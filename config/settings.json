@@ -1,0 +1,48 @@
+{
+    "project_name": "Tu Dosis Diaria - Content Factory",
+    "channel_name": "Tu Dosis Diaria",
+    "default_language": "es",
+    "video_duration_target_minutes": 10,
+    "clips_per_video": 170,
+    "clip_duration_seconds": 5,
+    "publication_schedule": {
+        "days": ["monday", "thursday"],
+        "time": "10:00",
+        "timezone": "America/Mexico_City"
+    },
+    "models": {
+        "script_generation": "gpt-5.5",
+        "emotion_tagging": "gpt-5.5",
+        "video_prompts": "gpt-5.5",
+        "seo_optimization": "gpt-5.5",
+        "tts_engine": "gemini-3.1-flash-tts",
+        "video_generation": "ltx-2.3"
+    },
+    "tts_config": {
+        "voice_name": "Kore",
+        "language": "Spanish",
+        "accent": "neutral Latin American",
+        "max_chars_per_chunk": 4500
+    },
+    "comfyui": {
+        "base_url": "",
+        "batch_size": 10,
+        "batch_delay_seconds": 30,
+        "max_retries": 3,
+        "retry_delays": [10, 30, 60]
+    },
+    "ffmpeg": {
+        "resolution": "1920x1080",
+        "fps": 24,
+        "codec": "libx264",
+        "audio_codec": "aac",
+        "transition_type": "xfade",
+        "transition_duration": 0.5
+    },
+    "output_dirs": {
+        "scripts": "output/scripts",
+        "audio": "output/audio",
+        "clips": "output/clips",
+        "final": "output/final"
+    }
+}

@@ -1,0 +1,16 @@
+.env
+__pycache__/
+*.pyc
+output/clips/*
+output/audio/*
+output/final/*
+output/scripts/*
+!output/clips/.gitkeep
+!output/audio/.gitkeep
+!output/final/.gitkeep
+!output/scripts/.gitkeep
+node_modules/
+.next/
+*.wav
+*.mp4
+*.mp3
