@@ -1,0 +1,222 @@
+"use client";
+import React, { useEffect, useState } from "react";
+import { useAuth } from "@/context/AuthContext";
+import { db } from "@/lib/firebase";
+import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { SYSTEM_AGENTS } from "@/lib/agents";
+
+export default function ProjectDetailsPage({ params }) {
+  const resolvedParams = React.use(params);
+  const { id } = resolvedParams;
+  const { user } = useAuth();
+  const [project, setProject] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("script"); // script, scenes, audio
+  const [editedScript, setEditedScript] = useState("");
+
+  useEffect(() => {
+    if (!user || !id) return;
+
+    // Escuchar cambios en tiempo real desde Firebase
+    const unsub = onSnapshot(doc(db, "projects", id), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setProject(data);
+        if (!editedScript && data.script?.plain) {
+          setEditedScript(data.script.plain);
+        }
+      }
+      setLoading(false);
+    });
+
+    return () => unsub();
+  }, [user, id]);
+
+  if (loading) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "60vh" }}>
+        <div className="spinner"></div>
+      </div>
+    );
+  }
+
+  if (!project) {
+    return <div>Proyecto no encontrado.</div>;
+  }
+
+  const agent = SYSTEM_AGENTS.find(a => a.agentId === project.agentId);
+
+  // Funciones para guardar cambios en el script
+  const handleSaveScript = async () => {
+    try {
+      await updateDoc(doc(db, "projects", id), {
+        "script.plain": editedScript,
+        "script.approved": true
+      });
+      alert("✅ Guión guardado y aprobado para voz.");
+    } catch(e) {
+      alert("Error al guardar: " + e.message);
+    }
+  };
+
+  return (
+    <div className="animate-fade-in" style={{ paddingBottom: "80px" }}>
+      {/* Header Premium */}
+      <div className="glass-card" style={{ marginBottom: "32px", padding: "24px", display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: "16px", borderLeft: `4px solid ${agent?.color || 'var(--accent)'}` }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
+            <span style={{ fontSize: "32px" }}>{agent?.emoji}</span>
+            <span className="badge badge-pro">{project.status.toUpperCase()}</span>
+          </div>
+          <h1 style={{ fontSize: "28px", fontWeight: "800", margin: "0 0 4px 0" }}>{project.title}</h1>
+          <p style={{ fontSize: "14px", color: "var(--text-secondary)", margin: 0 }}>
+            Agente: {agent?.name || project.agentId} • Creado: {project.createdAt?.toDate().toLocaleDateString()}
+          </p>
+        </div>
+
+        {/* Barra de Progreso Mágica */}
+        <div style={{ background: "var(--bg-card)", padding: "16px", borderRadius: "12px", border: "1px solid var(--border)", minWidth: "300px", position: "relative", overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: 0, left: 0, height: "4px", background: "var(--accent)", transition: "width 1s", width: `${project.progress?.percent || 0}%`, boxShadow: "0 0 10px var(--accent)" }} />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "1px", color: "var(--accent)" }}>Progreso</span>
+            <span style={{ fontSize: "12px", fontFamily: "monospace" }}>{project.progress?.percent || 0}%</span>
+          </div>
+          <p style={{ fontSize: "14px", fontWeight: "500", margin: 0, animation: "pulse 2s infinite" }}>
+            {project.progress?.stepName || "Procesando..."}
+          </p>
+        </div>
+      </div>
+
+      {/* Tabs Menu */}
+      <div style={{ display: "flex", gap: "16px", marginBottom: "24px", borderBottom: "1px solid var(--border)", paddingBottom: "8px" }}>
+        <button 
+          style={{ padding: "8px 16px", fontSize: "14px", fontWeight: "bold", transition: "all 0.3s", color: activeTab === 'script' ? 'var(--accent)' : 'var(--text-secondary)', borderBottom: activeTab === 'script' ? '2px solid var(--accent)' : '2px solid transparent', background: "none", borderTop: "none", borderLeft: "none", borderRight: "none", cursor: "pointer" }} 
+          onClick={() => setActiveTab("script")}
+        >
+          📄 Guión (Teleprompter)
+        </button>
+        <button 
+          style={{ padding: "8px 16px", fontSize: "14px", fontWeight: "bold", transition: "all 0.3s", color: activeTab === 'scenes' ? 'var(--accent)' : 'var(--text-secondary)', borderBottom: activeTab === 'scenes' ? '2px solid var(--accent)' : '2px solid transparent', background: "none", borderTop: "none", borderLeft: "none", borderRight: "none", cursor: "pointer" }} 
+          onClick={() => setActiveTab("scenes")}
+        >
+          🎬 Escenas Visuales
+        </button>
+        <button 
+          style={{ padding: "8px 16px", fontSize: "14px", fontWeight: "bold", transition: "all 0.3s", color: activeTab === 'audio' ? 'var(--accent)' : 'var(--text-secondary)', borderBottom: activeTab === 'audio' ? '2px solid var(--accent)' : '2px solid transparent', background: "none", borderTop: "none", borderLeft: "none", borderRight: "none", cursor: "pointer" }} 
+          onClick={() => setActiveTab("audio")}
+        >
+          🔊 Audio TTS
+        </button>
+      </div>
+
+      {/* Tab: Script */}
+      {activeTab === "script" && (
+        <div className="animate-fade-in" style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: "24px" }}>
+          <div>
+            <div className="glass-card" style={{ padding: "24px", position: "relative" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>Edición de Guión</h3>
+                {project.script?.plain ? (
+                  <button onClick={handleSaveScript} className="btn-glow" style={{ padding: "8px 16px", fontSize: "13px" }}>
+                    Guardar y Aprobar
+                  </button>
+                ) : (
+                  <span className="badge badge-free" style={{ animation: "pulse 2s infinite" }}>Esperando a la IA...</span>
+                )}
+              </div>
+              
+              {project.script?.plain ? (
+                 <textarea 
+                 value={editedScript}
+                 onChange={(e) => setEditedScript(e.target.value)}
+                 style={{ width: "100%", background: "rgba(0,0,0,0.2)", color: "white", padding: "16px", borderRadius: "8px", border: "1px solid var(--border)", outline: "none", fontFamily: "serif", fontSize: "18px", lineHeight: "1.6", resize: "vertical", minHeight: "500px" }}
+                 placeholder="El guión aparecerá aquí..."
+               />
+              ) : (
+                <div style={{ height: "400px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", textAlign: "center", border: "2px dashed var(--border)", borderRadius: "12px" }}>
+                  <div style={{ fontSize: "48px", marginBottom: "16px", animation: "bounce 2s infinite" }}>🤖</div>
+                  <h4 style={{ fontSize: "18px", fontWeight: "bold", margin: "0 0 8px 0" }}>El Chef está cocinando</h4>
+                  <p style={{ color: "var(--text-muted)", fontSize: "14px", maxWidth: "300px", margin: 0 }}>
+                    El motor de IA está investigando el tema y escribiendo una narrativa cinematográfica. Esto toma de 1 a 2 minutos.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+            <div className="glass-card" style={{ padding: "20px" }}>
+              <h4 style={{ fontWeight: "bold", margin: "0 0 16px 0", display: "flex", alignItems: "center", gap: "8px" }}>📊 Estadísticas</h4>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "12px", fontSize: "14px" }}>
+                <li style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border)", paddingBottom: "8px" }}>
+                  <span style={{ color: "var(--text-secondary)" }}>Palabras:</span>
+                  <span style={{ fontFamily: "monospace" }}>{project.script?.wordCount || 0}</span>
+                </li>
+                <li style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border)", paddingBottom: "8px" }}>
+                  <span style={{ color: "var(--text-secondary)" }}>Minutos est:</span>
+                  <span style={{ fontFamily: "monospace" }}>{project.script?.estimatedMinutes || 0} min</span>
+                </li>
+                <li style={{ display: "flex", justifyContent: "space-between", paddingBottom: "8px" }}>
+                  <span style={{ color: "var(--text-secondary)" }}>Estado:</span>
+                  <span style={{ color: project.script?.approved ? "#4ade80" : "#facc15", fontWeight: "bold" }}>
+                    {project.script?.approved ? "Aprobado" : "Borrador"}
+                  </span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Escenas */}
+      {activeTab === "scenes" && (
+        <div className="animate-fade-in">
+          {(!project.scenes || project.scenes.length === 0) ? (
+            <div className="glass-card" style={{ padding: "48px", textAlign: "center" }}>
+              <div style={{ fontSize: "48px", marginBottom: "16px", animation: "pulse 2s infinite" }}>🎬</div>
+              <h3 style={{ fontSize: "20px", fontWeight: "bold", margin: "0 0 8px 0" }}>Analizando Escenas</h3>
+              <p style={{ color: "var(--text-muted)", margin: 0 }}>El Director de Fotografía (Claude Opus) está dividiendo tu guión en prompts visuales cada 5 segundos...</p>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "24px" }}>
+              {project.scenes.map((scene, idx) => (
+                <div key={idx} className="glass-card" style={{ overflow: "hidden", transition: "all 0.3s" }}>
+                  <div style={{ aspectRatio: "16/9", background: "var(--bg-dark)", display: "flex", justifyContent: "center", alignItems: "center", position: "relative", overflow: "hidden" }}>
+                    {scene.imageUrl ? (
+                      <img src={scene.imageUrl} alt={`Scene ${idx+1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                        <span style={{ fontSize: "24px", marginBottom: "8px" }}>🎨</span>
+                        <span style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: "1px", color: "var(--text-muted)" }}>En cola</span>
+                      </div>
+                    )}
+                    <div className="badge" style={{ position: "absolute", top: "8px", left: "8px", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}>
+                      Escena {idx + 1}
+                    </div>
+                  </div>
+                  <div style={{ padding: "16px" }}>
+                    <p style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: "1.5", margin: 0 }}>{scene.prompt || scene}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Audio */}
+      {activeTab === "audio" && (
+        <div className="glass-card animate-fade-in" style={{ padding: "48px", textAlign: "center" }}>
+          <div style={{ fontSize: "48px", marginBottom: "24px" }}>🎙️</div>
+          <h3 style={{ fontSize: "24px", fontWeight: "bold", margin: "0 0 12px 0" }}>Estudio de Audio TTS</h3>
+          <p style={{ color: "var(--text-secondary)", maxWidth: "400px", margin: "0 auto 24px auto", lineHeight: "1.5" }}>
+            Una vez apruebes el guión, el motor de voces neuronales generará la narración perfecta para tu documental.
+          </p>
+          <button className="btn-secondary" disabled style={{ opacity: 0.5, cursor: "not-allowed" }}>
+            Aprobar guión primero
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -23,3 +23,6 @@ web/.env.*
 
 # Generated Content
 output/videos/
+
+# Firebase Service Account
+firebase-admin.json

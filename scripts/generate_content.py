@@ -21,6 +21,9 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 from openai import OpenAI
+import anthropic
+import firebase_admin
+from firebase_admin import credentials, firestore
 from dotenv import load_dotenv
 
 # Cargar variables de entorno
@@ -44,29 +47,47 @@ with open(CONFIG_PATH, "r", encoding="utf-8") as f:
 # ============================================================
 # CLIENTES IA
 # ============================================================
-# Motor 1 (Guión) + Motor 1.5 (Emociones) + SEO → GPT-5.5
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 GPT_MODEL = config["models"]["script_generation"]
 
-# Motor 2 (Prompts Visuales) → Claude Opus
-# Si no hay API key de Anthropic, fallback a GPT-5.5
+# Anthropic (Claude)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-claude_client = None
-CLAUDE_MODEL = "claude-opus-4-0-20250514"
+claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
+CLAUDE_MODEL_SCRIPT = "claude-3-5-sonnet-20241022"
+CLAUDE_MODEL_PROMPTS = "claude-opus-4-0-20250514"
 
-if ANTHROPIC_API_KEY:
+# ============================================================
+# FIREBASE ADMIN INIT
+# ============================================================
+firebase_db = None
+try:
+    if not firebase_admin._apps:
+        firebase_cred_str = os.getenv("FIREBASE_SERVICE_ACCOUNT")
+        if firebase_cred_str:
+            cred_dict = json.loads(firebase_cred_str)
+            cred = credentials.Certificate(cred_dict)
+        else:
+            cred = credentials.Certificate(str(BASE_DIR / "firebase-admin.json"))
+        firebase_admin.initialize_app(cred)
+    firebase_db = firestore.client()
+    print("✅ Firebase Admin conectado correctamente.")
+except Exception as e:
+    print(f"⚠️ No se pudo inicializar Firebase Admin: {e}")
+
+def update_progress(project_id: str, step_name: str, percent: int, extra_data: dict = None):
+    if not firebase_db or not project_id:
+        return
     try:
-        import anthropic
-        claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        print(f"✅ Claude Opus conectado para Motor 2 (Prompts Visuales)")
-    except ImportError:
-        print("⚠️  Módulo 'anthropic' no instalado. Instalando...")
-        os.system(f"{sys.executable} -m pip install anthropic")
-        import anthropic
-        claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        print(f"✅ Claude Opus conectado para Motor 2 (Prompts Visuales)")
-else:
-    print("⚠️  ANTHROPIC_API_KEY no configurada. Motor 2 usará GPT-5.5 como fallback.")
+        doc_ref = firebase_db.collection("projects").document(project_id)
+        update_data = {
+            "progress.stepName": step_name,
+            "progress.percent": percent,
+        }
+        if extra_data:
+            update_data.update(extra_data)
+        doc_ref.update(update_data)
+    except Exception as e:
+        print(f"⚠️ Error actualizando Firebase: {e}")
 
 
 # ============================================================
@@ -126,17 +147,16 @@ def generate_script(topic: str, agent_file: str = "agent_erotico_historico.md") 
     # Cargar el prompt del AI Agent seleccionado
     agent_prompt = load_prompt(agent_file)
     
-    # Llamada a GPT-5.5
-    response = openai_client.chat.completions.create(
-        model=GPT_MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": agent_prompt
-            },
-            {
-                "role": "user",
-                "content": f"""Genera una narrativa inmersiva completa sobre el siguiente tema:
+    # Llamada a IA (Priorizando Claude Sonnet 3.5 por tokens de OpenAI agotados)
+    if claude_client:
+        response = claude_client.messages.create(
+            model=CLAUDE_MODEL_SCRIPT,
+            max_tokens=8192,
+            system=agent_prompt,
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""Genera una narrativa inmersiva completa sobre el siguiente tema:
 
 TEMA: {topic}
 
@@ -148,12 +168,21 @@ Requisitos:
 - Incluye detalles históricos específicos (nombres, fechas, costumbres)
 - NO uses viñetas ni encabezados — narrativa pura y fluida
 - Cada sección debe fluir orgánicamente hacia la siguiente"""
-            }
-        ],
-        max_completion_tokens=8192,
-    )
-    
-    script_text = response.choices[0].message.content
+                }
+            ],
+        )
+        script_text = response.content[0].text
+        used_model = CLAUDE_MODEL_SCRIPT
+    else:
+        response = openai_client.chat.completions.create(
+            model=GPT_MODEL,
+            messages=[
+                {"role": "system", "content": agent_prompt},
+                {"role": "user", "content": f"TEMA: {topic}\n(Genera guión narrativa fluida sin viñetas)..."}
+            ]
+        )
+        script_text = response.choices[0].message.content
+        used_model = GPT_MODEL
     
     # Estadísticas
     char_count = len(script_text)
@@ -166,17 +195,12 @@ Requisitos:
         "agent": agent_file,
         "script": script_text,
         "metadata": {
-            "model": GPT_MODEL,
+            "model": used_model,
             "agent_personality": agent_file,
             "characters": char_count,
             "words": word_count,
             "estimated_duration_minutes": round(estimated_minutes, 1),
-            "generated_at": datetime.now().isoformat(),
-            "tokens_used": {
-                "prompt": response.usage.prompt_tokens,
-                "completion": response.usage.completion_tokens,
-                "total": response.usage.total_tokens
-            }
+            "generated_at": datetime.now().isoformat()
         }
     }
     
@@ -193,7 +217,6 @@ Requisitos:
     print(f"   📝 Caracteres: {char_count:,}")
     print(f"   📊 Palabras: {word_count:,}")
     print(f"   ⏱️  Duración estimada: {estimated_minutes:.1f} minutos")
-    print(f"   🪙 Tokens usados: {response.usage.total_tokens:,}")
     print(f"   💾 Guardado en: {output_path}")
     
     return result
@@ -236,26 +259,20 @@ def add_emotion_tags(script_text: str) -> str:
         result = None
         for attempt in range(3):  # 3 intentos por chunk
             try:
-                response = openai_client.chat.completions.create(
-                    model=GPT_MODEL,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": emotion_prompt
-                        },
-                        {
-                            "role": "user",
-                            "content": (
-                                "Agrega etiquetas de emoción a este fragmento de guión. "
-                                "Devuelve el texto COMPLETO con las etiquetas insertadas, "
-                                "sin omitir ninguna parte del texto original:\n\n" + chunk
-                            )
-                        }
-                    ],
-                    max_completion_tokens=6000,
-                )
-
-                content = response.choices[0].message.content
+                if claude_client:
+                    resp = claude_client.messages.create(
+                        model=CLAUDE_MODEL_SCRIPT,
+                        max_tokens=6000,
+                        system=emotion_prompt,
+                        messages=[{"role": "user", "content": "Agrega etiquetas de emoción a este fragmento de guión. Devuelve el texto COMPLETO con las etiquetas insertadas:\n\n" + chunk}]
+                    )
+                    content = resp.content[0].text
+                else:
+                    resp = openai_client.chat.completions.create(
+                        model=GPT_MODEL,
+                        messages=[{"role": "system", "content": emotion_prompt}, {"role": "user", "content": chunk}]
+                    )
+                    content = resp.choices[0].message.content
 
                 if content and len(content) > 50:
                     result = content
@@ -301,7 +318,7 @@ def generate_video_prompts_claude(chunk: str, scene_counter: int) -> list:
     for attempt in range(3):
         try:
             response = claude_client.messages.create(
-                model=CLAUDE_MODEL,
+                model=CLAUDE_MODEL_PROMPTS,
                 max_tokens=8000,
                 system=video_prompt_template,
                 messages=[
@@ -493,44 +510,46 @@ def generate_seo_metadata(topic: str, script_summary: str) -> dict:
     
     seo_prompt = load_prompt("seo_optimizer.md")
     
-    response = openai_client.chat.completions.create(
-        model=GPT_MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": seo_prompt
-            },
-            {
-                "role": "user",
-                "content": f"""Genera metadata SEO para este video:
-
-TEMA: {topic}
-RESUMEN DEL SCRIPT: {script_summary[:1000]}
-
-El canal se llama "Tu Dosis Diaria" y se enfoca en reconstrucciones
-históricas inmersivas con IA. Contenido en español."""
-            }
-        ],
-        max_completion_tokens=2000,
-        response_format={"type": "json_object"}
-    )
-    
     try:
-        metadata = json.loads(response.choices[0].message.content)
+        if claude_client:
+            resp = claude_client.messages.create(
+                model=CLAUDE_MODEL_SCRIPT,
+                max_tokens=2000,
+                system=seo_prompt,
+                messages=[{"role": "user", "content": f"Genera metadata SEO para este video en JSON:\n\nTEMA: {topic}\nRESUMEN: {script_summary[:1000]}\n\nDevuelve SOLO un JSON valido con keys: title, description, tags."}]
+            )
+            content = resp.content[0].text
+            clean = content.strip()
+            if clean.startswith("```"):
+                parts = clean.split("```")
+                clean = parts[1] if len(parts) > 1 else parts[0]
+                if clean.startswith("json"):
+                    clean = clean[4:]
+            metadata = json.loads(clean.strip())
+        else:
+            response = openai_client.chat.completions.create(
+                model=GPT_MODEL,
+                messages=[
+                    {"role": "system", "content": seo_prompt},
+                    {"role": "user", "content": f"Genera metadata SEO para este video:\nTEMA: {topic}\nRESUMEN: {script_summary[:1000]}"}
+                ],
+                response_format={"type": "json_object"}
+            )
+            metadata = json.loads(response.choices[0].message.content)
+            
         print(f"   ✅ Título: {metadata.get('title', 'N/A')}")
         return metadata
-    except json.JSONDecodeError:
-        print("   ⚠️  Error parseando SEO metadata")
+    except Exception as e:
+        print(f"   ⚠️  Error parseando SEO metadata: {e}")
         return {}
 
 
 # ============================================================
 # PIPELINE PRINCIPAL
 # ============================================================
-def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"):
+def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md", project_id: str = None):
     """
     Ejecuta el pipeline completo de generación de contenido textual.
-    Motor 1 (GPT-5.5) + Motor 1.5 (GPT-5.5) + Motor 2 (Claude Opus) + SEO (GPT-5.5)
     """
     use_claude = claude_client is not None
 
@@ -539,22 +558,27 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
     print("=" * 60)
     print(f"📌 Tema: {topic}")
     print(f"🎭 Agente: {agent_file}")
-    print(f"🧠 Motor 1 (Guión): GPT-5.5")
-    print(f"🎬 Motor 2 (Visual): {'Claude Opus' if use_claude else 'GPT-5.5 (fallback)'}")
-    print(f"⏰ Inicio: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("=" * 60)
+    print(f"🗂️  Proyecto: {project_id}")
     
-    # PASO 1: Generar guión (GPT-5.5)
+    update_progress(project_id, "Iniciando generación de guión narrativo (Claude 3.5)...", 10)
+    
+    # PASO 1: Generar guión
     result = generate_script(topic, agent_file)
     script = result["script"]
     
-    # PASO 2: Agregar etiquetas de emoción (GPT-5.5)
+    update_progress(project_id, "Agregando etiquetas de emoción y director...", 35)
+    
+    # PASO 2: Agregar etiquetas de emoción
     tagged_script = add_emotion_tags(script)
     
-    # PASO 3: Generar prompts de video (Claude Opus / GPT-5.5 fallback)
+    update_progress(project_id, "Creando escenas y prompts visuales (Claude Opus)...", 60)
+    
+    # PASO 3: Generar prompts de video
     video_scenes = generate_video_prompts(script)
     
-    # PASO 4: Generar SEO metadata (GPT-5.5)
+    update_progress(project_id, "Optimizando metadata SEO para YouTube...", 85)
+    
+    # PASO 4: Generar SEO metadata
     seo = generate_seo_metadata(topic, script[:500])
     
     # Guardar resultado completo
@@ -571,16 +595,31 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
         "pipeline_metadata": {
             "generated_at": datetime.now().isoformat(),
             "total_scenes": len(video_scenes),
-            "script_characters": len(script),
-            "script_model": GPT_MODEL,
-            "visual_model": CLAUDE_MODEL if use_claude else GPT_MODEL,
-            "agent_personality": agent_file
+            "script_characters": len(script)
         }
     }
     
     output_path = OUTPUT_DIR / f"FULL_{safe_name}_{timestamp}.json"
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(full_result, f, ensure_ascii=False, indent=2)
+        
+    # GUARDAR EN FIREBASE
+    if project_id:
+        try:
+            words = len(script.split())
+            update_progress(project_id, "¡Generación completada!", 100, {
+                "status": "script_ready",
+                "script.plain": script,
+                "script.tagged": tagged_script,
+                "script.wordCount": words,
+                "script.estimatedMinutes": round(words / 150, 1),
+                "scenes": video_scenes,
+                "seo": seo,
+                "completedAt": firestore.SERVER_TIMESTAMP
+            })
+            print(f"✅ Firebase actualizado para proyecto {project_id}")
+        except Exception as e:
+            print(f"⚠️ Fallo al guardar en Firebase: {e}")
     
     print("\n" + "=" * 60)
     print("✅ PIPELINE TEXTUAL COMPLETO")
@@ -631,6 +670,12 @@ Ejemplos de uso:
         "--agent", "-a",
         default="agent_erotico_historico.md",
         help="Archivo del agente personalidad a usar (default: agent_erotico_historico.md)"
+    )
+
+    parser.add_argument(
+        "--project-id", "-p",
+        default=None,
+        help="ID del proyecto de Firebase (opcional)"
     )
     
     parser.add_argument(
@@ -684,4 +729,4 @@ if __name__ == "__main__":
         print("⚠️  Modo --force-gpt: Motor 2 usará GPT-5.5 en lugar de Claude Opus")
     
     # Ejecutar pipeline
-    run_full_pipeline(args.topic, args.agent)
+    run_full_pipeline(args.topic, args.agent, args.project_id)

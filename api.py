@@ -13,24 +13,30 @@ async def trigger_generation(request: Request, background_tasks: BackgroundTasks
     data = await request.json()
     topic = data.get("topic")
     agent_file = data.get("agentFile", "agent_erotico_historico.md")
+    project_id = data.get("projectId")
     
     if not topic:
         return {"status": "error", "message": "Missing 'topic' in request body"}
 
     # Ejecutar en segundo plano para no dejar colgada la petición HTTP a n8n
-    background_tasks.add_task(run_script, topic, agent_file)
+    background_tasks.add_task(run_script, topic, agent_file, project_id)
     
     return {
         "status": "accepted", 
-        "message": f"Generation started for '{topic}' with agent '{agent_file}'"
+        "message": f"Generation started for '{topic}' with agent '{agent_file}' (Project: {project_id})"
     }
 
-def run_script(topic, agent_file):
-    print(f"🚀 [API] Starting background job for '{topic}' with '{agent_file}'...")
+def run_script(topic, agent_file, project_id):
+    print(f"🚀 [API] Starting background job for '{topic}' with '{agent_file}' (Project: {project_id})...")
     try:
         # Ejecutamos el script igual que en consola
+        args = ["python", "scripts/generate_content.py", "--agent", agent_file]
+        if project_id:
+            args.extend(["--project-id", project_id])
+        args.append(topic)
+        
         process = subprocess.run(
-            ["python", "scripts/generate_content.py", "--agent", agent_file, topic],
+            args,
             check=False,
             capture_output=True,
             text=True
