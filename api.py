@@ -1,0 +1,45 @@
+from fastapi import FastAPI, BackgroundTasks, Request
+import subprocess
+import os
+
+app = FastAPI(title="Content Factory API")
+
+@app.get("/")
+def health_check():
+    return {"status": "online", "service": "Content Factory API"}
+
+@app.post("/generate")
+async def trigger_generation(request: Request, background_tasks: BackgroundTasks):
+    data = await request.json()
+    topic = data.get("topic")
+    agent_file = data.get("agentFile", "agent_erotico_historico.md")
+    
+    if not topic:
+        return {"status": "error", "message": "Missing 'topic' in request body"}
+
+    # Ejecutar en segundo plano para no dejar colgada la petición HTTP a n8n
+    background_tasks.add_task(run_script, topic, agent_file)
+    
+    return {
+        "status": "accepted", 
+        "message": f"Generation started for '{topic}' with agent '{agent_file}'"
+    }
+
+def run_script(topic, agent_file):
+    print(f"🚀 [API] Starting background job for '{topic}' with '{agent_file}'...")
+    try:
+        # Ejecutamos el script igual que en consola
+        process = subprocess.run(
+            ["python", "scripts/generate_content.py", "--agent", agent_file, topic],
+            check=False,
+            capture_output=True,
+            text=True
+        )
+        print("✅ [API] Script finished.")
+        print("--- STDOUT ---")
+        print(process.stdout)
+        if process.stderr:
+            print("--- STDERR ---")
+            print(process.stderr)
+    except Exception as e:
+        print(f"❌ [API] Error running script: {e}")
