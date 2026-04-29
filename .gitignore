@@ -14,3 +14,12 @@ node_modules/
 *.wav
 *.mp4
 *.mp3
+
+# Security
+content-factory-tts-*.json
+web/.env.local
+web/.env.*
+.env.txt
+
+# Generated Content
+output/videos/

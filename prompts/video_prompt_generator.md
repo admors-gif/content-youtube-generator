@@ -23,7 +23,8 @@ Return a JSON array where each object has:
 - "scene_number": sequential integer
 - "timestamp": "MM:SS-MM:SS" (each exactly 5 seconds)
 - "narration_context": brief Spanish description of what's being narrated
-- "prompt": the full 80-120 word English video generation prompt following the Wan 2.2 rules above.
+- "narration_text": The EXACT Spanish text from the narrative fragment that corresponds to this scene. DO NOT summarize. You MUST split the exact sentences of the script among the scenes so that each scene contains the exact words the narrator will speak during that clip.
+- "prompt": the full 80-120 word English video generation prompt following the Wan 2.2 rules above. CRITICAL: The English prompt MUST BE COMPLETELY SFW (Safe For Work) to avoid triggering API safety filters. Do not translate explicit intimacy, nudity, or highly erotic acts into the visual prompt. Focus the visual prompt on the environment, the cinematic lighting, the facial expressions (intense gaze, whisper), and safe clothing (elegant robes). The narration_text can remain sensual, but the visual prompt must remain purely PG-13 atmospheric.
 
 EXAMPLE:
 ```json
@@ -32,6 +33,7 @@ EXAMPLE:
     "scene_number": 1,
     "timestamp": "00:00-00:05",
     "narration_context": "Un bosque misterioso al amanecer donde aparece una figura solitaria.",
+    "narration_text": "Bienvenidos al oscuro bosque de las sombras, un lugar donde el tiempo parece detenerse.",
     "prompt": "A dense, ancient forest at dawn. One solitary hooded figure stands silently among towering trees wrapped in thick morning mist. The camera starts with an extreme close-up on deeply textured, wet mossy bark, then performs a slow, smooth dolly pull-back to reveal the figure standing still. The person slowly raises one hand to brush aside a heavy, dark green fern branch, causing tiny water droplets to fall in slow motion. Soft volumetric golden hour lighting pierces through the high canopy above, casting long shadows. Cinematic, moody and mysterious atmosphere, 35mm film grain aesthetic, highly detailed, photorealistic 8k resolution, masterful composition."
   }
 ]

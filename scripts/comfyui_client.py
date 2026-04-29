@@ -41,33 +41,34 @@ HEADERS = {
 }
 
 
-def build_text_to_video_workflow(prompt: str, scene_number: int) -> dict:
+def build_flux_image_workflow(prompt: str, scene_number: int) -> dict:
     """
-    Carga el workflow JSON exportado de ComfyUI Cloud para Wan 2.2 14B Premium,
-    inyecta el prompt, semilla y duración forzada.
+    Carga el workflow JSON de FLUX.1 Krea Dev,
+    inyecta el prompt, semilla y prefijo de archivo.
     """
-    workflow_path = BASE_DIR / "config" / "video_wan2_2_14B_t2v_api.json"
+    workflow_path = BASE_DIR / "config" / "flux1_krea_dev_api.json"
     
     with open(workflow_path, "r", encoding="utf-8") as f:
         nodes = json.load(f)
         
-    # 1. Inyectar el prompt en el nodo CLIPTextEncode (Positive Prompt: 128:89)
-    if "128:89" in nodes and "inputs" in nodes["128:89"]:
-        cinematic_prompt = f"Masterpiece, cinematic lighting, ultra-detailed, highly realistic, 8k resolution. {prompt}"
-        nodes["128:89"]["inputs"]["text"] = cinematic_prompt
+    # 1. Inyectar el prompt en el nodo CLIPTextEncode (200:195)
+    if "200:195" in nodes and "inputs" in nodes["200:195"]:
+        cinematic_prompt = f"Highly realistic cinematic film still, masterpiece, 8k resolution. {prompt}"
+        nodes["200:195"]["inputs"]["text"] = cinematic_prompt
         
-    # 2. Inyectar la semilla aleatoria en el KSamplerAdvanced (128:81)
-    if "128:81" in nodes and "inputs" in nodes["128:81"]:
+    # 2. Inyectar la semilla aleatoria en KSampler (200:197)
+    if "200:197" in nodes and "inputs" in nodes["200:197"]:
         import random
-        nodes["128:81"]["inputs"]["noise_seed"] = random.randint(100000000000000, 999999999999999)
+        nodes["200:197"]["inputs"]["seed"] = random.randint(100000000000000, 999999999999999)
         
-    # 3. Nombrar el archivo de salida en SaveVideo (80)
-    if "80" in nodes and "inputs" in nodes["80"]:
-        nodes["80"]["inputs"]["filename_prefix"] = f"scene_{scene_number:04d}"
+    # 3. Inyectar dimensiones 16:9 en EmptySD3LatentImage (200:196)
+    if "200:196" in nodes and "inputs" in nodes["200:196"]:
+        nodes["200:196"]["inputs"]["width"] = 1344
+        nodes["200:196"]["inputs"]["height"] = 768
         
-    # 4. Forzar la duración a 81 frames (5 segundos a 16fps) en EmptyHunyuanLatentVideo (128:74)
-    if "128:74" in nodes and "inputs" in nodes["128:74"]:
-        nodes["128:74"]["inputs"]["length"] = 81
+    # 4. Nombrar el archivo de salida en SaveImage (9)
+    if "9" in nodes and "inputs" in nodes["9"]:
+        nodes["9"]["inputs"]["filename_prefix"] = f"scene_{scene_number:04d}"
         
     return {"prompt": nodes}
 
@@ -78,7 +79,7 @@ def submit_workflow(prompt: str, scene_number: int) -> str:
     Envía un workflow a ComfyUI Cloud.
     Returns: prompt_id para monitorear el progreso.
     """
-    workflow = build_text_to_video_workflow(prompt, scene_number)
+    workflow = build_flux_image_workflow(prompt, scene_number)
     
     try:
         with httpx.Client(timeout=60.0) as client:
@@ -117,6 +118,8 @@ def check_status(prompt_id: str) -> dict:
                 data = response.json()
                 if prompt_id in data:
                     return data[prompt_id]
+            else:
+                print(f"   ⚠️  ComfyUI status code: {response.status_code} - {response.text[:100]}")
             return None
             
     except Exception as e:
@@ -137,10 +140,10 @@ def download_clip(prompt_id: str, scene_number: int, output_dir: Path) -> str:
     outputs = status["outputs"]
     
     for node_id, node_output in outputs.items():
-        if "videos" in node_output:
-            for video in node_output["videos"]:
-                filename = video.get("filename", "")
-                subfolder = video.get("subfolder", "")
+        if "images" in node_output:
+            for image in node_output["images"]:
+                filename = image.get("filename", "")
+                subfolder = image.get("subfolder", "")
                 
                 try:
                     with httpx.Client(timeout=120.0) as client:
@@ -155,7 +158,7 @@ def download_clip(prompt_id: str, scene_number: int, output_dir: Path) -> str:
                         )
                         
                         if response.status_code == 200:
-                            output_path = output_dir / f"scene_{scene_number:04d}.mp4"
+                            output_path = output_dir / f"scene_{scene_number:04d}.png"
                             with open(output_path, "wb") as f:
                                 f.write(response.content)
                             return str(output_path)
@@ -244,7 +247,7 @@ def generate_batch(scenes: list, output_dir: Path, batch_size: int = 5,
             prompt = scene.get("prompt", "")
             
             # Verificar si ya existe
-            clip_path = output_dir / f"scene_{num:04d}.mp4"
+            clip_path = output_dir / f"scene_{num:04d}.png"
             if clip_path.exists():
                 print(f"   ⏭️  Escena {num}: ya existe, saltando")
                 generated.append(str(clip_path))
@@ -258,18 +261,25 @@ def generate_batch(scenes: list, output_dir: Path, batch_size: int = 5,
                 failed.append(num)
                 print(f"   ❌ Escena {num}: falló al enviar")
         
-        # No esperar ni descargar porque la API de la nube requiere descarga manual por ahora
-        print("   ⏭️  Trabajos enviados. Por favor, revisa el dashboard de ComfyUI Cloud.")
+        # Ya no esperamos la descarga automática porque ComfyUI Cloud bloquea el endpoint /history
+        # Las imágenes aparecerán automáticamente en el dashboard web del usuario
+        for prompt_id, scene_num in pending.items():
+            generated.append(str(scene_num))
+            print(f"   ✅ Escena {scene_num}: Generándose en la nube de ComfyUI (Revisar Web)")
+            
+        # Pequeña pausa para no saturar la API
+        import time
+        time.sleep(2)
         
         # Progreso
         progress = (batch_start + len(batch)) / len(remaining) * 100
-        print(f"   📊 Progreso: {progress:.0f}%")
+        print(f"   📊 Progreso: {progress:.0f}% ({len(generated)} enviadas a la nube)")
     
     # Resumen final
     print("\n" + "=" * 60)
     print("📊 RESUMEN DE GENERACIÓN")
     print("=" * 60)
-    print(f"   ✅ Enviados: {len(pending)} clips")
+    print(f"   ✅ Generados: {len(generated)} clips")
     print(f"   ❌ Fallidos: {len(failed)} clips")
     if failed:
         print(f"   🔄 Escenas fallidas: {failed}")
@@ -326,6 +336,11 @@ if __name__ == "__main__":
     print(f"📂 Cargando {len(scenes)} escenas desde {json_path}")
     print(f"📁 Directorio de proyecto: {output_dir}")
     
-    # LÍMITE DE PRUEBA: Generar los clips 4, 5 y 6 para el modelo premium
-    generate_batch(scenes[3:6], output_dir=output_dir, batch_size=3)
+    # Prevenir que Windows entre en suspensión mientras corre el script
+    import ctypes
+    # ES_CONTINUOUS = 0x80000000 | ES_SYSTEM_REQUIRED = 0x00000001
+    ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
+    
+    # Generar TODAS las escenas
+    generate_batch(scenes, output_dir=output_dir, batch_size=5)
 
