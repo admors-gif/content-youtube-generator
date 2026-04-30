@@ -47,7 +47,10 @@ with open(CONFIG_PATH, "r", encoding="utf-8") as f:
 # ============================================================
 # CLIENTES IA
 # ============================================================
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+_openai_key = os.getenv("OPENAI_API_KEY")
+openai_client = OpenAI(api_key=_openai_key) if _openai_key else None
+if not openai_client:
+    print("⚠️ OPENAI_API_KEY no configurada — Motor OpenAI deshabilitado (usando Claude como fallback)")
 GPT_MODEL = config["models"]["script_generation"]
 
 # Anthropic (Claude)
@@ -550,6 +553,7 @@ def generate_seo_metadata(topic: str, script_summary: str) -> dict:
 def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md", project_id: str = None):
     """
     Ejecuta el pipeline completo de generación de contenido textual.
+    Incluye error-handling global para reportar fallos a Firebase.
     """
     use_claude = claude_client is not None
 
@@ -559,81 +563,98 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
     print(f"📌 Tema: {topic}")
     print(f"🎭 Agente: {agent_file}")
     print(f"🗂️  Proyecto: {project_id}")
-    
-    update_progress(project_id, "Iniciando generación de guión narrativo (Claude 3.5)...", 10)
-    
-    # PASO 1: Generar guión
-    result = generate_script(topic, agent_file)
-    script = result["script"]
-    
-    update_progress(project_id, "Agregando etiquetas de emoción y director...", 35)
-    
-    # PASO 2: Agregar etiquetas de emoción
-    tagged_script = add_emotion_tags(script)
-    
-    update_progress(project_id, "Creando escenas y prompts visuales (Claude Opus)...", 60)
-    
-    # PASO 3: Generar prompts de video
-    video_scenes = generate_video_prompts(script)
-    
-    update_progress(project_id, "Optimizando metadata SEO para YouTube...", 85)
-    
-    # PASO 4: Generar SEO metadata
-    seo = generate_seo_metadata(topic, script[:500])
-    
-    # Guardar resultado completo
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_name = topic.lower().replace(" ", "_")[:50]
-    
-    full_result = {
-        "topic": topic,
-        "agent": agent_file,
-        "script_plain": script,
-        "script_tagged": tagged_script,
-        "video_scenes": video_scenes,
-        "seo_metadata": seo,
-        "pipeline_metadata": {
-            "generated_at": datetime.now().isoformat(),
-            "total_scenes": len(video_scenes),
-            "script_characters": len(script)
-        }
-    }
-    
-    output_path = OUTPUT_DIR / f"FULL_{safe_name}_{timestamp}.json"
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(full_result, f, ensure_ascii=False, indent=2)
+
+    # Validar que al menos un motor de IA esté disponible
+    if not claude_client and not openai_client:
+        error_msg = "No hay motor de IA disponible. Configura ANTHROPIC_API_KEY o OPENAI_API_KEY."
+        print(f"❌ FATAL: {error_msg}")
+        update_progress(project_id, f"Error: {error_msg}", 0, {"status": "error"})
+        return None
+
+    try:
+        update_progress(project_id, "Iniciando generación de guión narrativo (Claude 3.5)...", 10)
         
-    # GUARDAR EN FIREBASE
-    if project_id:
-        try:
-            words = len(script.split())
-            update_progress(project_id, "¡Generación completada!", 100, {
-                "status": "script_ready",
-                "script.plain": script,
-                "script.tagged": tagged_script,
-                "script.wordCount": words,
-                "script.estimatedMinutes": round(words / 150, 1),
-                "scenes": video_scenes,
-                "seo": seo,
-                "completedAt": firestore.SERVER_TIMESTAMP
-            })
-            print(f"✅ Firebase actualizado para proyecto {project_id}")
-        except Exception as e:
-            print(f"⚠️ Fallo al guardar en Firebase: {e}")
-    
-    print("\n" + "=" * 60)
-    print("✅ PIPELINE TEXTUAL COMPLETO")
-    print("=" * 60)
-    print(f"🎭 Agente: {agent_file}")
-    print(f"📄 Guión: {len(script):,} caracteres")
-    print(f"🎭 Etiquetas: {tagged_script.count('['):,} emociones")
-    print(f"🎬 Escenas: {len(video_scenes)} clips de 5 seg")
-    print(f"📈 SEO: {seo.get('title', 'N/A')}")
-    print(f"💾 Guardado: {output_path}")
-    print(f"⏰ Fin: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("=" * 60)
-    
-    return full_result
+        # PASO 1: Generar guión
+        result = generate_script(topic, agent_file)
+        script = result["script"]
+        
+        update_progress(project_id, "Agregando etiquetas de emoción y director...", 35)
+        
+        # PASO 2: Agregar etiquetas de emoción
+        tagged_script = add_emotion_tags(script)
+        
+        update_progress(project_id, "Creando escenas y prompts visuales (Claude Opus)...", 60)
+        
+        # PASO 3: Generar prompts de video
+        video_scenes = generate_video_prompts(script)
+        
+        update_progress(project_id, "Optimizando metadata SEO para YouTube...", 85)
+        
+        # PASO 4: Generar SEO metadata
+        seo = generate_seo_metadata(topic, script[:500])
+        
+        # Guardar resultado completo
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_name = topic.lower().replace(" ", "_")[:50]
+        
+        full_result = {
+            "topic": topic,
+            "agent": agent_file,
+            "script_plain": script,
+            "script_tagged": tagged_script,
+            "video_scenes": video_scenes,
+            "seo_metadata": seo,
+            "pipeline_metadata": {
+                "generated_at": datetime.now().isoformat(),
+                "total_scenes": len(video_scenes),
+                "script_characters": len(script)
+            }
+        }
+        
+        output_path = OUTPUT_DIR / f"FULL_{safe_name}_{timestamp}.json"
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(full_result, f, ensure_ascii=False, indent=2)
+            
+        # GUARDAR EN FIREBASE
+        if project_id:
+            try:
+                words = len(script.split())
+                update_progress(project_id, "¡Generación completada!", 100, {
+                    "status": "script_ready",
+                    "script.plain": script,
+                    "script.tagged": tagged_script,
+                    "script.wordCount": words,
+                    "script.estimatedMinutes": round(words / 150, 1),
+                    "scenes": video_scenes,
+                    "seo": seo,
+                    "completedAt": firestore.SERVER_TIMESTAMP
+                })
+                print(f"✅ Firebase actualizado para proyecto {project_id}")
+            except Exception as e:
+                print(f"⚠️ Fallo al guardar en Firebase: {e}")
+        
+        print("\n" + "=" * 60)
+        print("✅ PIPELINE TEXTUAL COMPLETO")
+        print("=" * 60)
+        print(f"🎭 Agente: {agent_file}")
+        print(f"📄 Guión: {len(script):,} caracteres")
+        print(f"🎭 Etiquetas: {tagged_script.count('['):,} emociones")
+        print(f"🎬 Escenas: {len(video_scenes)} clips de 5 seg")
+        print(f"📈 SEO: {seo.get('title', 'N/A')}")
+        print(f"💾 Guardado: {output_path}")
+        print(f"⏰ Fin: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("=" * 60)
+        
+        return full_result
+
+    except Exception as e:
+        error_msg = f"Error en pipeline: {type(e).__name__}: {str(e)[:200]}"
+        print(f"\n❌ FATAL: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        # Reportar el error a Firebase para que la UI muestre el fallo
+        update_progress(project_id, f"Error: {str(e)[:150]}", 0, {"status": "error"})
+        return None
 
 
 # ============================================================
