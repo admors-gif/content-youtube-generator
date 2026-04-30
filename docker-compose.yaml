@@ -7,4 +7,8 @@ services:
     ports:
       - "8085:8000"
     restart: unless-stopped
-    # Las variables de entorno reales serán inyectadas por el panel de Hostinger
+    env_file:
+      - .env
+    volumes:
+      - ./firebase-admin.json:/app/firebase-admin.json:ro
+      - ./output:/app/output
