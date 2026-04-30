@@ -9,7 +9,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
 } from "firebase/auth";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from "firebase/firestore";
 
 const AuthContext = createContext({});
 
@@ -19,13 +19,15 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let unsubProfile = null;
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
-        const profileDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-        if (profileDoc.exists()) {
-          setProfile(profileDoc.data());
-        } else {
+        
+        // Verificar si existe el perfil, si no crear uno
+        const profileRef = doc(db, "users", firebaseUser.uid);
+        const profileDoc = await getDoc(profileRef);
+        if (!profileDoc.exists()) {
           const newProfile = {
             uid: firebaseUser.uid,
             email: firebaseUser.email,
@@ -37,16 +39,26 @@ export function AuthProvider({ children }) {
             createdAt: serverTimestamp(),
             lastActive: serverTimestamp(),
           };
-          await setDoc(doc(db, "users", firebaseUser.uid), newProfile);
-          setProfile(newProfile);
+          await setDoc(profileRef, newProfile);
         }
+        
+        // Escuchar cambios en tiempo real (créditos, plan, etc.)
+        unsubProfile = onSnapshot(profileRef, (snap) => {
+          if (snap.exists()) {
+            setProfile(snap.data());
+          }
+        });
       } else {
         setUser(null);
         setProfile(null);
+        if (unsubProfile) unsubProfile();
       }
       setLoading(false);
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (unsubProfile) unsubProfile();
+    };
   }, []);
 
   const signInWithGoogle = async () => {
