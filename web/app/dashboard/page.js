@@ -24,13 +24,19 @@ export default function DashboardPage() {
 
   const handleDelete = async (e, project) => {
     e.stopPropagation();
-    if (!confirm(`¿Eliminar "${project.title}"? Esta acción no se puede deshacer.`)) return;
+    const isCompleted = project.status === "completed";
+    const msg = isCompleted
+      ? `¿Eliminar "${project.title}"?\n\n⚠️ Este video ya fue completado. El crédito NO será devuelto.`
+      : `¿Eliminar "${project.title}"?\n\n✅ Se te devolverá el crédito.`;
+    if (!confirm(msg)) return;
     try {
       await deleteDoc(doc(db, "projects", project.id));
-      // Devolver el crédito al usuario
-      await updateDoc(doc(db, "users", user.uid), {
-        "credits.used": increment(-1)
-      });
+      // Solo devolver crédito si el proyecto NO se completó
+      if (!isCompleted) {
+        await updateDoc(doc(db, "users", user.uid), {
+          "credits.used": increment(-1)
+        });
+      }
     } catch (err) {
       alert("Error al eliminar: " + err.message);
     }
