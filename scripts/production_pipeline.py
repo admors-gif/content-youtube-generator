@@ -73,13 +73,15 @@ def wait_and_download(client, prompt_id, img_path, max_wait=300):
 
 
 def apply_ken_burns(img_path, vid_path, effect, duration=5):
-    """Aplica efecto Ken Burns con FFmpeg."""
+    """Aplica efecto Ken Burns con FFmpeg — versión suave sin temblor."""
     fps = 30
     tf = duration * fps
     
+    # Fórmulas suavizadas: usan rampas lineales basadas en 'on' (frame number)
+    # en vez de acumular 'zoom+0.001' que causa micro-oscilaciones flotantes
     effects_map = {
-        "zoom_in": f"zoompan=z='min(zoom+0.0013,1.2)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={tf}:s=1920x1080:fps={fps}",
-        "zoom_out": f"zoompan=z='if(eq(on,1),1.3,max(zoom-0.002,1.0))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={tf}:s=1920x1080:fps={fps}",
+        "zoom_in": f"zoompan=z='1+0.2*on/{tf}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={tf}:s=1920x1080:fps={fps}",
+        "zoom_out": f"zoompan=z='1.3-0.3*on/{tf}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={tf}:s=1920x1080:fps={fps}",
         "pan_left": f"zoompan=z='1.15':x='iw-iw/zoom-on*(iw-iw/zoom)/{tf}':y='ih/2-(ih/zoom/2)':d={tf}:s=1920x1080:fps={fps}",
         "pan_right": f"zoompan=z='1.15':x='on*(iw-iw/zoom)/{tf}':y='ih/2-(ih/zoom/2)':d={tf}:s=1920x1080:fps={fps}",
         "pan_up": f"zoompan=z='1.15':x='iw/2-(iw/zoom/2)':y='ih-ih/zoom-on*(ih-ih/zoom)/{tf}':d={tf}:s=1920x1080:fps={fps}",

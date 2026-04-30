@@ -168,15 +168,15 @@ def apply_ken_burns(img_path: Path, output_path: Path, duration: int = 5,
     
     # Todas las variaciones producen video 1920x1080 (YouTube Full HD)
     if effect == "zoom_in":
-        # Zoom lento: de 100% a 120% centrado
+        # Zoom suave: rampa lineal de 100% a 120% (sin temblor)
         zoompan = (
-            f"zoompan=z='min(zoom+0.0013,1.2)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f"zoompan=z='1+0.2*on/{total_frames}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
             f":d={total_frames}:s=1920x1080:fps={fps}"
         )
     elif effect == "zoom_out":
-        # Zoom out: de 130% a 100%
+        # Zoom out suave: rampa lineal de 130% a 100%
         zoompan = (
-            f"zoompan=z='if(eq(on,1),1.3,max(zoom-0.002,1.0))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f"zoompan=z='1.3-0.3*on/{total_frames}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
             f":d={total_frames}:s=1920x1080:fps={fps}"
         )
     elif effect == "pan_left":

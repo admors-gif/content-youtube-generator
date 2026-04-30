@@ -14,6 +14,86 @@ export default function ProjectDetailsPage({ params }) {
   const [activeTab, setActiveTab] = useState("script"); // script, scenes, audio
   const [editedScript, setEditedScript] = useState("");
 
+  // ── Smooth Progress Bar State ──
+  const [displayPercent, setDisplayPercent] = useState(0);
+  const [startTime, setStartTime] = useState(null);
+
+  // Estimated durations per phase (based on measured ~8 min total)
+  const PHASE_TIMING = {
+    0:   { label: "Preparando...", duration: 5 },
+    10:  { label: "Generando guión narrativo...", duration: 120 },
+    35:  { label: "Etiquetando emociones...", duration: 30 },
+    60:  { label: "Creando prompts visuales...", duration: 240 },
+    85:  { label: "Optimizando SEO...", duration: 20 },
+    100: { label: "¡Completado!", duration: 0 },
+  };
+  const TOTAL_ESTIMATED_SECONDS = 415; // ~7 min
+
+  // Track when generation starts
+  useEffect(() => {
+    if (project?.progress?.percent > 0 && project?.progress?.percent < 100 && !startTime) {
+      setStartTime(Date.now());
+    }
+    if (project?.progress?.percent === 100 || project?.status === "error") {
+      setStartTime(null);
+    }
+  }, [project?.progress?.percent]);
+
+  // Smooth interpolation: gradually increment displayPercent toward real percent
+  useEffect(() => {
+    const realPercent = project?.progress?.percent || 0;
+
+    if (realPercent === 100 || realPercent === 0) {
+      setDisplayPercent(realPercent);
+      return;
+    }
+
+    // Find current phase and next checkpoint
+    const checkpoints = [0, 10, 35, 60, 85, 100];
+    let currentCheckpoint = 0;
+    let nextCheckpoint = 10;
+    for (let i = 0; i < checkpoints.length - 1; i++) {
+      if (realPercent >= checkpoints[i] && realPercent < checkpoints[i + 1]) {
+        currentCheckpoint = checkpoints[i];
+        nextCheckpoint = checkpoints[i + 1];
+        break;
+      }
+    }
+
+    const phaseDuration = (PHASE_TIMING[currentCheckpoint]?.duration || 60) * 1000;
+    const range = nextCheckpoint - currentCheckpoint;
+    const maxDrift = range * 0.85; // Don't go past 85% of the gap
+
+    const interval = setInterval(() => {
+      setDisplayPercent((prev) => {
+        if (prev >= realPercent + maxDrift) return prev; // Cap at 85% of gap
+        if (prev >= nextCheckpoint - 1) return prev; // Don't exceed next checkpoint
+        const increment = range / (phaseDuration / 500); // Small steps
+        return Math.min(prev + increment, realPercent + maxDrift, nextCheckpoint - 1);
+      });
+    }, 500);
+
+    // Jump to real percent if server reports a new checkpoint
+    if (realPercent > displayPercent) {
+      setDisplayPercent(realPercent);
+    }
+
+    return () => clearInterval(interval);
+  }, [project?.progress?.percent, displayPercent]);
+
+  // Calculate ETA
+  const getETA = () => {
+    if (!startTime || displayPercent >= 100 || displayPercent === 0) return null;
+    const elapsed = (Date.now() - startTime) / 1000;
+    const rate = displayPercent / elapsed; // percent per second
+    if (rate <= 0) return null;
+    const remaining = (100 - displayPercent) / rate;
+    const mins = Math.floor(remaining / 60);
+    const secs = Math.floor(remaining % 60);
+    if (mins > 15) return null; // Don't show unreasonable estimates
+    return mins > 0 ? `~${mins}m ${secs}s restantes` : `~${secs}s restantes`;
+  };
+
   useEffect(() => {
     if (!user || !id) return;
 
@@ -45,15 +125,45 @@ export default function ProjectDetailsPage({ params }) {
   }
 
   const agent = SYSTEM_AGENTS.find(a => a.agentId === project.agentId);
+  const isProcessing = project.progress?.percent > 0 && project.progress?.percent < 100 && project.status !== "error";
+  const eta = getETA();
 
-  // Funciones para guardar cambios en el script
+  // Funciones para guardar cambios en el script y disparar producción
   const handleSaveScript = async () => {
+    const confirmed = confirm(
+      "✅ ¿Aprobar guión y comenzar producción?\n\n" +
+      "Esto iniciará:\n" +
+      "1. 🎨 Generación de imágenes (FLUX)\n" +
+      "2. 🎬 Efecto Ken Burns (FFmpeg)\n" +
+      "3. 🎙️ Narración TTS (Google)\n" +
+      "4. 📽️ Ensamblaje de video final\n\n" +
+      "El proceso tarda ~30-60 min según la cantidad de escenas."
+    );
+    if (!confirmed) return;
+
     try {
+      // 1. Guardar guión aprobado en Firebase
       await updateDoc(doc(db, "projects", id), {
         "script.plain": editedScript,
-        "script.approved": true
+        "script.approved": true,
+        "status": "producing",
+        "progress.percent": 2,
+        "progress.stepName": "Iniciando producción...",
       });
-      alert("✅ Guión guardado y aprobado para voz.");
+
+      // 2. Disparar pipeline de producción en el VPS
+      const vpsUrl = process.env.NEXT_PUBLIC_VPS_API_URL;
+      if (vpsUrl) {
+        fetch(`${vpsUrl}/produce`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId: id })
+        }).catch(err => console.error("Error contactando VPS:", err));
+      } else {
+        console.warn("⚠️ Falta NEXT_PUBLIC_VPS_API_URL en .env.local");
+      }
+
+      alert("🚀 ¡Producción iniciada! Puedes ver el progreso en la barra superior.");
     } catch(e) {
       alert("Error al guardar: " + e.message);
     }
@@ -74,16 +184,36 @@ export default function ProjectDetailsPage({ params }) {
           </p>
         </div>
 
-        {/* Barra de Progreso Mágica */}
+        {/* Barra de Progreso Mágica — Smooth Interpolation */}
         <div style={{ background: "var(--bg-card)", padding: "16px", borderRadius: "12px", border: "1px solid var(--border)", minWidth: "300px", position: "relative", overflow: "hidden" }}>
-          <div style={{ position: "absolute", top: 0, left: 0, height: "4px", background: "var(--accent)", transition: "width 1s", width: `${project.progress?.percent || 0}%`, boxShadow: "0 0 10px var(--accent)" }} />
+          {/* Barra animada suave */}
+          <div style={{
+            position: "absolute", top: 0, left: 0, height: "4px",
+            background: displayPercent >= 100 ? "var(--success, #4ade80)" : "var(--accent)",
+            transition: "width 0.8s ease-out",
+            width: `${Math.round(displayPercent)}%`,
+            boxShadow: isProcessing ? "0 0 12px var(--accent), 0 0 24px var(--accent)" : "0 0 10px var(--accent)"
+          }} />
+          {/* Shimmer effect while processing */}
+          {isProcessing && (
+            <div style={{
+              position: "absolute", top: 0, left: 0, height: "4px", width: "100%",
+              background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent)",
+              animation: "shimmer 2s infinite",
+            }} />
+          )}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-            <span style={{ fontSize: "11px", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "1px", color: "var(--accent)" }}>Progreso</span>
-            <span style={{ fontSize: "12px", fontFamily: "monospace" }}>{project.progress?.percent || 0}%</span>
+            <span style={{ fontSize: "11px", fontWeight: "bold", textTransform: "uppercase", letterSpacing: "1px", color: displayPercent >= 100 ? "var(--success, #4ade80)" : "var(--accent)" }}>Progreso</span>
+            <span style={{ fontSize: "12px", fontFamily: "monospace" }}>{Math.round(displayPercent)}%</span>
           </div>
-          <p style={{ fontSize: "14px", fontWeight: "500", margin: 0, animation: "pulse 2s infinite" }}>
+          <p style={{ fontSize: "14px", fontWeight: "500", margin: 0, animation: isProcessing ? "pulse 2s infinite" : "none" }}>
             {project.progress?.stepName || "Procesando..."}
           </p>
+          {eta && (
+            <p style={{ fontSize: "11px", color: "var(--text-muted)", margin: "6px 0 0 0", fontFamily: "monospace" }}>
+              ⏱️ {eta}
+            </p>
+          )}
         </div>
       </div>
 
@@ -117,9 +247,15 @@ export default function ProjectDetailsPage({ params }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                 <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>Edición de Guión</h3>
                 {project.script?.plain ? (
-                  <button onClick={handleSaveScript} className="btn-glow" style={{ padding: "8px 16px", fontSize: "13px" }}>
-                    Guardar y Aprobar
-                  </button>
+                  project.status === "producing" ? (
+                    <span className="badge badge-starter" style={{ animation: "pulse 2s infinite" }}>⚙️ Produciendo...</span>
+                  ) : project.script?.approved && project.status !== "script_ready" ? (
+                    <span className="badge badge-free">✅ Ya aprobado</span>
+                  ) : (
+                    <button onClick={handleSaveScript} className="btn-glow" style={{ padding: "8px 16px", fontSize: "13px" }}>
+                      Aprobar y Producir 🚀
+                    </button>
+                  )
                 ) : (
                   <span className="badge badge-free" style={{ animation: "pulse 2s infinite" }}>Esperando a la IA...</span>
                 )}

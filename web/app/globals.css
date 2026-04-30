@@ -212,6 +212,10 @@ body {
   0%, 100% { box-shadow: 0 0 20px var(--accent-glow); }
   50% { box-shadow: 0 0 40px var(--accent-glow); }
 }
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
 .animate-fade-in {
   animation: fadeIn 0.4s ease forwards;
 }
