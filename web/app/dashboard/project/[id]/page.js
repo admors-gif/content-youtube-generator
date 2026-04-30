@@ -18,65 +18,37 @@ export default function ProjectDetailsPage({ params }) {
   const [displayPercent, setDisplayPercent] = useState(0);
   const [startTime, setStartTime] = useState(null);
 
-  // Estimated durations per phase (based on measured ~8 min total)
-  const PHASE_TIMING = {
-    0:   { label: "Preparando...", duration: 5 },
-    10:  { label: "Generando guión narrativo...", duration: 120 },
-    35:  { label: "Etiquetando emociones...", duration: 30 },
-    60:  { label: "Creando prompts visuales...", duration: 240 },
-    85:  { label: "Optimizando SEO...", duration: 20 },
-    100: { label: "¡Completado!", duration: 0 },
-  };
-  const TOTAL_ESTIMATED_SECONDS = 415; // ~7 min
-
   // Track when generation starts
   useEffect(() => {
     if (project?.progress?.percent > 0 && project?.progress?.percent < 100 && !startTime) {
       setStartTime(Date.now());
     }
-    if (project?.progress?.percent === 100 || project?.status === "error") {
+    if (project?.progress?.percent >= 100 || project?.status === "error") {
       setStartTime(null);
     }
   }, [project?.progress?.percent]);
 
-  // Smooth interpolation: gradually increment displayPercent toward real percent
+  // Smooth interpolation: gradually creep toward realPercent, NEVER exceeding it
   useEffect(() => {
     const realPercent = project?.progress?.percent || 0;
 
-    if (realPercent === 100 || realPercent === 0) {
+    if (realPercent >= 100 || realPercent === 0) {
       setDisplayPercent(realPercent);
       return;
     }
 
-    // Find current phase and next checkpoint
-    const checkpoints = [0, 10, 35, 60, 85, 100];
-    let currentCheckpoint = 0;
-    let nextCheckpoint = 10;
-    for (let i = 0; i < checkpoints.length - 1; i++) {
-      if (realPercent >= checkpoints[i] && realPercent < checkpoints[i + 1]) {
-        currentCheckpoint = checkpoints[i];
-        nextCheckpoint = checkpoints[i + 1];
-        break;
-      }
+    // Jump forward if backend jumped ahead
+    if (realPercent > displayPercent + 5) {
+      setDisplayPercent(realPercent - 2);
     }
 
-    const phaseDuration = (PHASE_TIMING[currentCheckpoint]?.duration || 60) * 1000;
-    const range = nextCheckpoint - currentCheckpoint;
-    const maxDrift = range * 0.85; // Don't go past 85% of the gap
-
+    // Creep slowly toward realPercent (never exceed it)
     const interval = setInterval(() => {
       setDisplayPercent((prev) => {
-        if (prev >= realPercent + maxDrift) return prev; // Cap at 85% of gap
-        if (prev >= nextCheckpoint - 1) return prev; // Don't exceed next checkpoint
-        const increment = range / (phaseDuration / 500); // Small steps
-        return Math.min(prev + increment, realPercent + maxDrift, nextCheckpoint - 1);
+        if (prev >= realPercent - 0.5) return prev; // Don't exceed real %
+        return prev + 0.3; // Slow, smooth increment
       });
-    }, 500);
-
-    // Jump to real percent if server reports a new checkpoint
-    if (realPercent > displayPercent) {
-      setDisplayPercent(realPercent);
-    }
+    }, 600);
 
     return () => clearInterval(interval);
   }, [project?.progress?.percent, displayPercent]);
@@ -311,31 +283,74 @@ export default function ProjectDetailsPage({ params }) {
             <div className="glass-card" style={{ padding: "48px", textAlign: "center" }}>
               <div style={{ fontSize: "48px", marginBottom: "16px", animation: "pulse 2s infinite" }}>🎬</div>
               <h3 style={{ fontSize: "20px", fontWeight: "bold", margin: "0 0 8px 0" }}>Analizando Escenas</h3>
-              <p style={{ color: "var(--text-muted)", margin: 0 }}>El Director de Fotografía (Claude Opus) está dividiendo tu guión en prompts visuales cada 5 segundos...</p>
+              <p style={{ color: "var(--text-muted)", margin: 0 }}>El Director de Fotografía está dividiendo tu guión en prompts visuales cada 5 segundos...</p>
             </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "24px" }}>
-              {project.scenes.map((scene, idx) => (
-                <div key={idx} className="glass-card" style={{ overflow: "hidden", transition: "all 0.3s" }}>
-                  <div style={{ aspectRatio: "16/9", background: "var(--bg-dark)", display: "flex", justifyContent: "center", alignItems: "center", position: "relative", overflow: "hidden" }}>
-                    {scene.imageUrl ? (
-                      <img src={scene.imageUrl} alt={`Scene ${idx+1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                        <span style={{ fontSize: "24px", marginBottom: "8px" }}>🎨</span>
-                        <span style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: "1px", color: "var(--text-muted)" }}>En cola</span>
+            <>
+              {/* Contador de progreso de imágenes */}
+              {project.status === "producing" && (
+                <div className="glass-card" style={{ padding: "16px 24px", marginBottom: "24px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <span style={{ fontSize: "24px", animation: "pulse 2s infinite" }}>🎨</span>
+                    <div>
+                      <div style={{ fontSize: "14px", fontWeight: "bold" }}>Generando imágenes</div>
+                      <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                        {project.scenes.filter(s => s.imageUrl).length} de {project.scenes.length} listas
                       </div>
-                    )}
-                    <div className="badge" style={{ position: "absolute", top: "8px", left: "8px", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}>
-                      Escena {idx + 1}
                     </div>
                   </div>
-                  <div style={{ padding: "16px" }}>
-                    <p style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: "1.5", margin: 0 }}>{scene.prompt || scene}</p>
+                  <div style={{ width: "120px", height: "8px", background: "var(--bg-primary)", borderRadius: "4px", overflow: "hidden" }}>
+                    <div style={{ 
+                      width: `${(project.scenes.filter(s => s.imageUrl).length / project.scenes.length) * 100}%`,
+                      height: "100%", background: "linear-gradient(90deg, var(--accent), var(--accent-secondary))",
+                      borderRadius: "4px", transition: "width 1s ease"
+                    }} />
                   </div>
                 </div>
-              ))}
-            </div>
+              )}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "24px" }}>
+                {project.scenes.map((scene, idx) => (
+                  <div key={idx} className="glass-card" style={{ overflow: "hidden", transition: "all 0.3s" }}>
+                    <div style={{ aspectRatio: "16/9", background: "var(--bg-dark)", display: "flex", justifyContent: "center", alignItems: "center", position: "relative", overflow: "hidden" }}>
+                      {scene.imageUrl ? (
+                        <img 
+                          src={scene.imageUrl} 
+                          alt={`Scene ${idx+1}`} 
+                          style={{ width: "100%", height: "100%", objectFit: "cover", animation: "fadeIn 0.8s ease" }} 
+                          loading="lazy"
+                        />
+                      ) : project.status === "producing" ? (
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", position: "relative", width: "100%", height: "100%", justifyContent: "center" }}>
+                          <div style={{ 
+                            position: "absolute", inset: 0,
+                            background: "linear-gradient(90deg, transparent 0%, rgba(139,92,246,0.08) 50%, transparent 100%)",
+                            animation: "shimmer 2.5s infinite"
+                          }} />
+                          <span style={{ fontSize: "28px", marginBottom: "8px", animation: "pulse 3s infinite" }}>🖌️</span>
+                          <span style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: "2px", color: "var(--accent)", fontWeight: "bold" }}>Generando...</span>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                          <span style={{ fontSize: "24px", marginBottom: "8px" }}>🎨</span>
+                          <span style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: "1px", color: "var(--text-muted)" }}>En cola</span>
+                        </div>
+                      )}
+                      <div className="badge" style={{ position: "absolute", top: "8px", left: "8px", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}>
+                        Escena {idx + 1}
+                      </div>
+                      {scene.imageUrl && (
+                        <div className="badge" style={{ position: "absolute", top: "8px", right: "8px", background: "rgba(74,222,128,0.2)", color: "#4ade80", backdropFilter: "blur(4px)" }}>
+                          ✅
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ padding: "16px" }}>
+                      <p style={{ fontSize: "13px", color: "var(--text-secondary)", lineHeight: "1.5", margin: 0 }}>{scene.prompt || scene}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
       )}

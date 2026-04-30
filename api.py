@@ -1,9 +1,28 @@
 from fastapi import FastAPI, BackgroundTasks, Request
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 import subprocess
 import os
 import json
+from pathlib import Path
 
 app = FastAPI(title="Content Factory API")
+
+# CORS para que el frontend pueda cargar imágenes
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/images/{project}/{filename}")
+def serve_image(project: str, filename: str):
+    """Sirve imágenes generadas desde el filesystem del VPS."""
+    img_path = Path(f"/app/output/videos/{project}/images/{filename}")
+    if img_path.exists():
+        return FileResponse(img_path, media_type="image/png")
+    return {"error": "Image not found"}
 
 @app.get("/")
 def health_check():
@@ -136,10 +155,55 @@ def run_production(project_id):
         # ═══════════════════════════════════════════
         update_progress(5, f"Generando {len(scenes)} imágenes con FLUX...")
         
+        # Ejecutar pipeline en background con monitoreo de archivos
+        import threading
+        from pathlib import Path
+        
+        images_dir = Path(f"/app/output/videos/{safe_title}/images")
+        images_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Hilo que monitorea imágenes creadas y actualiza Firebase
+        stop_monitoring = threading.Event()
+        
+        def monitor_images():
+            vps_base = os.environ.get("VPS_PUBLIC_URL", "http://100.99.207.113:8085")
+            reported = set()
+            while not stop_monitoring.is_set():
+                import time
+                time.sleep(8)
+                # Buscar nuevas imágenes
+                existing = sorted(images_dir.glob("scene_*.png"))
+                for img in existing:
+                    if img.name not in reported and img.stat().st_size > 1000:
+                        reported.add(img.name)
+                        # Extraer número de escena
+                        try:
+                            num = int(img.stem.split("_")[1])
+                            image_url = f"{vps_base}/images/{safe_title}/{img.name}"
+                            # Actualizar la escena en Firebase
+                            updated_scenes = doc_ref.get().to_dict().get("scenes", [])
+                            for s in updated_scenes:
+                                if s.get("scene_number") == num:
+                                    s["imageUrl"] = image_url
+                                    break
+                            doc_ref.update({"scenes": updated_scenes})
+                            
+                            # Actualizar progreso (5% a 45% basado en imágenes)
+                            pct = 5 + int((len(reported) / len(scenes)) * 40)
+                            update_progress(pct, f"Imagen {len(reported)}/{len(scenes)} generada")
+                        except Exception as e:
+                            print(f"   ⚠️ Monitor error: {e}")
+        
+        monitor_thread = threading.Thread(target=monitor_images, daemon=True)
+        monitor_thread.start()
+        
         result = subprocess.run(
             ["python", "scripts/production_pipeline.py", temp_path],
             capture_output=True, text=True, timeout=3600  # 1 hora max
         )
+        
+        stop_monitoring.set()
+        monitor_thread.join(timeout=5)
         
         if result.returncode != 0:
             update_progress(0, f"Error en generación de imágenes", "error")
