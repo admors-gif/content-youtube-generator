@@ -226,8 +226,9 @@ def run_production(project_id):
         monitor_thread = threading.Thread(target=monitor_images, daemon=True)
         monitor_thread.start()
         
+        # Ejecutar pipeline SOLO generación de imágenes (sin Ken Burns)
         result = subprocess.run(
-            ["python", "scripts/production_pipeline.py", temp_path],
+            ["python", "scripts/production_pipeline.py", temp_path, "--images-only"],
             capture_output=True, text=True, timeout=3600  # 1 hora max
         )
         
@@ -239,12 +240,12 @@ def run_production(project_id):
             print(f"STDERR: {result.stderr[-500:]}")
             return
         
-        update_progress(50, "Imágenes y Ken Burns listos ✅")
+        update_progress(45, "Imágenes FLUX listas ✅")
         
         # ═══════════════════════════════════════════
         # PASO 2: Generar Audio TTS  
         # ═══════════════════════════════════════════
-        update_progress(55, "Generando narración con Google TTS...")
+        update_progress(50, "Generando narración con Google TTS...")
         
         result = subprocess.run(
             ["python", "scripts/generate_google_tts.py", temp_path],
@@ -252,16 +253,49 @@ def run_production(project_id):
         )
         
         if result.returncode != 0:
-            update_progress(50, f"Error en generación de audio", "error")
+            update_progress(45, f"Error en generación de audio", "error")
             print(f"STDERR: {result.stderr[-500:]}")
             return
         
-        update_progress(75, "Audio narrado listo ✅")
+        update_progress(60, "Audio narrado listo ✅")
         
         # ═══════════════════════════════════════════
-        # PASO 3: Ensamblar Video Final
+        # PASO 3: Calcular duración y generar Ken Burns
         # ═══════════════════════════════════════════
-        update_progress(80, "Ensamblando video final...")
+        # Medir duración del audio para sincronizar
+        audio_path = f"/app/output/videos/{safe_title}/audio/master_google_narration.mp3"
+        duration_per_scene = 5  # fallback
+        try:
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", audio_path],
+                capture_output=True, text=True, timeout=30
+            )
+            audio_duration = float(probe.stdout.strip())
+            duration_per_scene = round(audio_duration / len(scenes), 2)
+            print(f"🎯 Audio: {audio_duration:.1f}s / {len(scenes)} escenas = {duration_per_scene:.2f}s por escena")
+        except Exception as e:
+            print(f"⚠️ No se pudo medir audio, usando 5s default: {e}")
+        
+        update_progress(65, f"Aplicando Ken Burns ({duration_per_scene:.1f}s/escena)...")
+        
+        result = subprocess.run(
+            ["python", "scripts/production_pipeline.py", temp_path, "--kenburns-only", 
+             "--duration", str(duration_per_scene)],
+            capture_output=True, text=True, timeout=3600
+        )
+        
+        if result.returncode != 0:
+            update_progress(60, f"Error en Ken Burns", "error")
+            print(f"STDERR: {result.stderr[-500:]}")
+            return
+        
+        update_progress(85, "Ken Burns sincronizado ✅")
+        
+        # ═══════════════════════════════════════════
+        # PASO 4: Ensamblar Video Final
+        # ═══════════════════════════════════════════
+        update_progress(90, "Ensamblando video final...")
         
         result = subprocess.run(
             ["python", "scripts/assemble_video.py", temp_path],
@@ -269,7 +303,7 @@ def run_production(project_id):
         )
         
         if result.returncode != 0:
-            update_progress(75, f"Error en ensamblaje de video", "error")
+            update_progress(85, f"Error en ensamblaje de video", "error")
             print(f"STDERR: {result.stderr[-500:]}")
             return
         

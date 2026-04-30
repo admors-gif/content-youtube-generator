@@ -107,10 +107,20 @@ def apply_ken_burns(img_path, vid_path, effect, duration=5):
 # ============================================================
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Uso: python production_pipeline.py <ruta_al_FULL_json>")
+        print("Uso: python production_pipeline.py <ruta_al_FULL_json> [--images-only] [--kenburns-only] [--duration N]")
         sys.exit(1)
     
     json_path = Path(sys.argv[1])
+    
+    # Parse flags
+    images_only = "--images-only" in sys.argv
+    kenburns_only = "--kenburns-only" in sys.argv
+    kb_duration = 5  # default
+    if "--duration" in sys.argv:
+        idx = sys.argv.index("--duration")
+        if idx + 1 < len(sys.argv):
+            kb_duration = float(sys.argv[idx + 1])
+    
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     
@@ -138,8 +148,14 @@ if __name__ == "__main__":
     # Ciclo de efectos variados
     effects = ["zoom_in", "pan_right", "zoom_out", "pan_left", "pan_down", "pan_up"]
     
+    mode = "COMPLETA"
+    if images_only:
+        mode = "SOLO IMÁGENES"
+    elif kenburns_only:
+        mode = f"SOLO KEN BURNS ({kb_duration:.2f}s/escena)"
+    
     print("=" * 60)
-    print("🏭 CONTENT FACTORY — Producción Completa")
+    print("🏭 CONTENT FACTORY — Producción " + mode)
     print("=" * 60)
     print(f"   📖 {raw_title}")
     print(f"   🎬 {len(scenes)} escenas")
@@ -161,37 +177,50 @@ if __name__ == "__main__":
             progress = f"[{i+1}/{len(scenes)}]"
             
             # === IMAGEN ===
-            if img_path.exists() and img_path.stat().st_size > 5000:
-                stats["skipped"] += 1
-            else:
-                print(f"\n{progress} 🚀 Escena {num}: generando imagen...")
-                pid = generate_image(client, base_workflow, prompt, num)
-                
-                if pid:
-                    ok = wait_and_download(client, pid, img_path)
-                    if ok:
-                        kb = img_path.stat().st_size // 1024
-                        stats["generated"] += 1
-                        print(f"{progress} ✅ Escena {num}: imagen OK ({kb}KB)")
+            if not kenburns_only:
+                if img_path.exists() and img_path.stat().st_size > 5000:
+                    stats["skipped"] += 1
+                else:
+                    print(f"\n{progress} 🚀 Escena {num}: generando imagen...")
+                    pid = generate_image(client, base_workflow, prompt, num)
+                    
+                    if pid:
+                        ok = wait_and_download(client, pid, img_path)
+                        if ok:
+                            kb = img_path.stat().st_size // 1024
+                            stats["generated"] += 1
+                            print(f"{progress} ✅ Escena {num}: imagen OK ({kb}KB)")
+                        else:
+                            stats["failed"] += 1
+                            print(f"{progress} ❌ Escena {num}: fallo descarga")
+                            continue
                     else:
                         stats["failed"] += 1
-                        print(f"{progress} ❌ Escena {num}: fallo descarga")
                         continue
-                else:
-                    stats["failed"] += 1
-                    continue
             
             # === KEN BURNS ===
-            if vid_path.exists() and vid_path.stat().st_size > 10000:
-                pass  # Ya existe
-            elif img_path.exists():
-                ok = apply_ken_burns(img_path, vid_path, effect)
-                if ok:
-                    mb = vid_path.stat().st_size / (1024*1024)
-                    stats["kenburns"] += 1
-                    print(f"{progress} 🎬 Escena {num}: {effect} ({mb:.1f}MB)")
+            if not images_only:
+                if kenburns_only:
+                    # En modo kenburns-only, siempre regenerar con nueva duración
+                    if img_path.exists():
+                        ok = apply_ken_burns(img_path, vid_path, effect, duration=kb_duration)
+                        if ok:
+                            mb = vid_path.stat().st_size / (1024*1024)
+                            stats["kenburns"] += 1
+                            print(f"{progress} 🎬 Escena {num}: {effect} {kb_duration:.1f}s ({mb:.1f}MB)")
+                        else:
+                            print(f"{progress} ❌ Escena {num}: Ken Burns falló")
                 else:
-                    print(f"{progress} ❌ Escena {num}: Ken Burns falló")
+                    if vid_path.exists() and vid_path.stat().st_size > 10000:
+                        pass  # Ya existe
+                    elif img_path.exists():
+                        ok = apply_ken_burns(img_path, vid_path, effect, duration=kb_duration)
+                        if ok:
+                            mb = vid_path.stat().st_size / (1024*1024)
+                            stats["kenburns"] += 1
+                            print(f"{progress} 🎬 Escena {num}: {effect} {kb_duration:.1f}s ({mb:.1f}MB)")
+                        else:
+                            print(f"{progress} ❌ Escena {num}: Ken Burns falló")
             
             # Progreso cada 10 escenas
             if (i + 1) % 10 == 0:
@@ -212,3 +241,4 @@ if __name__ == "__main__":
     print(f"   📸 {images_dir}")
     print(f"   🎥 {videos_dir}")
     print(f"{'='*60}")
+
