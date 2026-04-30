@@ -187,6 +187,31 @@ export default function ProjectDetailsPage({ params }) {
             </p>
           )}
         </div>
+
+        {/* Botones de descarga */}
+        {(project.status === "completed" || project.status === "producing") && (
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            {project.status === "completed" && (
+              <a
+                href={`${process.env.NEXT_PUBLIC_VPS_API_URL}/download/video/${encodeURIComponent(project.title?.replace(/ /g, '_').replace(/[^a-zA-Z0-9_\-]/g, '_'))}`}
+                className="btn-glow"
+                style={{ padding: "10px 20px", fontSize: "13px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "8px" }}
+                target="_blank"
+              >
+                📥 Descargar Video
+              </a>
+            )}
+            <a
+              href={`${process.env.NEXT_PUBLIC_VPS_API_URL}/download/images/${encodeURIComponent(project.title?.replace(/ /g, '_').replace(/[^a-zA-Z0-9_\-]/g, '_'))}`}
+              className="btn-secondary"
+              style={{ padding: "10px 20px", fontSize: "13px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "8px" }}
+              target="_blank"
+            >
+              🖼️ Descargar Imágenes (ZIP)
+            </a>
+          </div>
+        )}
+
       </div>
 
       {/* Tabs Menu */}

@@ -24,6 +24,35 @@ def serve_image(project: str, filename: str):
         return FileResponse(img_path, media_type="image/png")
     return {"error": "Image not found"}
 
+@app.get("/download/video/{project}")
+def download_video(project: str):
+    """Descarga el video final ensamblado."""
+    video_dir = Path(f"/app/output/videos/{project}")
+    # Buscar el archivo FINAL_*.mp4
+    finals = list(video_dir.glob("FINAL_*.mp4"))
+    if finals:
+        return FileResponse(finals[0], media_type="video/mp4", filename=finals[0].name)
+    # Buscar cualquier .mp4 que no sea de kenburns
+    all_mp4 = [f for f in video_dir.glob("*.mp4") if "kenburns" not in str(f)]
+    if all_mp4:
+        return FileResponse(all_mp4[0], media_type="video/mp4", filename=all_mp4[0].name)
+    return {"error": "Video not found"}
+
+@app.get("/download/images/{project}")
+def download_images_zip(project: str):
+    """Descarga todas las imágenes del proyecto como ZIP."""
+    import zipfile
+    images_dir = Path(f"/app/output/videos/{project}/images")
+    if not images_dir.exists():
+        return {"error": "Images not found"}
+    
+    zip_path = Path(f"/tmp/{project}_images.zip")
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for img in sorted(images_dir.glob("scene_*.png")):
+            zf.write(img, img.name)
+    
+    return FileResponse(zip_path, media_type="application/zip", filename=f"{project}_imagenes.zip")
+
 @app.get("/")
 def health_check():
     return {"status": "online", "service": "Content Factory API"}
