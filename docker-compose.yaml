@@ -11,4 +11,5 @@ services:
       - .env
     volumes:
       - ./firebase-admin.json:/app/firebase-admin.json:ro
+      - ./content-factory-tts-494706-0880f6d00a88.json:/app/content-factory-tts-494706-0880f6d00a88.json:ro
       - ./output:/app/output
