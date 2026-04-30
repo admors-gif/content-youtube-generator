@@ -73,22 +73,63 @@ def wait_and_download(client, prompt_id, img_path, max_wait=300):
 
 
 def apply_ken_burns(img_path, vid_path, effect, duration=5):
-    """Aplica efecto Ken Burns con FFmpeg — versión suave sin temblor."""
+    """Aplica efecto cinematográfico suave usando scale+crop — sin temblor.
+    
+    Técnica: trunc() fuerza posiciones a píxeles enteros,
+    eliminando la interpolación sub-pixel que causa micro-jitter.
+    Movimientos ultra-sutiles (4% zoom, 5% pan) para sensación
+    cinematográfica sin distracción.
+    """
     fps = 30
     tf = duration * fps
     
-    # Fórmulas suavizadas: usan rampas lineales basadas en 'on' (frame number)
-    # en vez de acumular 'zoom+0.001' que causa micro-oscilaciones flotantes
+    # ═══════════════════════════════════════════════════════════
+    # EFECTOS CINEMATOGRÁFICOS — Sin temblor
+    # ═══════════════════════════════════════════════════════════
+    # trunc() = píxeles enteros = cero jitter sub-pixel
+    # Zoom: solo 4% (1.0→1.04) = sutil "respiración"
+    # Pan: zoom fijo 1.05, desplazamiento suave
+    # ═══════════════════════════════════════════════════════════
     effects_map = {
-        "zoom_in": f"zoompan=z='1+0.2*on/{tf}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={tf}:s=1920x1080:fps={fps}",
-        "zoom_out": f"zoompan=z='1.3-0.3*on/{tf}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={tf}:s=1920x1080:fps={fps}",
-        "pan_left": f"zoompan=z='1.15':x='iw-iw/zoom-on*(iw-iw/zoom)/{tf}':y='ih/2-(ih/zoom/2)':d={tf}:s=1920x1080:fps={fps}",
-        "pan_right": f"zoompan=z='1.15':x='on*(iw-iw/zoom)/{tf}':y='ih/2-(ih/zoom/2)':d={tf}:s=1920x1080:fps={fps}",
-        "pan_up": f"zoompan=z='1.15':x='iw/2-(iw/zoom/2)':y='ih-ih/zoom-on*(ih-ih/zoom)/{tf}':d={tf}:s=1920x1080:fps={fps}",
-        "pan_down": f"zoompan=z='1.15':x='iw/2-(iw/zoom/2)':y='on*(ih-ih/zoom)/{tf}':d={tf}:s=1920x1080:fps={fps}",
+        # Zoom sutil: 1.0 → 1.04 centrado (como si la cámara "respirara")
+        "breathe_in": (
+            f"zoompan=z='1+0.04*on/{tf}'"
+            f":x='trunc(iw/2-(iw/zoom/2))':y='trunc(ih/2-(ih/zoom/2))'"
+            f":d={tf}:s=1920x1080:fps={fps}"
+        ),
+        # Zoom out sutil: 1.04 → 1.0
+        "breathe_out": (
+            f"zoompan=z='1.04-0.04*on/{tf}'"
+            f":x='trunc(iw/2-(iw/zoom/2))':y='trunc(ih/2-(ih/zoom/2))'"
+            f":d={tf}:s=1920x1080:fps={fps}"
+        ),
+        # Drift derecha: paneo horizontal ultra-suave
+        "drift_right": (
+            f"zoompan=z='1.05'"
+            f":x='trunc(on*(iw-iw/zoom)/{tf})':y='trunc(ih/2-(ih/zoom/2))'"
+            f":d={tf}:s=1920x1080:fps={fps}"
+        ),
+        # Drift izquierda
+        "drift_left": (
+            f"zoompan=z='1.05'"
+            f":x='trunc(iw-iw/zoom-on*(iw-iw/zoom)/{tf})':y='trunc(ih/2-(ih/zoom/2))'"
+            f":d={tf}:s=1920x1080:fps={fps}"
+        ),
+        # Drift arriba
+        "drift_up": (
+            f"zoompan=z='1.05'"
+            f":x='trunc(iw/2-(iw/zoom/2))':y='trunc(ih-ih/zoom-on*(ih-ih/zoom)/{tf})'"
+            f":d={tf}:s=1920x1080:fps={fps}"
+        ),
+        # Drift abajo
+        "drift_down": (
+            f"zoompan=z='1.05'"
+            f":x='trunc(iw/2-(iw/zoom/2))':y='trunc(on*(ih-ih/zoom)/{tf})'"
+            f":d={tf}:s=1920x1080:fps={fps}"
+        ),
     }
     
-    zoompan = effects_map.get(effect, effects_map["zoom_in"])
+    zoompan = effects_map.get(effect, effects_map["breathe_in"])
     
     cmd = [
         "ffmpeg", "-y", "-i", str(img_path),
@@ -146,7 +187,7 @@ if __name__ == "__main__":
         base_workflow = json.load(f)
     
     # Ciclo de efectos variados
-    effects = ["zoom_in", "pan_right", "zoom_out", "pan_left", "pan_down", "pan_up"]
+    effects = ["breathe_in", "drift_right", "breathe_out", "drift_left", "drift_up", "drift_down"]
     
     mode = "COMPLETA"
     if images_only:

@@ -57,39 +57,108 @@ if __name__ == "__main__":
     
     start_time = time.time()
     
-    # 1. Crear lista de videos para concatenar
-    list_file = project_dir / "concat_list.txt"
+    # 1. Obtener lista de videos para ensamblar
     video_files = sorted([f for f in kenburns_dir.glob("*.mp4")])
     
     if not video_files:
         print("❌ No se encontraron videos mp4 en la carpeta kenburns.")
         sys.exit(1)
-        
-    with open(list_file, "w", encoding="utf-8") as f:
-        for vf in video_files:
-            # FFmpeg requiere rutas absolutas escapadas o relativas correctas
-            # Usamos forward slashes para evitar problemas en Windows con ffmpeg
-            safe_path = str(vf.absolute()).replace("\\", "/")
-            f.write(f"file '{safe_path}'\n")
-            
-    print(f"📋 Lista de concatenación creada con {len(video_files)} clips.")
     
-    # 2. Concatenar los videos (Copia directa, ultra rápido, sin perder calidad)
+    print(f"📋 {len(video_files)} clips encontrados.")
+    
+    # 2. Ensamblar con crossfade (dissolve) entre escenas
     master_visuals = project_dir / "master_visuals.mp4"
     if master_visuals.exists():
         master_visuals.unlink()
-        
-    concat_cmd = [
-        "ffmpeg", "-y", 
-        "-f", "concat", 
-        "-safe", "0", 
-        "-i", str(list_file), 
-        "-c", "copy", 
-        str(master_visuals)
-    ]
     
-    if not run_ffmpeg(concat_cmd, "Uniendo clips de video"):
-        sys.exit(1)
+    CROSSFADE_DURATION = 0.5  # segundos de transición entre escenas
+    
+    if len(video_files) <= 1:
+        # Solo 1 clip, copiar directo
+        import shutil
+        shutil.copy2(str(video_files[0]), str(master_visuals))
+    elif len(video_files) <= 80:
+        # Usar xfade para transiciones suaves
+        # Obtener duración de cada clip
+        durations = []
+        for vf in video_files:
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", str(vf)],
+                capture_output=True, text=True
+            )
+            try:
+                durations.append(float(probe.stdout.strip()))
+            except:
+                durations.append(5.0)  # fallback
+        
+        # Construir filtro xfade encadenado
+        n = len(video_files)
+        inputs = []
+        for vf in video_files:
+            safe_path = str(vf.absolute()).replace("\\", "/")
+            inputs.extend(["-i", safe_path])
+        
+        # Calcular offsets acumulativos para cada transición
+        filter_parts = []
+        offsets = []
+        cumulative = 0
+        for i in range(n - 1):
+            cumulative += durations[i] - CROSSFADE_DURATION
+            offsets.append(cumulative)
+        
+        # Construir cadena de xfade
+        if n == 2:
+            filter_str = f"[0:v][1:v]xfade=transition=fade:duration={CROSSFADE_DURATION}:offset={offsets[0]},format=yuv420p[v]"
+        else:
+            # Primer par
+            filter_str = f"[0:v][1:v]xfade=transition=fade:duration={CROSSFADE_DURATION}:offset={offsets[0]}[v1];\n"
+            # Pares intermedios
+            for i in range(2, n - 1):
+                prev = f"v{i-1}"
+                curr = f"v{i}"
+                filter_str += f"[{prev}][{i}:v]xfade=transition=fade:duration={CROSSFADE_DURATION}:offset={offsets[i-1]}[{curr}];\n"
+            # Último par
+            last_prev = f"v{n-2}"
+            filter_str += f"[{last_prev}][{n-1}:v]xfade=transition=fade:duration={CROSSFADE_DURATION}:offset={offsets[n-2]},format=yuv420p[v]"
+        
+        xfade_cmd = ["ffmpeg", "-y"] + inputs + [
+            "-filter_complex", filter_str,
+            "-map", "[v]",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            str(master_visuals)
+        ]
+        
+        print(f"🎞️ Aplicando dissolve ({CROSSFADE_DURATION}s) entre {n} clips...")
+        if not run_ffmpeg(xfade_cmd, f"Crossfade dissolve ({n} clips)"):
+            # Fallback: concat simple sin crossfade
+            print("⚠️ Crossfade falló, usando concat directo...")
+            list_file = project_dir / "concat_list.txt"
+            with open(list_file, "w", encoding="utf-8") as f:
+                for vf in video_files:
+                    safe_path = str(vf.absolute()).replace("\\", "/")
+                    f.write(f"file '{safe_path}'\n")
+            concat_cmd = [
+                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                "-i", str(list_file), "-c", "copy", str(master_visuals)
+            ]
+            if not run_ffmpeg(concat_cmd, "Concat directo (fallback)"):
+                sys.exit(1)
+            list_file.unlink()
+    else:
+        # Demasiados clips para xfade (limitación FFmpeg), usar concat
+        list_file = project_dir / "concat_list.txt"
+        with open(list_file, "w", encoding="utf-8") as f:
+            for vf in video_files:
+                safe_path = str(vf.absolute()).replace("\\", "/")
+                f.write(f"file '{safe_path}'\n")
+        concat_cmd = [
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+            "-i", str(list_file), "-c", "copy", str(master_visuals)
+        ]
+        if not run_ffmpeg(concat_cmd, "Uniendo clips de video"):
+            sys.exit(1)
+        list_file.unlink()
         
     # 3. Mezclar Visuales + Audio
     final_video = project_dir / f"FINAL_{safe_title}.mp4"
@@ -112,9 +181,7 @@ if __name__ == "__main__":
     if not run_ffmpeg(mix_cmd, "Sincronizando Voz y Video"):
         sys.exit(1)
         
-    # Limpieza
-    if list_file.exists():
-        list_file.unlink()
+    # Limpieza (concat_list ya se borra dentro de cada rama)
         
     elapsed = time.time() - start_time
     print(f"\n{'='*60}")
