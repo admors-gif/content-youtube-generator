@@ -453,7 +453,7 @@ def generate_video_prompts(script_text: str) -> list:
     Divide el guión en chunks por párrafos para evitar límites de tokens.
     """
     use_claude = claude_client is not None
-    engine_name = f"Claude Opus ({CLAUDE_MODEL})" if use_claude else f"GPT-5.5 ({GPT_MODEL})"
+    engine_name = f"Claude Opus ({CLAUDE_MODEL_PROMPTS})" if use_claude else f"GPT-5.5 ({GPT_MODEL})"
     
     print(f"\n🎬 MOTOR 2: Generando prompts de video...")
     print(f"   Motor visual: {engine_name}")
