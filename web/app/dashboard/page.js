@@ -1,7 +1,7 @@
 "use client";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
-import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
+import { collection, query, where, orderBy, onSnapshot, deleteDoc, doc, updateDoc, increment } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -22,6 +22,20 @@ export default function DashboardPage() {
   const [projects, setProjects] = useState([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
 
+  const handleDelete = async (e, project) => {
+    e.stopPropagation();
+    if (!confirm(`¿Eliminar "${project.title}"? Esta acción no se puede deshacer.`)) return;
+    try {
+      await deleteDoc(doc(db, "projects", project.id));
+      // Devolver el crédito al usuario
+      await updateDoc(doc(db, "users", user.uid), {
+        "credits.used": increment(-1)
+      });
+    } catch (err) {
+      alert("Error al eliminar: " + err.message);
+    }
+  };
+
   useEffect(() => {
     if (!user) return;
     const q = query(
@@ -32,6 +46,21 @@ export default function DashboardPage() {
     const unsub = onSnapshot(q, (snap) => {
       setProjects(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
       setLoadingProjects(false);
+    }, (error) => {
+      console.warn("⚠️ Firestore index missing, using fallback query:", error.message);
+      // Fallback: query without orderBy (no composite index needed)
+      const fallbackQ = query(
+        collection(db, "projects"),
+        where("userId", "==", user.uid)
+      );
+      const unsub2 = onSnapshot(fallbackQ, (snap) => {
+        const sorted = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+        setProjects(sorted);
+        setLoadingProjects(false);
+      });
+      return () => unsub2();
     });
     return () => unsub();
   }, [user]);
@@ -111,6 +140,25 @@ export default function DashboardPage() {
                           <div style={{ width: `${p.progress.percent}%`, height: "100%", background: "var(--accent)", borderRadius: 3, transition: "width 0.5s" }} />
                         </div>
                       )}
+                      <button
+                        onClick={(e) => handleDelete(e, p)}
+                        title="Eliminar proyecto"
+                        style={{
+                          background: "transparent",
+                          border: "1px solid rgba(255,59,48,0.3)",
+                          color: "var(--danger, #ff3b30)",
+                          borderRadius: 6,
+                          padding: "4px 10px",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          marginLeft: 4,
+                          transition: "all 0.2s",
+                        }}
+                        onMouseEnter={(e) => { e.target.style.background = "rgba(255,59,48,0.15)"; }}
+                        onMouseLeave={(e) => { e.target.style.background = "transparent"; }}
+                      >
+                        🗑️
+                      </button>
                     </div>
                   </div>
                 </div>
