@@ -24,15 +24,16 @@ export default function DashboardPage() {
 
   const handleDelete = async (e, project) => {
     e.stopPropagation();
-    const isCompleted = project.status === "completed";
-    const msg = isCompleted
-      ? `¿Eliminar "${project.title}"?\n\n⚠️ Este video ya fue completado. El crédito NO será devuelto.`
-      : `¿Eliminar "${project.title}"?\n\n✅ Se te devolverá el crédito.`;
+    // Crédito consumido = si ya se generó un guión (tokens de IA gastados)
+    const hasScript = (project.script?.wordCount > 0) || (project.script?.plain?.length > 0);
+    const msg = hasScript
+      ? `¿Eliminar "${project.title}"?\n\n⚠️ El guión ya fue generado. El crédito NO será devuelto.`
+      : `¿Eliminar "${project.title}"?\n\n✅ No se generó guión. Se te devolverá el crédito.`;
     if (!confirm(msg)) return;
     try {
       await deleteDoc(doc(db, "projects", project.id));
-      // Solo devolver crédito si el proyecto NO se completó
-      if (!isCompleted) {
+      // Solo devolver crédito si NO se generó guión (no se gastaron tokens)
+      if (!hasScript) {
         await updateDoc(doc(db, "users", user.uid), {
           "credits.used": increment(-1)
         });
