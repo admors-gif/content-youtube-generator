@@ -3,19 +3,12 @@ services:
     build:
       context: .
       args:
-        - CACHE_BUST=20260501v7-envfix
+        - CACHE_BUST=20260501v8-envfix2
     container_name: content-factory-v5
     ports:
       - "8085:8000"
     restart: unless-stopped
-    environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.5}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
-      - COMFYUI_API_KEY=${COMFYUI_API_KEY}
-      - LUMA_API_KEY=${LUMA_API_KEY}
-      - IMGBB_API_KEY=${IMGBB_API_KEY}
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-admin.json
+    env_file:
+      - .env
     volumes:
       - ./output:/app/output
