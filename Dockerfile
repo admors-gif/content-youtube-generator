@@ -2,8 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Forzar que Python no bufferee stdout — los prints se ven en Docker logs en tiempo real
+# Forzar que Python no bufferee stdout
 ENV PYTHONUNBUFFERED=1
+
+# Cache bust ANTES de apt-get para forzar rebuild completo cuando sea necesario
+ARG CACHE_BUST=unknown
 
 # Instalar FFmpeg, libass (subtítulos ASS), fonts y dependencias
 RUN apt-get update && \
@@ -15,8 +18,7 @@ RUN apt-get update && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el código del proyecto (CACHE_BUST fuerza rebuild)
-ARG CACHE_BUST=unknown
+# Copiar el código del proyecto
 COPY . .
 
 EXPOSE 8000
