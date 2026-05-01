@@ -5,9 +5,10 @@ WORKDIR /app
 # Forzar que Python no bufferee stdout — los prints se ven en Docker logs en tiempo real
 ENV PYTHONUNBUFFERED=1
 
-# Instalar FFmpeg y dependencias del sistema (crucial para procesar video/audio después)
+# Instalar FFmpeg, libass (subtítulos ASS), fonts y dependencias
 RUN apt-get update && \
-    apt-get install -y ffmpeg && \
+    apt-get install -y ffmpeg libass-dev fonts-montserrat fontconfig && \
+    fc-cache -f -v && \
     rm -rf /var/lib/apt/lists/*
 
 # Instalar librerías de Python

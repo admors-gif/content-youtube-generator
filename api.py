@@ -337,17 +337,35 @@ def run_production(project_id):
         # ═══════════════════════════════════════════
         # COMPLETADO
         # ═══════════════════════════════════════════
-        final_video = list(Path(f"/app/output/videos/{safe_title}").glob("FINAL_*.mp4"))
-        final_path = str(final_video[0]) if final_video else ""
+        video_dir = Path(f"/app/output/videos/{safe_title}")
+        
+        # Preferir video con subtítulos si existe
+        sub_videos = list(video_dir.glob("FINAL_SUB_*.mp4"))
+        regular_videos = list(video_dir.glob("FINAL_*.mp4"))
+        # Filtrar para que regular_videos no incluya los SUB
+        regular_videos = [v for v in regular_videos if "FINAL_SUB_" not in v.name]
+        
+        if sub_videos:
+            final_path = str(sub_videos[0])
+            has_subs = True
+        elif regular_videos:
+            final_path = str(regular_videos[0])
+            has_subs = False
+        else:
+            final_path = ""
+            has_subs = False
+        
+        status_msg = "🏆 ¡Video cinemático finalizado!" if not has_subs else "🏆 ¡Video cinemático con subtítulos finalizado!"
         
         doc_ref.update({
             "status": "completed",
             "progress.percent": 100,
-            "progress.stepName": "🏆 ¡Video cinemático finalizado!",
+            "progress.stepName": status_msg,
             "videoPath": final_path,
+            "hasSubtitles": has_subs,
         })
         
-        print(f"🏆 [PRODUCE] Cinematic production complete! {final_path}")
+        print(f"🏆 [PRODUCE] Cinematic production complete! Subs: {has_subs} | {final_path}")
         
     except Exception as e:
         update_progress(0, f"Error: {str(e)[:100]}", "error")

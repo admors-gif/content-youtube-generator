@@ -46,6 +46,7 @@ from luma_video import (
     generate_cinematic_clips, upload_image_to_temp,
     create_generation, poll_generation, download_video
 )
+from generate_subtitles import add_subtitles_to_video
 
 
 # ============================================================
@@ -600,6 +601,25 @@ if __name__ == "__main__":
         final_video = assemble_final_video(scenes, project_dir, mode, luma_indices)
     
     # ════════════════════════════════════════════════════════
+    # PASO 5: SUBTÍTULOS (Whisper + ASS + FFmpeg)
+    # ════════════════════════════════════════════════════════
+    skip_subs = "--skip-subs" in sys.argv
+    subtitled_video = None
+    
+    if final_video and not skip_subs:
+        try:
+            master_audio = project_dir / "master_audio.mp3"
+            subtitled_video = add_subtitles_to_video(
+                video_path=final_video,
+                audio_path=master_audio if master_audio.exists() else None
+            )
+            if subtitled_video:
+                # El video subtitulado es ahora el principal
+                final_video = subtitled_video
+        except Exception as e:
+            print(f"   ⚠️ Subtítulos fallaron (video sin subs disponible): {e}")
+    
+    # ════════════════════════════════════════════════════════
     # RESUMEN FINAL
     # ════════════════════════════════════════════════════════
     total_time = (time.time() - pipeline_start) / 60
@@ -613,5 +633,9 @@ if __name__ == "__main__":
     if final_video:
         size_mb = final_video.stat().st_size / (1024 * 1024)
         print(f"   🎥 Video final: {final_video.name} ({size_mb:.1f}MB)")
+    if subtitled_video:
+        print(f"   📝 Subtítulos: ✅ Incluidos")
+    else:
+        print(f"   📝 Subtítulos: ⚠️ No disponibles")
     print(f"   📁 Proyecto: {project_dir}")
     print("═" * 60)

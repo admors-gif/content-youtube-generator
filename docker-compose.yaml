@@ -3,7 +3,7 @@ services:
     build:
       context: .
       args:
-        - CACHE_BUST=20260501v4-fixes
+        - CACHE_BUST=20260501v5-subtitles
     container_name: content-factory-api
     ports:
       - "8085:8000"
