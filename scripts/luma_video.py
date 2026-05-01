@@ -226,14 +226,14 @@ def generate_cinematic_clips(
     # Prompts de movimiento cinematográfico variados
     if not motion_prompts:
         motion_prompts = [
-            "Slow subtle push in, gentle atmospheric haze movement",
-            "Smooth lateral dolly right, volumetric light shifts",
-            "Slow pull back revealing scene, dust particles floating",
-            "Gentle tilt up with subtle depth of field shift",
-            "Slow orbit left, cinematic lighting flicker",
-            "Static shot with subtle atmospheric movement, smoke wisps",
-            "Very slow push in, dramatic shadow play",
-            "Gentle crane down, atmospheric fog drift",
+            "Slow subtle push in, gentle atmospheric haze movement, physically realistic motion, no morphing or distortion",
+            "Smooth lateral dolly right, volumetric light shifts, natural human movement only",
+            "Slow pull back revealing scene, dust particles floating, physically grounded camera motion",
+            "Gentle tilt up with subtle depth of field shift, realistic lighting transition",
+            "Slow orbit left, cinematic lighting flicker, no warping or impossible physics",
+            "Static shot with subtle atmospheric movement, smoke wisps, minimal subject motion",
+            "Very slow push in, dramatic shadow play, stable and grounded composition",
+            "Gentle crane down, atmospheric fog drift, photorealistic motion only",
         ]
     
     stats = {"generated": 0, "skipped": 0, "failed": 0, "no_image": 0}

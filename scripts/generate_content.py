@@ -322,7 +322,7 @@ def generate_video_prompts_claude(chunk: str, scene_counter: int) -> list:
         try:
             response = claude_client.messages.create(
                 model=CLAUDE_MODEL_PROMPTS,
-                max_tokens=8000,
+                max_tokens=16000,
                 system=video_prompt_template,
                 messages=[
                     {
@@ -332,6 +332,10 @@ def generate_video_prompts_claude(chunk: str, scene_counter: int) -> list:
                             f"Inicia la numeración de escenas desde {scene_counter + 1}.\n"
                             f"El timestamp de inicio es {start_mm:02d}:{start_ss:02d}.\n"
                             f"Cada escena = 5 segundos.\n\n"
+                            f"IMPORTANTE: Debes cubrir TODO el texto del fragmento, "
+                            f"desde la primera hasta la última oración. "
+                            f"El campo narration_text debe contener el texto EXACTO del guión. "
+                            f"No omitas ninguna parte del fragmento.\n\n"
                             f"Responde SOLO con un JSON valido con la estructura: "
                             f"{{\"scenes\": [...]}}\n\n"
                             f"FRAGMENTO DE NARRATIVA:\n\n{chunk}"
@@ -400,13 +404,17 @@ def generate_video_prompts_gpt(chunk: str, scene_counter: int) -> list:
                             f"Inicia la numeración de escenas desde {scene_counter + 1}.\n"
                             f"El timestamp de inicio es {start_mm:02d}:{start_ss:02d}.\n"
                             f"Cada escena = 5 segundos.\n\n"
+                            f"IMPORTANTE: Debes cubrir TODO el texto del fragmento, "
+                            f"desde la primera hasta la última oración. "
+                            f"El campo narration_text debe contener el texto EXACTO del guión. "
+                            f"No omitas ninguna parte del fragmento.\n\n"
                             f"Responde SOLO con un JSON valido con la estructura: "
                             f"{{\"scenes\": [...]}}\n\n"
                             f"FRAGMENTO DE NARRATIVA:\n\n{chunk}"
                         )
                     }
                 ],
-                max_completion_tokens=8000,
+                max_completion_tokens=16000,
                 response_format={"type": "json_object"}
             )
 
@@ -476,6 +484,7 @@ def generate_video_prompts(script_text: str) -> list:
 
     all_scenes = []
     scene_counter = 0
+    failed_chunks = []
 
     for i, chunk in enumerate(chunks):
         print(f"   🔄 Procesando chunk {i+1}/{len(chunks)}...")
@@ -486,16 +495,45 @@ def generate_video_prompts(script_text: str) -> list:
             chunk_scenes = generate_video_prompts_claude(chunk, scene_counter)
             if chunk_scenes is None:
                 print(f"   ⚠️  Claude falló en chunk {i+1}, usando GPT-5.5 como fallback...")
-                chunk_scenes = generate_video_prompts_gpt(chunk, scene_counter)
+                if openai_client:
+                    chunk_scenes = generate_video_prompts_gpt(chunk, scene_counter)
         else:
             chunk_scenes = generate_video_prompts_gpt(chunk, scene_counter)
+
+        # SEGUNDO INTENTO: Si falló, intentar dividir el chunk en sub-chunks más pequeños
+        if chunk_scenes is None:
+            print(f"   🔄 Reintentando chunk {i+1} dividido en sub-chunks más pequeños...")
+            sub_paragraphs = [p.strip() for p in chunk.split("\n\n") if p.strip()]
+            sub_scenes = []
+            sub_failed = False
+            for j, sub_p in enumerate(sub_paragraphs):
+                print(f"      Sub-chunk {j+1}/{len(sub_paragraphs)}...")
+                sub_result = None
+                if use_claude:
+                    sub_result = generate_video_prompts_claude(sub_p, scene_counter + len(sub_scenes))
+                if sub_result is None and openai_client:
+                    sub_result = generate_video_prompts_gpt(sub_p, scene_counter + len(sub_scenes))
+                if sub_result:
+                    sub_scenes.extend(sub_result)
+                else:
+                    sub_failed = True
+                    print(f"      ❌ Sub-chunk {j+1} también falló")
+            if sub_scenes:
+                chunk_scenes = sub_scenes
+                if sub_failed:
+                    print(f"   ⚠️  Chunk {i+1}: parcialmente recuperado ({len(sub_scenes)} escenas)")
 
         if chunk_scenes:
             all_scenes.extend(chunk_scenes)
             scene_counter += len(chunk_scenes)
             print(f"   ✅ Chunk {i+1}: {len(chunk_scenes)} escenas (total: {len(all_scenes)})")
         else:
-            print(f"   ❌ Chunk {i+1}: falló después de todos los intentos, saltando...")
+            failed_chunks.append(i + 1)
+            print(f"   🚨 ALERTA: Chunk {i+1}/{len(chunks)} perdido — el video estará incompleto")
+
+    if failed_chunks:
+        print(f"\n   🚨 ADVERTENCIA: {len(failed_chunks)} chunks fallaron: {failed_chunks}")
+        print(f"   📊 Cobertura del guión: {((len(chunks) - len(failed_chunks)) / len(chunks) * 100):.0f}%")
 
     print(f"   🎬 Total: {len(all_scenes)} escenas de video generadas")
 

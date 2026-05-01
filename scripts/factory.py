@@ -77,7 +77,7 @@ def generate_flux_images(scenes, images_dir, workflow_path):
             
             # Preparar workflow
             nodes = copy.deepcopy(base_workflow)
-            nodes["200:195"]["inputs"]["text"] = f"Highly realistic cinematic film still, masterpiece, 8k resolution. {prompt}"
+            nodes["200:195"]["inputs"]["text"] = f"Highly realistic cinematic film still, masterpiece, 8k resolution, anatomically perfect human proportions, natural facial features, correct number of fingers, photorealistic skin texture. {prompt}"
             nodes["200:197"]["inputs"]["seed"] = random.randint(100000000000000, 999999999999999)
             nodes["200:196"]["inputs"]["width"] = 1344
             nodes["200:196"]["inputs"]["height"] = 768

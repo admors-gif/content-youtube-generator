@@ -30,13 +30,27 @@ def download_video(project: str):
     video_dir = Path(f"/app/output/videos/{project}")
     # Buscar el archivo FINAL_*.mp4
     finals = list(video_dir.glob("FINAL_*.mp4"))
-    if finals:
-        return FileResponse(finals[0], media_type="video/mp4", filename=finals[0].name)
-    # Buscar cualquier .mp4 que no sea de kenburns
-    all_mp4 = [f for f in video_dir.glob("*.mp4") if "kenburns" not in str(f)]
-    if all_mp4:
-        return FileResponse(all_mp4[0], media_type="video/mp4", filename=all_mp4[0].name)
-    return {"error": "Video not found"}
+    video_file = finals[0] if finals else None
+    if not video_file:
+        # Buscar cualquier .mp4 que no sea de kenburns
+        all_mp4 = [f for f in video_dir.glob("*.mp4") if "kenburns" not in str(f)]
+        video_file = all_mp4[0] if all_mp4 else None
+    if not video_file:
+        return {"error": "Video not found"}
+    
+    file_size = video_file.stat().st_size
+    safe_name = video_file.name.encode('ascii', 'ignore').decode('ascii') or "video.mp4"
+    return FileResponse(
+        video_file,
+        media_type="video/mp4",
+        filename=safe_name,
+        headers={
+            "Content-Length": str(file_size),
+            "Content-Disposition": f'attachment; filename="{safe_name}"',
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-cache",
+        }
+    )
 
 @app.get("/download/images/{project}")
 def download_images_zip(project: str):
@@ -51,7 +65,18 @@ def download_images_zip(project: str):
         for img in sorted(images_dir.glob("scene_*.png")):
             zf.write(img, img.name)
     
-    return FileResponse(zip_path, media_type="application/zip", filename=f"{project}_imagenes.zip")
+    file_size = zip_path.stat().st_size
+    safe_name = f"{project}_imagenes.zip".encode('ascii', 'ignore').decode('ascii')
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=safe_name,
+        headers={
+            "Content-Length": str(file_size),
+            "Content-Disposition": f'attachment; filename="{safe_name}"',
+            "Cache-Control": "no-cache",
+        }
+    )
 
 @app.get("/")
 def health_check():
