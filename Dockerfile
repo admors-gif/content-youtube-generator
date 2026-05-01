@@ -2,6 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Forzar que Python no bufferee stdout — los prints se ven en Docker logs en tiempo real
+ENV PYTHONUNBUFFERED=1
+
 # Instalar FFmpeg y dependencias del sistema (crucial para procesar video/audio después)
 RUN apt-get update && \
     apt-get install -y ffmpeg && \
