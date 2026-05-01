@@ -3,7 +3,7 @@ services:
     build:
       context: .
       args:
-        - CACHE_BUST=20260501v9-persist
+        - CACHE_BUST=20260501v10-https
     container_name: content-factory-v5
     ports:
       - "8085:8000"
