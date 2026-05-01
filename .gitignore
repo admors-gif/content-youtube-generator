@@ -1,4 +1,6 @@
 .env
+.env.*
+.env.txt
 __pycache__/
 *.pyc
 output/clips/*
@@ -15,14 +17,17 @@ node_modules/
 *.mp4
 *.mp3
 
-# Security
+# Security — NEVER commit credentials
+firebase-admin.json
+firebase-admin.json.json
+firebase-admin*.json
 content-factory-tts-*.json
+*-service-account*.json
+*credentials*.json
+*-key.json
+*-key*.json
 web/.env.local
 web/.env.*
-.env.txt
 
 # Generated Content
 output/videos/
-
-# Firebase Service Account
-firebase-admin.json
