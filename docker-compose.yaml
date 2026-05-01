@@ -4,7 +4,7 @@ services:
       context: .
       args:
         - CACHE_BUST=20260501v6-fresh
-    container_name: content-factory-v5
+    container_name: content-factory-api
     ports:
       - "8085:8000"
     restart: unless-stopped
