@@ -136,6 +136,83 @@ async def trigger_production(request: Request, background_tasks: BackgroundTasks
         "message": f"Production pipeline started for project {project_id}"
     }
 
+@app.post("/retry")
+async def retry_production(request: Request, background_tasks: BackgroundTasks):
+    """Resetea estado de un proyecto con error y re-lanza producción."""
+    data = await request.json()
+    project_id = data.get("projectId")
+    
+    if not project_id:
+        return {"status": "error", "message": "Missing 'projectId'"}
+    
+    # Resetear estado en Firebase
+    try:
+        import firebase_admin
+        from firebase_admin import credentials, firestore
+        try:
+            firebase_admin.get_app()
+        except ValueError:
+            cred_path = "/app/firebase-admin.json"
+            if os.path.exists(cred_path):
+                cred = credentials.Certificate(cred_path)
+                firebase_admin.initialize_app(cred)
+        
+        db = firestore.client()
+        doc_ref = db.collection("projects").document(project_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            return {"status": "error", "message": "Project not found"}
+        
+        # Resetear a estado "produced" para re-lanzar
+        doc_ref.update({
+            "status": "producing",
+            "progress.percent": 5,
+            "progress.stepName": "Retrying production...",
+        })
+        
+        background_tasks.add_task(run_production, project_id)
+        
+        return {
+            "status": "accepted",
+            "message": f"Retry started for project {project_id}"
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/reset-status")
+async def reset_project_status(request: Request):
+    """Resetea el estado de un proyecto para permitir re-producción desde la UI."""
+    data = await request.json()
+    project_id = data.get("projectId")
+    new_status = data.get("status", "produced")
+    
+    if not project_id:
+        return {"status": "error", "message": "Missing 'projectId'"}
+    
+    try:
+        import firebase_admin
+        from firebase_admin import credentials, firestore
+        try:
+            firebase_admin.get_app()
+        except ValueError:
+            cred_path = "/app/firebase-admin.json"
+            if os.path.exists(cred_path):
+                cred = credentials.Certificate(cred_path)
+                firebase_admin.initialize_app(cred)
+        
+        db = firestore.client()
+        doc_ref = db.collection("projects").document(project_id)
+        doc_ref.update({
+            "status": new_status,
+            "progress.percent": 0,
+            "progress.stepName": "",
+        })
+        
+        return {"status": "ok", "message": f"Project reset to '{new_status}'"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 def run_script(topic, agent_file, project_id):
     print(f"🚀 [API] Starting background job for '{topic}' with '{agent_file}' (Project: {project_id})...", flush=True)
     try:
