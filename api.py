@@ -330,53 +330,62 @@ def run_production(project_id):
         # ═══════════════════════════════════════════
         # PASO 1: Generar Imágenes con FLUX (5% → 40%)
         # ═══════════════════════════════════════════
-        update_progress(5, f"Generando {len(scenes)} imágenes con FLUX...")
         
-        # Monitorear progreso de imágenes
-        stop_monitoring = threading.Event()
+        # Detectar imágenes existentes para evitar regenerar
+        existing_images = sorted(images_dir.glob("scene_*.png"))
+        existing_count = len([f for f in existing_images if f.stat().st_size > 1000])
         
-        def monitor_images():
-            vps_base = os.environ.get("VPS_PUBLIC_URL", "http://100.99.207.113:8085")
-            reported = set()
-            while not stop_monitoring.is_set():
-                time.sleep(8)
-                existing = sorted(images_dir.glob("scene_*.png"))
-                for img in existing:
-                    if img.name not in reported and img.stat().st_size > 1000:
-                        reported.add(img.name)
-                        try:
-                            num = int(img.stem.split("_")[1])
-                            image_url = f"{vps_base}/images/{safe_title}/{img.name}"
-                            updated_scenes = doc_ref.get().to_dict().get("scenes", [])
-                            for s in updated_scenes:
-                                sn = s.get("scene_number", s.get("sceneNumber", 0))
-                                if sn == num:
-                                    s["imageUrl"] = image_url
-                                    break
-                            doc_ref.update({"scenes": updated_scenes})
-                            pct = 5 + int((len(reported) / len(scenes)) * 35)
-                            update_progress(pct, f"🎨 Imagen {len(reported)}/{len(scenes)} generada")
-                        except Exception as e:
-                            print(f"   ⚠️ Monitor error: {e}")
-        
-        monitor_thread = threading.Thread(target=monitor_images, daemon=True)
-        monitor_thread.start()
-        
-        # factory.py con --images-only
-        result = subprocess.run(
-            ["python", "scripts/factory.py", temp_path, "--mode", "cinematico", "--images-only"],
-            capture_output=True, text=True, timeout=3600
-        )
-        
-        stop_monitoring.set()
-        monitor_thread.join(timeout=5)
-        
-        if result.returncode != 0:
-            update_progress(0, f"Error generando imágenes", "error")
-            print(f"STDERR: {result.stderr[-500:]}")
-            return
-        
-        update_progress(40, "✅ Imágenes FLUX listas")
+        if existing_count >= len(scenes):
+            print(f"   ✅ {existing_count}/{len(scenes)} imágenes ya existen — saltando FLUX")
+            update_progress(40, f"✅ {existing_count} imágenes ya existentes (reutilizadas)")
+        else:
+            update_progress(5, f"Generando {len(scenes)} imágenes con FLUX... ({existing_count} existentes)")
+            
+            # Monitorear progreso de imágenes
+            stop_monitoring = threading.Event()
+            
+            def monitor_images():
+                vps_base = os.environ.get("VPS_PUBLIC_URL", "http://100.99.207.113:8085")
+                reported = set()
+                while not stop_monitoring.is_set():
+                    time.sleep(8)
+                    existing = sorted(images_dir.glob("scene_*.png"))
+                    for img in existing:
+                        if img.name not in reported and img.stat().st_size > 1000:
+                            reported.add(img.name)
+                            try:
+                                num = int(img.stem.split("_")[1])
+                                image_url = f"{vps_base}/images/{safe_title}/{img.name}"
+                                updated_scenes = doc_ref.get().to_dict().get("scenes", [])
+                                for s in updated_scenes:
+                                    sn = s.get("scene_number", s.get("sceneNumber", 0))
+                                    if sn == num:
+                                        s["imageUrl"] = image_url
+                                        break
+                                doc_ref.update({"scenes": updated_scenes})
+                                pct = 5 + int((len(reported) / len(scenes)) * 35)
+                                update_progress(pct, f"🎨 Imagen {len(reported)}/{len(scenes)} generada")
+                            except Exception as e:
+                                print(f"   ⚠️ Monitor error: {e}")
+            
+            monitor_thread = threading.Thread(target=monitor_images, daemon=True)
+            monitor_thread.start()
+            
+            # factory.py con --images-only
+            result = subprocess.run(
+                ["python", "scripts/factory.py", temp_path, "--mode", "cinematico", "--images-only"],
+                capture_output=True, text=True, timeout=3600
+            )
+            
+            stop_monitoring.set()
+            monitor_thread.join(timeout=5)
+            
+            if result.returncode != 0:
+                update_progress(0, f"Error generando imágenes", "error")
+                print(f"STDERR: {result.stderr[-500:]}")
+                return
+            
+            update_progress(40, "✅ Imágenes FLUX listas")
         
         # ═══════════════════════════════════════════
         # PASO 2-4: Narración + Luma + Ken Burns + Ensamblaje (40% → 100%)

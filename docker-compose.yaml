@@ -3,7 +3,7 @@ services:
     build:
       context: .
       args:
-        - CACHE_BUST=20260501v8-envfix2
+        - CACHE_BUST=20260501v9-persist
     container_name: content-factory-v5
     ports:
       - "8085:8000"
@@ -11,4 +11,4 @@ services:
     env_file:
       - .env
     volumes:
-      - ./output:/app/output
+      - /opt/content-factory/output:/app/output
