@@ -56,8 +56,8 @@ GPT_MODEL = config["models"]["script_generation"]
 # Anthropic (Claude)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
-CLAUDE_MODEL_SCRIPT = "claude-sonnet-4-20250514"
-CLAUDE_MODEL_PROMPTS = "claude-opus-4-20250514"
+CLAUDE_MODEL_SCRIPT = "claude-3-7-sonnet-20250219"
+CLAUDE_MODEL_PROMPTS = "claude-3-7-sonnet-20250219"
 
 # ============================================================
 # FIREBASE ADMIN INIT
