@@ -441,14 +441,41 @@ def run_production(project_id):
             return
         
         # ═══════════════════════════════════════════
-        # COMPLETADO
+        # PASO EXTRA: Subtítulos explícitos (fallback)
         # ═══════════════════════════════════════════
         video_dir = Path(f"/app/output/videos/{safe_title}")
+        sub_videos = list(video_dir.glob("FINAL_SUB_*.mp4"))
         
-        # Preferir video con subtítulos si existe
+        if not sub_videos:
+            # factory.py no generó subtítulos — intentar directamente
+            update_progress(92, "📝 Generando subtítulos...")
+            regular_videos = list(video_dir.glob("FINAL_*.mp4"))
+            regular_videos = [v for v in regular_videos if "FINAL_SUB_" not in v.name]
+            
+            if regular_videos:
+                try:
+                    sys.path.insert(0, "/app/scripts")
+                    from generate_subtitles import add_subtitles_to_video
+                    
+                    master_audio = video_dir / "master_audio.mp3"
+                    subtitled = add_subtitles_to_video(
+                        video_path=regular_videos[0],
+                        audio_path=master_audio if master_audio.exists() else None
+                    )
+                    if subtitled:
+                        sub_videos = [subtitled]
+                        print(f"   ✅ Subtítulos generados: {subtitled.name}")
+                    else:
+                        print("   ⚠️ Subtítulos fallaron — continuando sin subs")
+                except Exception as sub_err:
+                    print(f"   ⚠️ Error subtítulos: {sub_err}")
+        
+        # ═══════════════════════════════════════════
+        # COMPLETADO
+        # ═══════════════════════════════════════════
+        # Refrescar listas después del paso de subtítulos
         sub_videos = list(video_dir.glob("FINAL_SUB_*.mp4"))
         regular_videos = list(video_dir.glob("FINAL_*.mp4"))
-        # Filtrar para que regular_videos no incluya los SUB
         regular_videos = [v for v in regular_videos if "FINAL_SUB_" not in v.name]
         
         if sub_videos:
