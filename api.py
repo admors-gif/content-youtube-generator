@@ -92,28 +92,40 @@ async def trigger_production(request: Request, background_tasks: BackgroundTasks
     }
 
 def run_script(topic, agent_file, project_id):
-    print(f"🚀 [API] Starting background job for '{topic}' with '{agent_file}' (Project: {project_id})...")
+    print(f"🚀 [API] Starting background job for '{topic}' with '{agent_file}' (Project: {project_id})...", flush=True)
     try:
-        # Ejecutamos el script igual que en consola
-        args = ["python", "scripts/generate_content.py", "--agent", agent_file]
-        if project_id:
-            args.extend(["--project-id", project_id])
-        args.append(topic)
-        
-        process = subprocess.run(
-            args,
-            check=False,
-            capture_output=True,
-            text=True
-        )
-        print("✅ [API] Script finished.")
-        print("--- STDOUT ---")
-        print(process.stdout)
-        if process.stderr:
-            print("--- STDERR ---")
-            print(process.stderr)
+        # Import directo — sin subprocess, para que los errores aparezcan en logs
+        import sys
+        sys.path.insert(0, "/app")
+        from scripts.generate_content import run_full_pipeline
+        result = run_full_pipeline(topic, agent_file, project_id)
+        if result:
+            print(f"✅ [API] Pipeline completed successfully for '{topic}'", flush=True)
+        else:
+            print(f"⚠️ [API] Pipeline returned None for '{topic}' — check Firebase for error status", flush=True)
     except Exception as e:
-        print(f"❌ [API] Error running script: {e}")
+        import traceback
+        print(f"❌ [API] Error running script: {e}", flush=True)
+        traceback.print_exc()
+        # Reportar error a Firebase
+        try:
+            import firebase_admin
+            from firebase_admin import credentials, firestore
+            try:
+                firebase_admin.get_app()
+            except ValueError:
+                cred_path = "/app/firebase-admin.json"
+                if os.path.exists(cred_path):
+                    cred = credentials.Certificate(cred_path)
+                    firebase_admin.initialize_app(cred)
+            db = firestore.client()
+            db.collection("projects").document(project_id).update({
+                "status": "error",
+                "progress.stepName": f"Error: {str(e)[:150]}",
+                "progress.percent": 0,
+            })
+        except Exception as fb_err:
+            print(f"❌ [API] Also failed to report error to Firebase: {fb_err}", flush=True)
 
 def run_production(project_id):
     """Ejecuta el pipeline cinemático: FLUX → ElevenLabs → Luma → Ken Burns → Ensamblaje."""
