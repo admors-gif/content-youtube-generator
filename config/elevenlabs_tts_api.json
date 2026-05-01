@@ -1,0 +1,47 @@
+{
+  "1": {
+    "inputs": {
+      "voice": "Josh"
+    },
+    "class_type": "ElevenLabsVoiceSelector",
+    "_meta": {
+      "title": "Selector de Voz ElevenLabs"
+    }
+  },
+  "2": {
+    "inputs": {
+      "text": "Texto de prueba para narración.",
+      "stability": 0.65,
+      "apply_text_normalization": "auto",
+      "model": "eleven_multilingual_v2",
+      "language_code": "es",
+      "seed": 1,
+      "output_format": "mp3_44100_192",
+      "speed": 0.95,
+      "similarity_boost": 0.80,
+      "use_speaker_boost": false,
+      "style": 0.05,
+      "voice": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "ElevenLabsTextToSpeech",
+    "_meta": {
+      "title": "ElevenLabs Text to Speech"
+    }
+  },
+  "3": {
+    "inputs": {
+      "filename_prefix": "narration",
+      "audio": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "SaveAudio",
+    "_meta": {
+      "title": "Guardar Audio"
+    }
+  }
+}

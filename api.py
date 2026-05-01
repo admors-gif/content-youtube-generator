@@ -116,12 +116,14 @@ def run_script(topic, agent_file, project_id):
         print(f"❌ [API] Error running script: {e}")
 
 def run_production(project_id):
-    """Ejecuta el pipeline de producción completo con reportes a Firebase."""
+    """Ejecuta el pipeline cinemático: FLUX → ElevenLabs → Luma → Ken Burns → Ensamblaje."""
     import firebase_admin
     from firebase_admin import credentials, firestore
     from pathlib import Path
+    import threading
+    import time
     
-    print(f"🏭 [PRODUCE] Starting production for project {project_id}...")
+    print(f"🏭 [PRODUCE] Starting CINEMATIC production for project {project_id}...")
     
     # Inicializar Firebase si no está activo
     try:
@@ -155,173 +157,163 @@ def run_production(project_id):
         
         title = project.get("title", "video_sin_titulo")
         scenes = project.get("scenes", [])
-        script_text = project.get("script", {}).get("plain", "")
+        agent_id = project.get("agentId", "")
         
         if not scenes:
             update_progress(0, "Error: No hay escenas visuales", "error")
             return
         
-        if not script_text:
-            update_progress(0, "Error: No hay guión aprobado", "error")
-            return
-        
-        # Crear JSON temporal para los scripts de producción
+        # Crear JSON compatible con factory.py
         import re
         safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', title.replace(" ", "_"))
         
+        # Mapear scenes de Firestore al formato factory.py
+        factory_scenes = []
+        for s in scenes:
+            factory_scenes.append({
+                "scene_number": s.get("scene_number", s.get("sceneNumber", 0)),
+                "prompt": s.get("prompt", ""),
+                "narration": s.get("narration_text", s.get("narration", "")),
+            })
+        
         temp_json = {
             "topic": title,
-            "script_plain": script_text,
-            "video_scenes": scenes,
+            "agent": agent_id,
+            "video_scenes": factory_scenes,
             "seo_metadata": project.get("seo_metadata", {"title": title})
         }
         temp_path = f"/app/output/scripts/PRODUCE_{safe_title}.json"
+        os.makedirs(os.path.dirname(temp_path), exist_ok=True)
         with open(temp_path, "w", encoding="utf-8") as f:
             json.dump(temp_json, f, ensure_ascii=False, indent=2)
         
         # ═══════════════════════════════════════════
-        # PASO 1: Generar Imágenes con FLUX + Ken Burns
+        # Directorios del proyecto
         # ═══════════════════════════════════════════
-        update_progress(5, f"Generando {len(scenes)} imágenes con FLUX...")
-        
-        # Ejecutar pipeline en background con monitoreo de archivos
-        import threading
-        from pathlib import Path
-        
         images_dir = Path(f"/app/output/videos/{safe_title}/images")
         images_dir.mkdir(parents=True, exist_ok=True)
         
-        # Hilo que monitorea imágenes creadas y actualiza Firebase
+        # ═══════════════════════════════════════════
+        # PASO 1: Generar Imágenes con FLUX (5% → 40%)
+        # ═══════════════════════════════════════════
+        update_progress(5, f"Generando {len(scenes)} imágenes con FLUX...")
+        
+        # Monitorear progreso de imágenes
         stop_monitoring = threading.Event()
         
         def monitor_images():
             vps_base = os.environ.get("VPS_PUBLIC_URL", "http://100.99.207.113:8085")
             reported = set()
             while not stop_monitoring.is_set():
-                import time
                 time.sleep(8)
-                # Buscar nuevas imágenes
                 existing = sorted(images_dir.glob("scene_*.png"))
                 for img in existing:
                     if img.name not in reported and img.stat().st_size > 1000:
                         reported.add(img.name)
-                        # Extraer número de escena
                         try:
                             num = int(img.stem.split("_")[1])
                             image_url = f"{vps_base}/images/{safe_title}/{img.name}"
-                            # Actualizar la escena en Firebase
                             updated_scenes = doc_ref.get().to_dict().get("scenes", [])
                             for s in updated_scenes:
-                                if s.get("scene_number") == num:
+                                sn = s.get("scene_number", s.get("sceneNumber", 0))
+                                if sn == num:
                                     s["imageUrl"] = image_url
                                     break
                             doc_ref.update({"scenes": updated_scenes})
-                            
-                            # Actualizar progreso (5% a 45% basado en imágenes)
-                            pct = 5 + int((len(reported) / len(scenes)) * 40)
-                            update_progress(pct, f"Imagen {len(reported)}/{len(scenes)} generada")
+                            pct = 5 + int((len(reported) / len(scenes)) * 35)
+                            update_progress(pct, f"🎨 Imagen {len(reported)}/{len(scenes)} generada")
                         except Exception as e:
                             print(f"   ⚠️ Monitor error: {e}")
         
         monitor_thread = threading.Thread(target=monitor_images, daemon=True)
         monitor_thread.start()
         
-        # Ejecutar pipeline SOLO generación de imágenes (sin Ken Burns)
+        # factory.py con --images-only
         result = subprocess.run(
-            ["python", "scripts/production_pipeline.py", temp_path, "--images-only"],
-            capture_output=True, text=True, timeout=3600  # 1 hora max
+            ["python", "scripts/factory.py", temp_path, "--mode", "cinematico", "--images-only"],
+            capture_output=True, text=True, timeout=3600
         )
         
         stop_monitoring.set()
         monitor_thread.join(timeout=5)
         
         if result.returncode != 0:
-            update_progress(0, f"Error en generación de imágenes", "error")
+            update_progress(0, f"Error generando imágenes", "error")
             print(f"STDERR: {result.stderr[-500:]}")
             return
         
-        update_progress(45, "Imágenes FLUX listas ✅")
+        update_progress(40, "✅ Imágenes FLUX listas")
         
         # ═══════════════════════════════════════════
-        # PASO 2: Generar Audio TTS  
+        # PASO 2-4: Narración + Luma + Ken Burns + Ensamblaje (40% → 100%)
         # ═══════════════════════════════════════════
-        update_progress(50, "Generando narración con Google TTS...")
+        update_progress(45, "🎙️ Generando narración con ElevenLabs...")
+        
+        # Ejecutar factory.py completo (skip-images ya que las tenemos)
+        # Monitorear progreso por pasos
+        def monitor_factory():
+            """Monitorea los archivos generados para actualizar progreso."""
+            audio_dir = Path(f"/app/output/videos/{safe_title}/audio")
+            kb_dir = Path(f"/app/output/videos/{safe_title}/kenburns")
+            luma_dir = Path(f"/app/output/videos/{safe_title}/luma_clips")
+            
+            while not stop_monitoring.is_set():
+                time.sleep(5)
+                try:
+                    # Audio progress (45% → 65%)
+                    audio_count = len(list(audio_dir.glob("narration_*.mp3"))) if audio_dir.exists() else 0
+                    if audio_count > 0 and audio_count < len(scenes):
+                        pct = 45 + int((audio_count / len(scenes)) * 20)
+                        update_progress(pct, f"🎙️ Narración {audio_count}/{len(scenes)}")
+                    elif audio_count >= len(scenes):
+                        # Ken Burns progress (65% → 85%)
+                        kb_count = len(list(kb_dir.glob("scene_*.mp4"))) if kb_dir.exists() else 0
+                        if kb_count > 0 and kb_count < len(scenes):
+                            pct = 65 + int((kb_count / len(scenes)) * 15)
+                            update_progress(pct, f"🎬 Ken Burns {kb_count}/{len(scenes)}")
+                        elif kb_count >= len(scenes):
+                            # Luma progress (80% → 90%)
+                            luma_count = len(list(luma_dir.glob("luma_*.mp4"))) if luma_dir.exists() else 0
+                            if luma_count > 0:
+                                update_progress(85, f"🎥 Luma clips: {luma_count}")
+                except:
+                    pass
+        
+        stop_monitoring = threading.Event()
+        factory_monitor = threading.Thread(target=monitor_factory, daemon=True)
+        factory_monitor.start()
         
         result = subprocess.run(
-            ["python", "scripts/generate_google_tts.py", temp_path],
-            capture_output=True, text=True, timeout=600  # 10 min max
-        )
-        
-        if result.returncode != 0:
-            update_progress(45, f"Error en generación de audio", "error")
-            print(f"STDERR: {result.stderr[-500:]}")
-            return
-        
-        update_progress(60, "Audio narrado listo ✅")
-        
-        # ═══════════════════════════════════════════
-        # PASO 3: Calcular duración y generar Ken Burns
-        # ═══════════════════════════════════════════
-        # Medir duración del audio para sincronizar
-        audio_path = f"/app/output/videos/{safe_title}/audio/master_google_narration.mp3"
-        duration_per_scene = 5  # fallback
-        try:
-            probe = subprocess.run(
-                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                 "-of", "default=noprint_wrappers=1:nokey=1", audio_path],
-                capture_output=True, text=True, timeout=30
-            )
-            audio_duration = float(probe.stdout.strip())
-            duration_per_scene = round(audio_duration / len(scenes), 2)
-            print(f"🎯 Audio: {audio_duration:.1f}s / {len(scenes)} escenas = {duration_per_scene:.2f}s por escena")
-        except Exception as e:
-            print(f"⚠️ No se pudo medir audio, usando 5s default: {e}")
-        
-        update_progress(65, f"Aplicando Ken Burns ({duration_per_scene:.1f}s/escena)...")
-        
-        result = subprocess.run(
-            ["python", "scripts/production_pipeline.py", temp_path, "--kenburns-only", 
-             "--duration", str(duration_per_scene)],
+            ["python", "scripts/factory.py", temp_path, 
+             "--mode", "cinematico", "--luma-scenes", "8", "--skip-images"],
             capture_output=True, text=True, timeout=3600
         )
         
-        if result.returncode != 0:
-            update_progress(60, f"Error en Ken Burns", "error")
-            print(f"STDERR: {result.stderr[-500:]}")
-            return
-        
-        update_progress(85, "Ken Burns sincronizado ✅")
-        
-        # ═══════════════════════════════════════════
-        # PASO 4: Ensamblar Video Final
-        # ═══════════════════════════════════════════
-        update_progress(90, "Ensamblando video final...")
-        
-        result = subprocess.run(
-            ["python", "scripts/assemble_video.py", temp_path],
-            capture_output=True, text=True, timeout=600
-        )
+        stop_monitoring.set()
+        factory_monitor.join(timeout=5)
         
         if result.returncode != 0:
-            update_progress(85, f"Error en ensamblaje de video", "error")
+            update_progress(40, f"Error en pipeline cinemático", "error")
             print(f"STDERR: {result.stderr[-500:]}")
             return
         
         # ═══════════════════════════════════════════
         # COMPLETADO
         # ═══════════════════════════════════════════
-        final_video_path = f"/app/output/videos/{safe_title}/FINAL_{safe_title}.mp4"
+        final_video = list(Path(f"/app/output/videos/{safe_title}").glob("FINAL_*.mp4"))
+        final_path = str(final_video[0]) if final_video else ""
         
         doc_ref.update({
             "status": "completed",
             "progress.percent": 100,
-            "progress.stepName": "¡Video finalizado!",
-            "videoPath": final_video_path,
+            "progress.stepName": "🏆 ¡Video cinemático finalizado!",
+            "videoPath": final_path,
         })
         
-        print(f"🏆 [PRODUCE] Production complete! Video: {final_video_path}")
+        print(f"🏆 [PRODUCE] Cinematic production complete! {final_path}")
         
     except Exception as e:
         update_progress(0, f"Error: {str(e)[:100]}", "error")
         print(f"❌ [PRODUCE] Error: {e}")
+
 

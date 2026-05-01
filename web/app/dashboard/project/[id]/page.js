@@ -103,13 +103,14 @@ export default function ProjectDetailsPage({ params }) {
   // Funciones para guardar cambios en el script y disparar producción
   const handleSaveScript = async () => {
     const confirmed = confirm(
-      "✅ ¿Aprobar guión y comenzar producción?\n\n" +
-      "Esto iniciará:\n" +
+      "✅ ¿Aprobar guión y comenzar producción cinemática?\n\n" +
+      "Pipeline Cinemático:\n" +
       "1. 🎨 Generación de imágenes (FLUX)\n" +
-      "2. 🎬 Efecto Ken Burns (FFmpeg)\n" +
-      "3. 🎙️ Narración TTS (Google)\n" +
-      "4. 📽️ Ensamblaje de video final\n\n" +
-      "El proceso tarda ~30-60 min según la cantidad de escenas."
+      "2. 🎙️ Narración profesional (ElevenLabs)\n" +
+      "3. 🎥 Clips cinemáticos (Luma AI)\n" +
+      "4. 🎬 Ken Burns sincronizado\n" +
+      "5. 📽️ Ensamblaje final HD\n\n" +
+      "El proceso tarda ~10-15 min según la cantidad de escenas."
     );
     if (!confirmed) return;
 

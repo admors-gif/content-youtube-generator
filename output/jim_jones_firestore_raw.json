@@ -1,0 +1,1453 @@
+{
+  "name": "projects/content-factory-5cbcb/databases/(default)/documents/projects/Zpti2GnHN5y4rWF5j05M",
+  "fields": {
+    "voice": {
+      "mapValue": {
+        "fields": {
+          "model": {
+            "stringValue": "es-US-Neural2-A"
+          },
+          "pitch": {
+            "integerValue": "0"
+          },
+          "speed": {
+            "integerValue": "1"
+          },
+          "gender": {
+            "stringValue": "female"
+          }
+        }
+      }
+    },
+    "completedAt": {
+      "timestampValue": "2026-04-30T06:14:31.058Z"
+    },
+    "status": {
+      "stringValue": "completed"
+    },
+    "seo": {
+      "mapValue": {
+        "fields": {
+          "description": {
+            "stringValue": "El 18 de noviembre de 1978 ocurrió uno de los suicidios masivos más escalofriantes de la historia. 918 personas murieron en menos de una hora en Jonestown, Guyana.\n\nEn este documental reconstruimos los últimos momentos de la secta de Jim Jones, desde los primeros niños que bebieron el veneno hasta el silencio final que cubrió la selva guyanesa.\n\n⏰ CAPÍTULOS:\n0:00 - El día que cambió la historia\n3:45 - Quién era realmente Jim Jones\n8:20 - La construcción de Jonestown\n12:15 - Los últimos minutos de horror\n16:40 - El legado de una tragedia\n\n🔔 SUSCRÍBETE para más documentales históricos\n\n#Jonestown #JimJones #SuicidioMasivo #Sectas #Historia #DocumentalHistorico #Guyana #Tragedia #CultosReligiosos #HistoriaReal #DocumentalesEnEspañol #HistoriaNegra #CriminalHistory #TrueHistory #DarkHistory #SecretosOcultos #HistoriaMundial #DocumentalCompleto #HistoriaVeridica #CasosReales"
+          },
+          "title": {
+            "stringValue": "El Horror de Jonestown: 918 Muertos en 1 Hora (La Verdad Completa)"
+          },
+          "tags": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "Jonestown"
+                },
+                {
+                  "stringValue": "Jim Jones"
+                },
+                {
+                  "stringValue": "suicidio masivo"
+                },
+                {
+                  "stringValue": "sectas"
+                },
+                {
+                  "stringValue": "cultos religiosos"
+                },
+                {
+                  "stringValue": "Guyana"
+                },
+                {
+                  "stringValue": "1978"
+                },
+                {
+                  "stringValue": "tragedia"
+                },
+                {
+                  "stringValue": "historia real"
+                },
+                {
+                  "stringValue": "documental histórico"
+                },
+                {
+                  "stringValue": "documentales en español"
+                },
+                {
+                  "stringValue": "historia negra"
+                },
+                {
+                  "stringValue": "dark history"
+                },
+                {
+                  "stringValue": "true history"
+                },
+                {
+                  "stringValue": "criminal history"
+                },
+                {
+                  "stringValue": "casos reales"
+                },
+                {
+                  "stringValue": "pueblos del templo"
+                },
+                {
+                  "stringValue": "peoples temple"
+                },
+                {
+                  "stringValue": "mass suicide"
+                },
+                {
+                  "stringValue": "religious cults"
+                },
+                {
+                  "stringValue": "historia mundial"
+                },
+                {
+                  "stringValue": "documentary"
+                },
+                {
+                  "stringValue": "historical documentary"
+                },
+                {
+                  "stringValue": "tragedia histórica"
+                },
+                {
+                  "stringValue": "sectas destructivas"
+                },
+                {
+                  "stringValue": "lavado cerebral"
+                },
+                {
+                  "stringValue": "manipulación psicológica"
+                },
+                {
+                  "stringValue": "historia americana"
+                },
+                {
+                  "stringValue": "crímenes históricos"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "createdAt": {
+      "timestampValue": "2026-04-30T06:07:04.123Z"
+    },
+    "videoPath": {
+      "stringValue": "/app/output/videos/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/FINAL_Jim_Jones_y_el_suicidio_masivo_de_Jonestown.mp4"
+    },
+    "output": {
+      "mapValue": {}
+    },
+    "script": {
+      "mapValue": {
+        "fields": {
+          "tagged": {
+            "stringValue": "[serious, authoritative] El 18 de noviembre de 1978, a las 5:15 de la tarde, novecientas dieciocho personas se reunieron en el pabellón central de Jonestown, Guyana. [building intensity, dramatic] En menos de una hora, todos estarían muertos. [sad, reflective] Los niños fueron los primeros en beber el líquido color púrpura con sabor a uva. Sus padres los cargaron en brazos mientras convulsionaban, susurrándoles que todo estaría bien, que pronto estarían en un lugar mejor. [whispering] Los gritos se desvanecieron gradualmente hasta que solo quedó el silencio. [urgent, tense] Jim Jones observaba desde su silla, micrófono en mano, narrando cada momento como si fuera una ceremonia sagrada.\n\n[pause]\n\n[warm, nostalgic] Para el mundo exterior, Jim Jones era un visionario progresista. Un pastor que predicaba la igualdad racial en los años cincuenta, cuando hacerlo significaba amenazas de muerte. [excited, with wonder] Su iglesia, el Templo del Pueblo, era un refugio para los marginados: afroamericanos, ancianos abandonados, drogadictos en recuperación, personas LGBT rechazadas por sus familias. Jones adoptó niños de diferentes razas y los presentó como su \"familia arcoíris\". [serious, authoritative] Los medios lo alababan como un líder comunitario ejemplar. En San Francisco, políticos como Harvey Milk y Willie Brown buscaban su apoyo. [speaking slowly, with reverence] Parecía genuinamente comprometido con la justicia social, alimentando a miles de personas semanalmente, proporcionando vivienda a los desamparados, y creando empleos para quienes la sociedad había desechado. [building intensity, dramatic] Su carisma era magnético: hablaba con la pasión de Martin Luther King y la autoridad de un profeta bíblico. Quienes lo conocían describían una presencia que llenaba cualquier habitación, ojos que parecían ver directamente al alma, y una capacidad sobrenatural para recordar los nombres y problemas personales de cientos de seguidores.\n\n[pause]\n\n[calm, peaceful] James Warren Jones nació el 13 de mayo de 1931 en una cabaña decrépita en Indiana. [sad, reflective] Su padre, James Thurman Jones, era un veterano de la Primera Guerra Mundial incapacitado por los gases tóxicos y adicto al alcohol. Su madre, Lynetta Putnam, trabajaba en una fábrica y despreciaba abiertamente a su esposo. [whispering] El pequeño Jim crecía solo, hambriento de atención, fascinado obsesivamente con la muerte. [urgent, tense] A los cinco años, realizaba funerales elaborados para animales muertos que encontraba o, según algunos vecinos, que él mismo mataba. Predicaba a otros niños desde el porche de su casa, pero cuando no lo escuchaban, los golpeaba hasta que lloraran. [speaking slowly, with reverence] Su madre lo llamaba \"pequeño profeta\", alimentando su narcisismo incipiente. [serious, authoritative] En la escuela, era brillante pero cruel, manipulando a maestros con su encanto mientras aterrorizaba a compañeros más vulnerables. [deep breath] La pobreza y el rechazo paterno crearon en él una necesidad desesperada de control y adoración. [building intensity, dramatic] A los doce años, ya había decidido que el poder religioso era el camino hacia ambos.\n\n[serious, authoritative] Jones exhibía la tríada oscura de la personalidad con precisión clínica. Su narcisismo se manifestaba en la creencia grandiosa de ser el mesías reencarnado, comparándose constantemente con Cristo y afirmando que solo él podía salvar a la humanidad del holocausto nuclear inminente. [building intensity, dramatic] Su psicopatía se revelaba en la ausencia total de empatía genuina: mientras predicaba amor, experimentaba secretamente con drogas en sus seguidores, los separaba de sus familias, y confiscaba sus propiedades. [urgent, tense] Su maquiavelismo era magistral: utilizaba técnicas de control mental desarrolladas por décadas. Privaba a sus seguidores de sueño con reuniones de doce horas, los mantenía en estado de paranoia constante hablando de enemigos imaginarios, y empleaba castigos públicos humillantes que destruían la autoestima individual mientras reforzaban su autoridad absoluta. [whispering] Grababa sesiones íntimas de terapia para usar la información como chantaje emocional. [serious, authoritative] Creó un sistema de informantes internos donde padres reportaban a hijos y esposos traicionaban a esposas, fracturando systematicamente todos los vínculos que no lo incluyeran a él como centro.\n\n[pause] [sad, reflective] Sus víctimas seguían un patrón psicológico predecible. Buscaba deliberadamente a personas en crisis vital: madres solteras desesperadas por comunidad, ancianos abandonados por familias negligentes, minorías que habían experimentado discriminación sistemática, y jóvenes idealistas hambrientos de propósito. [warm, nostalgic] Les ofrecía exactamente lo que más necesitaban: pertenencia incondicional, propósito trascendental, y la promesa de ser especiales, elegidos por Dios mismo. [building intensity, dramatic] Una vez enganchados, implementaba técnicas de aislamiento progresivo. Primero, compromisos pequeños: asistir a reuniones, donar dinero modesto. Gradualmente, demandas mayores: mudarse cerca del templo, cortar contacto con familiares \"negativos\", entregar propiedades para la causa común. [urgent, tense] Para cuando se daban cuenta del control total, estaban completamente dependientes emocional, social y económicamente del grupo, sin recursos externos para escapar.\n\n[serious, authoritative] Los enablers de Jones fueron tan responsables como él mismo. Sus lugartenientes, como Marceline Jones su esposa y Carolyn Layton su amante, sabían perfectamente sobre los abusos físicos y sexuales, pero los justificaban como sacrificios necesarios para el bien mayor. [building intensity, dramatic] Miembros del consejo interno participaban activamente en sesiones de tortura psicológica llamadas \"reuniones de catarsis\", donde Jones humillaba públicamente a disidentes potenciales. [sad, reflective] Los políticos de San Francisco ignoraron reportes de ex-miembros sobre condiciones de esclavitud porque los votos del Templo del Pueblo eran políticamente valiosos. Los medios de comunicación rechazaron investigar acusaciones serias porque Jones había cultivado cuidadosamente su imagen progresista. [whispering] Incluso familiares fuera del culto frecuentemente minimizaban las súplicas desesperadas de ayuda de sus seres queridos, prefiriendo creer que estaban involucrados en una fase religiosa temporal en lugar de confrontar la realidad aterradora de que habían perdido para siempre a quienes amaban.\n\n[pause]\n\n[urgent, tense] El fin comenzó cuando el congresista Leo Ryan llegó a Jonestown el 17 de noviembre de 1978, respondiendo a quejas de familiares preocupados. Jones había pasado meses preparando a sus seguidores para este momento, diciéndoles que el gobierno estadounidense planeaba destruir su paraíso socialista y separar a las familias. [building intensity, dramatic] Cuando varios miembros pidieron secretamente salir con Ryan, Jones interpretó esto como la traición final que había profetizado. Su paranoia, alimentada por años de abuso de anfetaminas, se desató completamente. [speaking quickly] Ordenó el asesinato de Ryan y su delegación en la pista de aterrizaje, luego regresó al campamento para implementar su \"Solución Revolucionaria Final\": el suicidio masivo que había estado practicando mediante simulacros durante meses. [serious, authoritative] Su máscara de líder benevolente se desintegró por completo, revelando al tirano megalómano que siempre había estado debajo.\n\n[pause]\n\n[deep breath] Un análisis forense moderno diagnosticaría a Jones con trastorno narcisista de personalidad maligno, combinado con rasgos psicopáticos antisociales y síntomas de trastorno paranoide inducido por sustancias. [serious, authoritative] Su cerebro, moldeado por trauma infantil temprano y décadas de abuso de drogas, había perdido la capacidad de procesamiento empático normal. Las neuroimágenes revelarían probablemente atrofia en el córtex prefrontal, responsable de la regulación emocional y el juicio moral. [building intensity, dramatic] Su comportamiento sexual compulsivo y sadismo creciente indicaban desregulación dopaminérgica severa. [whispering] Más perturbadoramente, exhibía lo que los psicólogos llaman \"cognición compartimental\": la capacidad de mantener sistemas de creencias completamente contradictorios sin experimentar disonancia cognitiva, permitiéndole creer simultáneamente en su propia divinidad mientras planificaba conscientemente el asesinato masivo de sus seguidores.\n\n[serious, authoritative] Lo más inquietante de Jim Jones no era su maldad obvia, sino su capacidad de despertar lo mejor y lo peor de la naturaleza humana simultáneamente. [building intensity, dramatic] Vemos ecos de sus técnicas en líderes empresariales tóxicos que exigen lealtad total mientras explotan empleados, en relaciones románticas donde el amor se weaponiza para control, en movimientos políticos que prometen pureza mientras practican crueldad. [urgent, tense] Su historia nos obliga a preguntarnos: ¿cuánto de nuestro deseo de pertenencia, propósito y trascendencia nos hace vulnerables a manipuladores carismáticos? ¿En qué momento nuestra necesidad de creer se vuelve más importante que nuestra capacidad de cuestionar?\n\n[pause]\n\n[sad, reflective] La tragedia de Jonestown permanece como el recordatorio más visceral de que el mal raramente llega anunciándose como tal. [speaking slowly, with reverence] Llega prometiendo salvación, ofreciendo comunidad, predicando amor. [whispering] Y cuando finalmente revela su verdadera naturaleza, ya es demasiado tarde para escapar. [serious, authoritative] Si este análisis te perturbó tanto como debería, suscríbete para más exploraciones en la psicología más oscura de la humanidad. [deep breath] Porque entender estos patrones no es morbosidad: es supervivencia."
+          },
+          "approved": {
+            "booleanValue": true
+          },
+          "estimatedMinutes": {
+            "doubleValue": 8.4
+          },
+          "plain": {
+            "stringValue": "El 18 de noviembre de 1978, a las 5:15 de la tarde, novecientas dieciocho personas se reunieron en el pabellón central de Jonestown, Guyana. En menos de una hora, todos estarían muertos. Los niños fueron los primeros en beber el líquido color púrpura con sabor a uva. Sus padres los cargaron en brazos mientras convulsionaban, susurrándoles que todo estaría bien, que pronto estarían en un lugar mejor. Los gritos se desvanecieron gradualmente hasta que solo quedó el silencio. Jim Jones observaba desde su silla, micrófono en mano, narrando cada momento como si fuera una ceremonia sagrada.\n\nPara el mundo exterior, Jim Jones era un visionario progresista. Un pastor que predicaba la igualdad racial en los años cincuenta, cuando hacerlo significaba amenazas de muerte. Su iglesia, el Templo del Pueblo, era un refugio para los marginados: afroamericanos, ancianos abandonados, drogadictos en recuperación, personas LGBT rechazadas por sus familias. Jones adoptó niños de diferentes razas y los presentó como su \"familia arcoíris\". Los medios lo alababan como un líder comunitario ejemplar. En San Francisco, políticos como Harvey Milk y Willie Brown buscaban su apoyo. Parecía genuinamente comprometido con la justicia social, alimentando a miles de personas semanalmente, proporcionando vivienda a los desamparados, y creando empleos para quienes la sociedad había desechado. Su carisma era magnético: hablaba con la pasión de Martin Luther King y la autoridad de un profeta bíblico. Quienes lo conocían describían una presencia que llenaba cualquier habitación, ojos que parecían ver directamente al alma, y una capacidad sobrenatural para recordar los nombres y problemas personales de cientos de seguidores.\n\nJames Warren Jones nació el 13 de mayo de 1931 en una cabaña decrépita en Indiana. Su padre, James Thurman Jones, era un veterano de la Primera Guerra Mundial incapacitado por los gases tóxicos y adicto al alcohol. Su madre, Lynetta Putnam, trabajaba en una fábrica y despreciaba abiertamente a su esposo. El pequeño Jim crecía solo, hambriento de atención, fascinado obsesivamente con la muerte. A los cinco años, realizaba funerales elaborados para animales muertos que encontraba o, según algunos vecinos, que él mismo mataba. Predicaba a otros niños desde el porche de su casa, pero cuando no lo escuchaban, los golpeaba hasta que lloraran. Su madre lo llamaba \"pequeño profeta\", alimentando su narcisismo incipiente. En la escuela, era brillante pero cruel, manipulando a maestros con su encanto mientras aterrorizaba a compañeros más vulnerables. La pobreza y el rechazo paterno crearon en él una necesidad desesperada de control y adoración. A los doce años, ya había decidido que el poder religioso era el camino hacia ambos.\n\nJones exhibía la tríada oscura de la personalidad con precisión clínica. Su narcisismo se manifestaba en la creencia grandiosa de ser el mesías reencarnado, comparándose constantemente con Cristo y afirmando que solo él podía salvar a la humanidad del holocausto nuclear inminente. Su psicopatía se revelaba en la ausencia total de empatía genuina: mientras predicaba amor, experimentaba secretamente con drogas en sus seguidores, los separaba de sus familias, y confiscaba sus propiedades. Su maquiavelismo era magistral: utilizaba técnicas de control mental desarrolladas por décadas. Privaba a sus seguidores de sueño con reuniones de doce horas, los mantenía en estado de paranoia constante hablando de enemigos imaginarios, y empleaba castigos públicos humillantes que destruían la autoestima individual mientras reforzaban su autoridad absoluta. Grababa sesiones íntimas de terapia para usar la información como chantaje emocional. Creó un sistema de informantes internos donde padres reportaban a hijos y esposos traicionaban a esposas, fracturando systematicamente todos los vínculos que no lo incluyeran a él como centro.\n\nSus víctimas seguían un patrón psicológico predecible. Buscaba deliberadamente a personas en crisis vital: madres solteras desesperadas por comunidad, ancianos abandonados por familias negligentes, minorías que habían experimentado discriminación sistemática, y jóvenes idealistas hambrientos de propósito. Les ofrecía exactamente lo que más necesitaban: pertenencia incondicional, propósito trascendental, y la promesa de ser especiales, elegidos por Dios mismo. Una vez enganchados, implementaba técnicas de aislamiento progresivo. Primero, compromisos pequeños: asistir a reuniones, donar dinero modesto. Gradualmente, demandas mayores: mudarse cerca del templo, cortar contacto con familiares \"negativos\", entregar propiedades para la causa común. Para cuando se daban cuenta del control total, estaban completamente dependientes emocional, social y económicamente del grupo, sin recursos externos para escapar.\n\nLos enablers de Jones fueron tan responsables como él mismo. Sus lugartenientes, como Marceline Jones su esposa y Carolyn Layton su amante, sabían perfectamente sobre los abusos físicos y sexuales, pero los justificaban como sacrificios necesarios para el bien mayor. Miembros del consejo interno participaban activamente en sesiones de tortura psicológica llamadas \"reuniones de catarsis\", donde Jones humillaba públicamente a disidentes potenciales. Los políticos de San Francisco ignoraron reportes de ex-miembros sobre condiciones de esclavitud porque los votos del Templo del Pueblo eran políticamente valiosos. Los medios de comunicación rechazaron investigar acusaciones serias porque Jones había cultivado cuidadosamente su imagen progresista. Incluso familiares fuera del culto frecuentemente minimizaban las súplicas desesperadas de ayuda de sus seres queridos, prefiriendo creer que estaban involucrados en una fase religiosa temporal en lugar de confrontar la realidad aterradora de que habían perdido para siempre a quienes amaban.\n\nEl fin comenzó cuando el congresista Leo Ryan llegó a Jonestown el 17 de noviembre de 1978, respondiendo a quejas de familiares preocupados. Jones había pasado meses preparando a sus seguidores para este momento, diciéndoles que el gobierno estadounidense planeaba destruir su paraíso socialista y separar a las familias. Cuando varios miembros pidieron secretamente salir con Ryan, Jones interpretó esto como la traición final que había profetizado. Su paranoia, alimentada por años de abuso de anfetaminas, se desató completamente. Ordenó el asesinato de Ryan y su delegación en la pista de aterrizaje, luego regresó al campamento para implementar su \"Solución Revolucionaria Final\": el suicidio masivo que había estado practicando mediante simulacros durante meses. Su máscara de líder benevolente se desintegró por completo, revelando al tirano megalómano que siempre había estado debajo.\n\nUn análisis forense moderno diagnosticaría a Jones con trastorno narcisista de personalidad maligno, combinado con rasgos psicopáticos antisociales y síntomas de trastorno paranoide inducido por sustancias. Su cerebro, moldeado por trauma infantil temprano y décadas de abuso de drogas, había perdido la capacidad de procesamiento empático normal. Las neuroimágenes revelarían probablemente atrofia en el córtex prefrontal, responsable de la regulación emocional y el juicio moral. Su comportamiento sexual compulsivo y sadismo creciente indicaban desregulación dopaminérgica severa. Más perturbadoramente, exhibía lo que los psicólogos llaman \"cognición compartimental\": la capacidad de mantener sistemas de creencias completamente contradictorios sin experimentar disonancia cognitiva, permitiéndole creer simultáneamente en su propia divinidad mientras planificaba conscientemente el asesinato masivo de sus seguidores.\n\nLo más inquietante de Jim Jones no era su maldad obvia, sino su capacidad de despertar lo mejor y lo peor de la naturaleza humana simultáneamente. Vemos ecos de sus técnicas en líderes empresariales tóxicos que exigen lealtad total mientras explotan empleados, en relaciones románticas donde el amor se weaponiza para control, en movimientos políticos que prometen pureza mientras practican crueldad. Su historia nos obliga a preguntarnos: ¿cuánto de nuestro deseo de pertenencia, propósito y trascendencia nos hace vulnerables a manipuladores carismáticos? ¿En qué momento nuestra necesidad de creer se vuelve más importante que nuestra capacidad de cuestionar?\n\nLa tragedia de Jonestown permanece como el recordatorio más visceral de que el mal raramente llega anunciándose como tal. Llega prometiendo salvación, ofreciendo comunidad, predicando amor. Y cuando finalmente revela su verdadera naturaleza, ya es demasiado tarde para escapar. Si este análisis te perturbó tanto como debería, suscríbete para más exploraciones en la psicología más oscura de la humanidad. Porque entender estos patrones no es morbosidad: es supervivencia."
+          },
+          "wordCount": {
+            "integerValue": "1257"
+          }
+        }
+      }
+    },
+    "scenes": {
+      "arrayValue": {
+        "values": [
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0001.png"
+                },
+                "narration_context": {
+                  "stringValue": "La tragedia de Jonestown comienza"
+                },
+                "scene_number": {
+                  "integerValue": "1"
+                },
+                "timestamp": {
+                  "stringValue": "00:00-00:05"
+                },
+                "narration_text": {
+                  "stringValue": "El 18 de noviembre de 1978, a las 5:15 de la tarde, novecientas dieciocho personas se reunieron en el pabellón central de Jonestown, Guyana."
+                },
+                "prompt": {
+                  "stringValue": "A massive wooden pavilion in a tropical clearing at golden hour. Hundreds of people of diverse ages and ethnicities gather in organized rows, filling the entire structure. The camera starts with an extreme wide aerial shot showing the entire compound surrounded by dense jungle, then performs a smooth crane movement descending toward the pavilion entrance. People walk slowly toward their seats, some holding hands, others carrying small children. Warm sunset light filters through the wooden slats, casting long shadows across weathered benches. Documentary-style cinematography, handheld subtle movement, 1970s film stock aesthetic with natural grain, muted color palette, photorealistic details."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "timestamp": {
+                  "stringValue": "00:05-00:10"
+                },
+                "narration_text": {
+                  "stringValue": "En menos de una hora, todos estarían muertos. Los niños fueron los primeros en beber el líquido color púrpura con sabor a uva."
+                },
+                "prompt": {
+                  "stringValue": "Interior of a crowded wooden pavilion at dusk. A close-up shot of multiple paper cups filled with purple liquid being passed from hand to hand. The camera performs a slow tracking shot along a row of seated families, focusing on worried adult faces and innocent children. One small child reaches for a cup while sitting on their parent's lap. Natural lighting dims as sunset approaches through the windows. Handheld documentary style, shallow depth of field, 16mm film texture, desaturated colors emphasizing browns and muted purples, authentic 1970s period details visible in clothing."
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0002.png"
+                },
+                "narration_context": {
+                  "stringValue": "La hora final se acerca"
+                },
+                "scene_number": {
+                  "integerValue": "2"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "timestamp": {
+                  "stringValue": "00:10-00:15"
+                },
+                "narration_text": {
+                  "stringValue": "Sus padres los cargaron en brazos mientras convulsionaban, susurrándoles que todo estaría bien, que pronto estarían en un lugar mejor."
+                },
+                "prompt": {
+                  "stringValue": "A medium shot inside the dim pavilion showing a parent gently cradling their sleeping child, rocking slowly back and forth. The camera performs an intimate dolly-in toward their faces, capturing a tender moment of a parent whispering comforting words. Other families sit nearby in similar embraces, creating a pattern of protective gestures. Soft ambient light from setting sun creates silhouettes. Cinematic shallow focus, extremely gentle camera movement, warm color grading despite somber mood, 35mm film aesthetic, deeply emotional yet respectful framing."
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0003.png"
+                },
+                "narration_context": {
+                  "stringValue": "Los últimos momentos entre padres e hijos"
+                },
+                "scene_number": {
+                  "integerValue": "3"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "prompt": {
+                  "stringValue": "A wide shot of the pavilion interior, now eerily quiet and still. In the background, one man sits elevated on a simple wooden chair, holding a vintage microphone. The camera executes a slow zoom toward his silhouette against the fading daylight. His figure remains motionless, surveying the silent crowd before him. Dust particles float through the last rays of sunlight. Atmospheric cinematography, static tripod shot with subtle zoom, high contrast lighting creating dramatic shadows, period-accurate 1970s details, somber documentary aesthetic."
+                },
+                "narration_text": {
+                  "stringValue": "Los gritos se desvanecieron gradualmente hasta que solo quedó el silencio. Jim Jones observaba desde su silla, micrófono en mano, narrando cada momento como si fuera una ceremonia sagrada."
+                },
+                "timestamp": {
+                  "stringValue": "00:15-00:20"
+                },
+                "scene_number": {
+                  "integerValue": "4"
+                },
+                "narration_context": {
+                  "stringValue": "El silencio final y Jim Jones observando"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0004.png"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0005.png"
+                },
+                "scene_number": {
+                  "integerValue": "5"
+                },
+                "narration_context": {
+                  "stringValue": "Jim Jones como líder carismático"
+                },
+                "timestamp": {
+                  "stringValue": "00:20-00:25"
+                },
+                "prompt": {
+                  "stringValue": "A 1950s church interior with mixed-race congregation. One charismatic preacher in a dark suit stands at a wooden pulpit, gesturing passionately while speaking. The camera starts with a low angle shot emphasizing his commanding presence, then slowly pulls back to reveal an integrated audience of Black and white churchgoers sitting together. Bright morning light streams through stained glass windows, creating colorful patterns. Period-accurate cinematography mimicking 1950s documentary style, warm sepia-toned color grading, authentic period costumes and hairstyles, 16mm film grain texture."
+                },
+                "narration_text": {
+                  "stringValue": "Para el mundo exterior, Jim Jones era un visionario progresista. Un pastor que predicaba la igualdad racial en los años cincuenta, cuando hacerlo significaba amenazas de muerte."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_text": {
+                  "stringValue": "Su iglesia, el Templo del Pueblo, era un refugio para los marginados: afroamericanos, ancianos abandonados, drogadictos en recuperación, personas LGBT rechazadas por sus familias."
+                },
+                "prompt": {
+                  "stringValue": "A welcoming church community center filled with diverse people. The camera performs a smooth tracking shot through the space, showing elderly people being served meals, young people in recovery circles, and families of all backgrounds interacting warmly. A large banner reads 'Peoples Temple Welcomes All'. Natural indoor lighting creates a warm, safe atmosphere. Handheld documentary style capturing authentic moments, soft focus on background activities, 1970s color palette with earth tones, genuine expressions of community and belonging, cinematic verité approach."
+                },
+                "timestamp": {
+                  "stringValue": "00:25-00:30"
+                },
+                "narration_context": {
+                  "stringValue": "El Templo del Pueblo como refugio"
+                },
+                "scene_number": {
+                  "integerValue": "6"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0006.png"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0007.png"
+                },
+                "narration_context": {
+                  "stringValue": "La familia arcoíris de Jones"
+                },
+                "scene_number": {
+                  "integerValue": "7"
+                },
+                "timestamp": {
+                  "stringValue": "00:30-00:35"
+                },
+                "narration_text": {
+                  "stringValue": "Jones adoptó niños de diferentes razas y los presentó como su 'familia arcoíris'. Los medios lo alababan como un líder comunitario ejemplar."
+                },
+                "prompt": {
+                  "stringValue": "A sunny outdoor press conference in 1970s San Francisco. One man in sunglasses stands with seven children of different ethnicities arranged around him for photographers. The camera starts tight on flashing press cameras, then pulls back to reveal the full family portrait scene. Reporters hold microphones and notepads, capturing the moment. Bright California sunshine, authentic 1970s fashion and hairstyles, documentary photography style with period-appropriate color saturation, multiple press photographers visible in frame, civic building backdrop."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "timestamp": {
+                  "stringValue": "00:35-00:40"
+                },
+                "prompt": {
+                  "stringValue": "San Francisco City Hall steps, 1970s. A community leader shakes hands with well-dressed politicians while crowds gather. The camera captures a dynamic dolly shot moving through the crowd, showing people holding 'Peoples Temple' signs. In the foreground, volunteers distribute food from long tables to a diverse line of people. Bright midday sun, authentic 1970s political rally atmosphere, period-accurate suits and fashion, documentary-style handheld movement, saturated Kodachrome color aesthetic, visible San Francisco architecture."
+                },
+                "narration_text": {
+                  "stringValue": "En San Francisco, políticos como Harvey Milk y Willie Brown buscaban su apoyo. Parecía genuinamente comprometido con la justicia social, alimentando a miles de personas semanalmente,"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0008.png"
+                },
+                "scene_number": {
+                  "integerValue": "8"
+                },
+                "narration_context": {
+                  "stringValue": "Apoyo político en San Francisco"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0009.png"
+                },
+                "scene_number": {
+                  "integerValue": "9"
+                },
+                "narration_context": {
+                  "stringValue": "Ayuda a los necesitados"
+                },
+                "timestamp": {
+                  "stringValue": "00:40-00:45"
+                },
+                "prompt": {
+                  "stringValue": "A busy community center where people receive housing assignments and job placement help. The camera follows one charismatic man in a suit moving through the space, touching shoulders, making eye contact, radiating confidence. He stops at different desks where volunteers help homeless individuals fill out paperwork. Warm fluorescent lighting typical of 1970s offices, wood paneling visible, authentic period details in clothing and decor. Smooth steadicam movement, medium depth of field, documentary realism, muted color palette."
+                },
+                "narration_text": {
+                  "stringValue": "proporcionando vivienda a los desamparados, y creando empleos para quienes la sociedad había desechado. Su carisma era magnético:"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0010.png"
+                },
+                "narration_context": {
+                  "stringValue": "El carisma de Jones"
+                },
+                "scene_number": {
+                  "integerValue": "10"
+                },
+                "timestamp": {
+                  "stringValue": "00:45-00:50"
+                },
+                "narration_text": {
+                  "stringValue": "hablaba con la pasión de Martin Luther King y la autoridad de un profeta bíblico. Quienes lo conocían describían una presencia que llenaba cualquier habitación,"
+                },
+                "prompt": {
+                  "stringValue": "Inside a packed church, one man at the pulpit delivers a passionate sermon. The camera starts with an extreme close-up of his expressive face, then slowly pulls back revealing hundreds of mesmerized listeners. His animated gestures command the space as he speaks into a vintage microphone. Dramatic stage lighting creates a halo effect, congregation members lean forward captivated. Classic 1970s church interior, warm tungsten lighting, shallow depth of field focusing on the speaker, cinematic framing emphasizing his commanding presence."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_text": {
+                  "stringValue": "ojos que parecían ver directamente al alma, y una capacidad sobrenatural para recordar los nombres y problemas personales de cientos de seguidores."
+                },
+                "prompt": {
+                  "stringValue": "An intimate church gathering where one man moves through a crowd, making intense eye contact with individuals. The camera captures extreme close-ups of his penetrating gaze alternating with reaction shots of moved congregants. He stops to whisper personal words to different people who react emotionally. Soft church lighting, handheld camera creating intimate feeling, shallow focus isolating interactions, warm color temperature, 1970s clothing and hairstyles, documentary-style naturalistic movement, emphasis on human connections and emotional responses."
+                },
+                "timestamp": {
+                  "stringValue": "00:50-00:55"
+                },
+                "narration_context": {
+                  "stringValue": "Los ojos penetrantes de Jones"
+                },
+                "scene_number": {
+                  "integerValue": "11"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0011.png"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0012.png"
+                },
+                "scene_number": {
+                  "integerValue": "12"
+                },
+                "narration_context": {
+                  "stringValue": "El nacimiento de Jones"
+                },
+                "timestamp": {
+                  "stringValue": "00:55-01:00"
+                },
+                "prompt": {
+                  "stringValue": "A weathered wooden cabin in rural 1930s Indiana, surrounded by bare trees and muddy ground. The camera starts with a wide establishing shot of the dilapidated structure, then slowly pushes in toward a foggy window. Through the window glass, shadowy figures move inside the dimly lit interior. A man in worn military clothing sits in a rocking chair on the porch. Overcast sky, depression-era atmosphere, desaturated color palette mimicking old photographs, static camera with subtle push-in, period-accurate architectural details, melancholic mood."
+                },
+                "narration_text": {
+                  "stringValue": "James Warren Jones nació el 13 de mayo de 1931 en una cabaña decrépita en Indiana. Su padre, James Thurman Jones, era un veterano de la Primera Guerra Mundial"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "timestamp": {
+                  "stringValue": "01:00-01:05"
+                },
+                "narration_text": {
+                  "stringValue": "incapacitado por los gases tóxicos y adicto al alcohol. Su madre, Lynetta Putnam, trabajaba en una fábrica y despreciaba abiertamente a su esposo."
+                },
+                "prompt": {
+                  "stringValue": "Interior of a 1930s factory with rows of women workers at industrial machines. The camera tracks along the production line, focusing on one stern-faced woman in work clothes operating equipment. Through dirty factory windows, the late afternoon light creates harsh shadows. The woman glances disapprovingly at a faded photograph tucked into her workstation. Period-accurate industrial setting, authentic 1930s work attire, documentary-style camera movement, muted color palette with browns and grays, atmospheric factory smoke and steam visible."
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0013.png"
+                },
+                "narration_context": {
+                  "stringValue": "Los padres de Jones"
+                },
+                "scene_number": {
+                  "integerValue": "13"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_context": {
+                  "stringValue": "La infancia solitaria de Jones"
+                },
+                "scene_number": {
+                  "integerValue": "14"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0014.png"
+                },
+                "narration_text": {
+                  "stringValue": "El pequeño Jim crecía solo, hambriento de atención, fascinado obsesivamente con la muerte. A los cinco años, realizaba funerales elaborados para animales muertos"
+                },
+                "prompt": {
+                  "stringValue": "A small boy alone in a rural backyard, arranging tiny wooden crosses in neat rows. The camera starts with an overhead shot of his makeshift cemetery, then tilts down to show him solemnly placing flowers. He wears suspenders and worn clothes typical of 1930s poverty. Dead leaves scatter across the muddy ground. Overcast lighting creates somber mood, static camera with slow tilt movement, depression-era setting, muted autumn colors, authentic period details in clothing and environment, melancholic atmosphere."
+                },
+                "timestamp": {
+                  "stringValue": "01:05-01:10"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "timestamp": {
+                  "stringValue": "01:10-01:15"
+                },
+                "narration_text": {
+                  "stringValue": "que encontraba o, según algunos vecinos, que él mismo mataba. Predicaba a otros niños desde el porche de su casa, pero cuando no lo escuchaban, los golpeaba hasta que lloraran."
+                },
+                "prompt": {
+                  "stringValue": "A rickety wooden porch where a young boy stands on a crate, gesturing dramatically to a small group of reluctant neighborhood children. The camera captures him from a low angle, emphasizing his commanding position despite his small stature. Some children start to walk away, and his expression changes from animated to frustrated. Rural 1930s setting, late afternoon golden hour light, handheld camera suggesting documentary observation, authentic period clothing with patches and worn fabrics, naturalistic lighting, subtle camera movement."
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0015.png"
+                },
+                "narration_context": {
+                  "stringValue": "Los funerales de animales"
+                },
+                "scene_number": {
+                  "integerValue": "15"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_text": {
+                  "stringValue": "Su madre lo llamaba 'pequeño profeta', alimentando su narcisismo incipiente. En la escuela, era brillante pero cruel, manipulando a maestros con su encanto"
+                },
+                "prompt": {
+                  "stringValue": "Inside a 1930s one-room schoolhouse, a young boy stands at the chalkboard solving complex equations while the teacher watches admiringly. The camera slowly dollies in on his confident smirk as he turns to face the class. Other students sit at worn wooden desks looking uncomfortable. Sunlight streams through tall windows creating dramatic light shafts. Period-accurate classroom details, vintage educational posters on walls, formal 1930s school attire, classic cinematography style, warm but slightly unsettling atmosphere."
+                },
+                "timestamp": {
+                  "stringValue": "01:15-01:20"
+                },
+                "narration_context": {
+                  "stringValue": "El narcisismo temprano"
+                },
+                "scene_number": {
+                  "integerValue": "16"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0016.png"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0017.png"
+                },
+                "scene_number": {
+                  "integerValue": "17"
+                },
+                "narration_context": {
+                  "stringValue": "La decisión del poder religioso"
+                },
+                "timestamp": {
+                  "stringValue": "01:20-01:25"
+                },
+                "prompt": {
+                  "stringValue": "A twelve-year-old boy stands alone in an empty rural church, gazing up at the pulpit with intense determination. The camera starts tight on his calculating expression, then pulls back to reveal him climbing the steps to stand behind the podium. His small hands grip the edges as he looks out at empty pews, imagining future congregations. Dust motes float in colored light from stained glass. Dramatic low angle emphasizing his ambition, gothic church atmosphere, 1940s period details, cinematic lighting creating long shadows."
+                },
+                "narration_text": {
+                  "stringValue": "mientras aterrorizaba a compañeros más vulnerables. La pobreza y el rechazo paterno crearon en él una necesidad desesperada de control y adoración. A los doce años, ya había decidido que el poder religioso era el camino hacia ambos."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_context": {
+                  "stringValue": "Descripción de la tríada oscura de personalidad de Jones"
+                },
+                "scene_number": {
+                  "integerValue": "18"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0018.png"
+                },
+                "narration_text": {
+                  "stringValue": "Jones exhibía la tríada oscura de la personalidad con precisión clínica. Su narcisismo se manifestaba en la creencia grandiosa de ser el mesías reencarnado, comparándose constantemente con Cristo"
+                },
+                "prompt": {
+                  "stringValue": "Interior of a dimly lit church hall. One charismatic male figure stands at an ornate wooden pulpit, arms spread wide in a messianic pose, wearing flowing white robes. The camera begins with an extreme close-up on his intense eyes reflecting golden candlelight, then slowly pulls back in a smooth dolly motion. He raises both hands toward the vaulted ceiling as dust particles float through dramatic shafts of stained glass light. The congregation sits in shadowy pews below, faces upturned in reverence. Deep shadows contrast with warm amber lighting creating a baroque chiaroscuro effect. Cinematic psychological thriller atmosphere, 35mm anamorphic lens, shallow depth of field, highly detailed 8k resolution."
+                },
+                "timestamp": {
+                  "stringValue": "01:25-01:30"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_context": {
+                  "stringValue": "Jones afirmando poder salvar a la humanidad del holocausto nuclear"
+                },
+                "scene_number": {
+                  "integerValue": "19"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0019.png"
+                },
+                "narration_text": {
+                  "stringValue": "y afirmando que solo él podía salvar a la humanidad del holocausto nuclear inminente. Su psicopatía se revelaba en la ausencia total de empatía genuina:"
+                },
+                "prompt": {
+                  "stringValue": "A dark conference room with maps and apocalyptic imagery covering the walls. One commanding figure in a dark suit points dramatically at nuclear explosion photographs while addressing unseen followers. The camera performs a slow circular tracking shot around him, starting from behind his shoulder. He gestures emphatically with one hand while gripping the table edge with the other, his shadow looming large on the wall behind. Red emergency lighting bathes the scene in ominous crimson hues. Multiple world maps show strategic markers and danger zones. Tense, paranoid atmosphere with high contrast lighting, film noir aesthetic, grainy 16mm documentary style, photorealistic detail."
+                },
+                "timestamp": {
+                  "stringValue": "01:30-01:35"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_text": {
+                  "stringValue": "mientras predicaba amor, experimentaba secretamente con drogas en sus seguidores, los separaba de sus familias, y confiscaba sus propiedades."
+                },
+                "prompt": {
+                  "stringValue": "A crowded commune meeting hall at night. One authoritative figure walks among seated followers, placing a reassuring hand on shoulders while speaking. The camera follows him with a handheld tracking shot at chest level, creating an intimate yet unsettling perspective. People hand over documents and valuables into collection baskets that pass between rows. Some followers embrace tearfully while others stare ahead with vacant expressions. Harsh fluorescent lighting creates unflattering shadows on exhausted faces. The leader's smile never reaches his calculating eyes. Documentary realism style, handheld camera movement, desaturated color palette, gritty 1970s aesthetic, highly detailed crowd scenes."
+                },
+                "timestamp": {
+                  "stringValue": "01:35-01:40"
+                },
+                "narration_context": {
+                  "stringValue": "La falsa predicación de amor mientras experimentaba con drogas"
+                },
+                "scene_number": {
+                  "integerValue": "20"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0020.png"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0021.png"
+                },
+                "narration_context": {
+                  "stringValue": "El maquiavelismo y técnicas de control mental"
+                },
+                "scene_number": {
+                  "integerValue": "21"
+                },
+                "timestamp": {
+                  "stringValue": "01:40-01:45"
+                },
+                "narration_text": {
+                  "stringValue": "Su maquiavelismo era magistral: utilizaba técnicas de control mental desarrolladas por décadas. Privaba a sus seguidores de sueño con reuniones de doce horas,"
+                },
+                "prompt": {
+                  "stringValue": "Interior of a windowless meeting hall at 3am. Exhausted followers sit in metal folding chairs under buzzing fluorescent lights while one energetic speaker paces the stage. The camera starts with a wide establishing shot showing hundreds of drowsy people, then slowly pushes in toward the speaker. Some followers' heads nod forward before jerking awake. The speaker gestures dramatically, his amplified voice echoing off concrete walls. A large clock on the wall shows the late hour. Harsh overhead lighting creates deep eye socket shadows on gaunt faces. Oppressive, claustrophobic atmosphere, static wide-angle lens, institutional green-gray color palette, documentary realism, highly detailed environmental storytelling."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_text": {
+                  "stringValue": "los mantenía en estado de paranoia constante hablando de enemigos imaginarios, y empleaba castigos públicos humillantes que destruían la autoestima individual"
+                },
+                "prompt": {
+                  "stringValue": "A tense commune courtyard gathering at dusk. One person stands alone in the center while a crowd forms a judgmental circle around them. The camera performs a slow 360-degree rotation at ground level, capturing feet shuffling nervously and hands clenched in anxiety. The central figure keeps their head bowed in shame while an authoritative voice speaks from off-camera. Long shadows stretch across dusty ground as the setting sun creates dramatic backlighting. Faces in the crowd show mixture of fear and forced approval. Psychological horror atmosphere, handheld camera with slight shake, muted earth tones, 1970s period authentic clothing and hairstyles, photorealistic crowd dynamics."
+                },
+                "timestamp": {
+                  "stringValue": "01:45-01:50"
+                },
+                "narration_context": {
+                  "stringValue": "Mantenía paranoia constante sobre enemigos imaginarios"
+                },
+                "scene_number": {
+                  "integerValue": "22"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0022.png"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_context": {
+                  "stringValue": "Reforzaba autoridad y usaba información como chantaje"
+                },
+                "scene_number": {
+                  "integerValue": "23"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0023.png"
+                },
+                "narration_text": {
+                  "stringValue": "mientras reforzaban su autoridad absoluta. Grababa sesiones íntimas de terapia para usar la información como chantaje emocional."
+                },
+                "prompt": {
+                  "stringValue": "A dimly lit office with wood paneling and a leather therapy couch. One figure sits behind a heavy wooden desk operating a reel-to-reel tape recorder, fingers adjusting recording levels. The camera starts with an extreme close-up on spinning tape reels, then pulls back to reveal filing cabinets filled with labeled recordings. The operator's face remains partially shadowed as they make notes in a ledger. A single desk lamp creates a pool of yellow light while the rest of the room falls into darkness. Noir thriller aesthetic, static medium shot with shallow depth of field, vintage 1970s office decor, ominous mood with high contrast lighting, period-accurate technology details."
+                },
+                "timestamp": {
+                  "stringValue": "01:50-01:55"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0024.png"
+                },
+                "scene_number": {
+                  "integerValue": "24"
+                },
+                "narration_context": {
+                  "stringValue": "Sistema de informantes donde familias se traicionaban"
+                },
+                "timestamp": {
+                  "stringValue": "01:55-02:00"
+                },
+                "prompt": {
+                  "stringValue": "A sparse commune dormitory with multiple beds. Two figures whisper urgently in a corner while glancing nervously at a sleeping form nearby. The camera uses a slow creeping dolly movement from behind a partition, suggesting surveillance perspective. One person passes a folded note while the other looks conflicted, touching a family photograph hidden under their pillow. Moonlight through barred windows creates prison-like shadows across worn wooden floors. The whispering figures separate quickly as footsteps approach from the hallway. Paranoid thriller atmosphere, handheld observational style, cool blue moonlight contrasting warm hallway glow, authentic 1970s commune setting, tension-building cinematography."
+                },
+                "narration_text": {
+                  "stringValue": "Creó un sistema de informantes internos donde padres reportaban a hijos y esposos traicionaban a esposas, fracturando systematicamente todos los vínculos que no lo incluyeran a él como centro."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_context": {
+                  "stringValue": "El patrón psicológico predecible de las víctimas"
+                },
+                "scene_number": {
+                  "integerValue": "25"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0025.png"
+                },
+                "narration_text": {
+                  "stringValue": "Sus víctimas seguían un patrón psicológico predecible. Buscaba deliberadamente a personas en crisis vital: madres solteras desesperadas por comunidad,"
+                },
+                "prompt": {
+                  "stringValue": "A community outreach center with warm lighting. One young mother holding a small child enters through glass doors into a welcoming reception area. The camera tracks alongside her at child height, emphasizing vulnerability. Friendly greeters with genuine smiles approach with open arms and pamphlets. Colorful children's drawings decorate bulletin boards promising family activities. The mother's tired face shows cautious hope as someone offers to hold her child. Soft natural lighting streams through windows creating an inviting atmosphere. Empathetic documentary style, smooth steadicam movement, warm color palette suggesting safety and belonging, realistic slice-of-life details, emotional storytelling focus."
+                },
+                "timestamp": {
+                  "stringValue": "02:00-02:05"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "prompt": {
+                  "stringValue": "A diverse group gathering in a bright community hall. The camera performs a slow lateral tracking shot revealing different faces: an elderly man with a cane, a young activist with passionate eyes, people of various ethnicities sharing a communal meal. Everyone listens intently to an unseen speaker as warm afternoon light floods through tall windows. Hands reach across tables in gestures of unity and support. Some wipe away tears while others nod with newfound purpose. The atmosphere radiates acceptance and belonging. Observational documentary style, natural lighting with golden hour warmth, authentic 1970s period clothing and decor, emphasis on genuine human connection, photorealistic details."
+                },
+                "narration_text": {
+                  "stringValue": "ancianos abandonados por familias negligentes, minorías que habían experimentado discriminación sistemática, y jóvenes idealistas hambrientos de propósito."
+                },
+                "timestamp": {
+                  "stringValue": "02:05-02:10"
+                },
+                "scene_number": {
+                  "integerValue": "26"
+                },
+                "narration_context": {
+                  "stringValue": "Buscaba ancianos abandonados y minorías discriminadas"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0026.png"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "scene_number": {
+                  "integerValue": "27"
+                },
+                "narration_context": {
+                  "stringValue": "Les ofrecía lo que más necesitaban: pertenencia y propósito"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0027.png"
+                },
+                "prompt": {
+                  "stringValue": "Interior of a church sanctuary filled with warm candlelight. A diverse congregation stands with raised hands and closed eyes in spiritual rapture. The camera starts with a wide crane shot from above, then descends slowly into the crowd. People embrace each other with tears of joy, holding hands in unified prayer circles. Golden light streams through stained glass creating ethereal colored patterns on upturned faces. Some kneel in reverence while others sway to unseen music. Transcendent spiritual atmosphere, sweeping camera movement, Renaissance painting lighting quality, authentic period clothing, deeply emotional crowd reactions, cinematic scope with intimate human moments."
+                },
+                "narration_text": {
+                  "stringValue": "Les ofrecía exactamente lo que más necesitaban: pertenencia incondicional, propósito trascendental, y la promesa de ser especiales, elegidos por Dios mismo."
+                },
+                "timestamp": {
+                  "stringValue": "02:10-02:15"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "timestamp": {
+                  "stringValue": "02:15-02:20"
+                },
+                "prompt": {
+                  "stringValue": "A modest church office with donation boxes and sign-up sheets. Several people form a line, writing checks and filling out commitment cards at a folding table. The camera performs a slow push-in from wide shot to close-up on hands signing documents. Smiling volunteers collect small cash donations in wicker baskets while marking attendance sheets. Wall calendars show increasing meeting schedules circled in red. Warm but slightly artificial fluorescent lighting illuminates eager faces making their first commitments. Observational documentary approach, subtle handheld movement, period-accurate 1970s props and clothing, focus on seemingly innocent administrative details, building sense of systematic process."
+                },
+                "narration_text": {
+                  "stringValue": "Una vez enganchados, implementaba técnicas de aislamiento progresivo. Primero, compromisos pequeños: asistir a reuniones, donar dinero modesto."
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0028.png"
+                },
+                "scene_number": {
+                  "integerValue": "28"
+                },
+                "narration_context": {
+                  "stringValue": "Implementaba técnicas de aislamiento progresivo"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0029.png"
+                },
+                "narration_context": {
+                  "stringValue": "Demandas mayores de mudarse y cortar contacto familiar"
+                },
+                "scene_number": {
+                  "integerValue": "29"
+                },
+                "timestamp": {
+                  "stringValue": "02:20-02:25"
+                },
+                "narration_text": {
+                  "stringValue": "Gradualmente, demandas mayores: mudarse cerca del templo, cortar contacto con familiares 'negativos', entregar propiedades para la causa común."
+                },
+                "prompt": {
+                  "stringValue": "A moving truck outside a suburban home at dawn. One family loads furniture and boxes while neighbors watch from windows with concern. The camera tracks backward as movers carry out a lifetime of possessions, revealing a 'For Sale' sign on the lawn. A person tears up old photo albums, dropping family pictures into a trash barrel. Children clutch favorite toys while being led to waiting vehicles. Morning fog creates an ethereal, melancholic atmosphere as the house stands empty behind them. Emotional documentary style, slow reverse tracking shot, desaturated color palette suggesting loss and transition, authentic period vehicles and architecture, poignant human drama."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_text": {
+                  "stringValue": "Para cuando se daban cuenta del control total, estaban completamente dependientes emocional, social y económicamente del grupo, sin recursos externos para escapar."
+                },
+                "prompt": {
+                  "stringValue": "Inside a crowded commune dormitory at night. One person sits alone on a narrow bed, staring at empty hands where a wallet once was. The camera performs a slow circular dolly around them, revealing sparse surroundings: a single suitcase, commune-issued clothing on hooks, no personal belongings. Through barred windows, the outside world seems impossibly distant. Other residents sleep in identical beds, creating a sense of institutional uniformity. Harsh overhead lighting casts prison-like shadows while the subject's face shows dawning realization of complete isolation. Psychological thriller atmosphere, confined spatial composition, cold institutional color palette, emphasis on environmental storytelling, deeply unsettling mood."
+                },
+                "timestamp": {
+                  "stringValue": "02:25-02:30"
+                },
+                "narration_context": {
+                  "stringValue": "Dependencia total sin recursos para escapar"
+                },
+                "scene_number": {
+                  "integerValue": "30"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0030.png"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "scene_number": {
+                  "integerValue": "31"
+                },
+                "narration_context": {
+                  "stringValue": "Los cómplices de Jones y su responsabilidad"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0031.png"
+                },
+                "prompt": {
+                  "stringValue": "A dimly lit meeting room with wood-paneled walls. Two women in 1970s attire sit at opposite ends of a long table covered with documents and photographs. The camera begins with an overhead wide shot showing the tense geometry of their positioning, then slowly tracks forward along the table's surface. One woman nervously taps her fingers while the other maintains an unnaturally rigid posture, her eyes fixed on a stack of confidential folders. Harsh fluorescent lighting creates deep shadows beneath their eyes. Period-accurate 1970s interior, muted color palette with browns and yellows, documentary-style cinematography, shallow depth of field, grainy 16mm film texture, somber and conspiratorial atmosphere."
+                },
+                "narration_text": {
+                  "stringValue": "Los enablers de Jones fueron tan responsables como él mismo. Sus lugartenientes, como Marceline Jones su esposa y Carolyn Layton su amante, sabían perfectamente sobre los abusos físicos y sexuales, pero los justificaban como sacrificios necesarios para el bien mayor."
+                },
+                "timestamp": {
+                  "stringValue": "02:30-02:35"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0032.png"
+                },
+                "narration_context": {
+                  "stringValue": "Las sesiones de tortura psicológica"
+                },
+                "scene_number": {
+                  "integerValue": "32"
+                },
+                "timestamp": {
+                  "stringValue": "02:35-02:40"
+                },
+                "narration_text": {
+                  "stringValue": "Miembros del consejo interno participaban activamente en sesiones de tortura psicológica llamadas 'reuniones de catarsis', donde Jones humillaba públicamente a disidentes potenciales."
+                },
+                "prompt": {
+                  "stringValue": "A large communal hall filled with rows of seated people facing forward. One person stands alone in the center under a single harsh spotlight while others watch from darkness. The camera starts with an extreme close-up on trembling hands gripping a wooden podium, then performs a slow spiral dolly movement revealing the isolated figure surrounded by silent observers. Shadows of seated figures shift slightly as they lean forward. The standing person's face shows visible distress, eyes downcast. Oppressive theatrical lighting with stark contrast between light and shadow, 1970s period clothing, cinematic wide-angle lens distortion, high contrast black and white aesthetic, psychological thriller atmosphere."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "prompt": {
+                  "stringValue": "San Francisco City Hall's ornate interior corridor. Three politicians in crisp suits walk purposefully past classical columns while deliberately avoiding eye contact with a desperate-looking former member holding papers. The camera executes a smooth tracking shot following the politicians as they stride forward, their polished shoes clicking on marble floors. The petitioner reaches out with documents that flutter ignored to the ground. Golden afternoon light streams through tall windows creating dramatic diagonal beams. Neoclassical architecture, 1970s period styling, formal government building atmosphere, deep focus cinematography, muted color grading emphasizing golds and grays, political drama aesthetic."
+                },
+                "narration_text": {
+                  "stringValue": "Los políticos de San Francisco ignoraron reportes de ex-miembros sobre condiciones de esclavitud porque los votos del Templo del Pueblo eran políticamente valiables."
+                },
+                "timestamp": {
+                  "stringValue": "02:40-02:45"
+                },
+                "scene_number": {
+                  "integerValue": "33"
+                },
+                "narration_context": {
+                  "stringValue": "La complicidad política en San Francisco"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0033.png"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_text": {
+                  "stringValue": "Los medios de comunicación rechazaron investigar acusaciones serias porque Jones había cultivado cuidadosamente su imagen progresista."
+                },
+                "prompt": {
+                  "stringValue": "A busy 1970s newsroom with rows of desks and typewriters. One journalist sits at their desk examining a folder of disturbing photographs and testimonies. The camera begins with a close-up on their concerned expression, then slowly pulls back as they close the folder and slide it into a drawer. Other reporters type frantically around them, creating a cacophony of clicking keys. Cigarette smoke drifts through shafts of window light. Period-accurate newsroom setting with vintage typewriters and rotary phones, warm tungsten lighting, documentary photography style, shallow depth of field isolating the main subject, journalistic thriller atmosphere."
+                },
+                "timestamp": {
+                  "stringValue": "02:45-02:50"
+                },
+                "narration_context": {
+                  "stringValue": "El silencio de los medios de comunicación"
+                },
+                "scene_number": {
+                  "integerValue": "34"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0034.png"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "prompt": {
+                  "stringValue": "A modest suburban living room with floral wallpaper. An elderly couple sits on a couch reading a handwritten letter, their faces showing forced calm despite visible worry lines. The camera starts tight on the trembling letter in weathered hands, then slowly dollies back to reveal family photos on the mantle, one notably turned face-down. The woman adjusts her reading glasses while the man stares blankly at the wall. Soft afternoon light filters through lace curtains creating delicate patterns. 1970s middle-class American home interior, warm but melancholic color palette, static camera with subtle handheld movement, intimate domestic drama cinematography, deeply emotional atmosphere."
+                },
+                "narration_text": {
+                  "stringValue": "Incluso familiares fuera del culto frecuentemente minimizaban las súplicas desesperadas de ayuda de sus seres queridos, prefiriendo creer que estaban involucrados en una fase religiosa temporal en lugar de confrontar la realidad aterradora de que habían perdido para siempre a quienes amaban."
+                },
+                "timestamp": {
+                  "stringValue": "02:50-02:55"
+                },
+                "scene_number": {
+                  "integerValue": "35"
+                },
+                "narration_context": {
+                  "stringValue": "Las familias que ignoraron las señales"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0035.png"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_context": {
+                  "stringValue": "La llegada del congresista Leo Ryan"
+                },
+                "scene_number": {
+                  "integerValue": "36"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0036.png"
+                },
+                "narration_text": {
+                  "stringValue": "El fin comenzó cuando el congresista Leo Ryan llegó a Jonestown el 17 de noviembre de 1978, respondiendo a quejas de familiares preocupados."
+                },
+                "prompt": {
+                  "stringValue": "A small propeller aircraft descends toward a rough jungle airstrip surrounded by dense tropical vegetation. The camera captures the plane's approach from ground level, heat waves distorting the image as the aircraft touches down on the dusty runway. A distinguished man in a light suit emerges from the plane door, squinting in the harsh equatorial sun. Local guides wait nervously by the runway edge. The jungle canopy looms dark and mysterious in the background. Documentary-style handheld camera work, bleached color palette suggesting oppressive heat, wide-angle lens capturing the isolation, photojournalistic aesthetic, ominous and foreboding atmosphere."
+                },
+                "timestamp": {
+                  "stringValue": "02:55-03:00"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0037.png"
+                },
+                "scene_number": {
+                  "integerValue": "37"
+                },
+                "narration_context": {
+                  "stringValue": "La preparación paranoica de Jones"
+                },
+                "timestamp": {
+                  "stringValue": "03:00-03:05"
+                },
+                "prompt": {
+                  "stringValue": "A crowded pavilion filled with hundreds of people listening intently to a speaker at a podium. The camera slowly pushes through the crowd from behind, showing the backs of heads all focused forward. People of all ages sit on simple wooden benches, some holding children, others taking notes. The speaker gestures dramatically, though only seen from behind and in silhouette. Harsh tropical sunlight filters through the pavilion's open sides creating stark contrast. Documentary verité style, handheld camera movement suggesting urgency, desaturated color palette, wide-angle lens showing the massive gathering, increasingly tense atmosphere building dread."
+                },
+                "narration_text": {
+                  "stringValue": "Jones había pasado meses preparando a sus seguidores para este momento, diciéndoles que el gobierno estadounidense planeaba destruir su paraíso socialista y separar a las familias."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "timestamp": {
+                  "stringValue": "03:05-03:10"
+                },
+                "narration_text": {
+                  "stringValue": "Cuando varios miembros pidieron secretamente salir con Ryan, Jones interpretó esto como la traición final que había profetizado. Su paranoia, alimentada por años de abuso de anfetaminas, se desató completamente."
+                },
+                "prompt": {
+                  "stringValue": "A tense indoor scene in a sparse wooden building. Several people huddle together whispering urgently while glancing toward the door. The camera starts with an extreme close-up on nervous eyes darting back and forth, then pulls back to reveal the group's secretive body language. One person writes hastily on a small piece of paper while another keeps watch. Shadows from wooden slats create a prison-bar pattern across their faces. Low-key lighting emphasizing paranoia, handheld camera suggesting instability, muted earth tones, cinema verité documentary style, suffocating and claustrophobic atmosphere with palpable fear."
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0038.png"
+                },
+                "narration_context": {
+                  "stringValue": "La traición percibida y la paranoia desatada"
+                },
+                "scene_number": {
+                  "integerValue": "38"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0039.png"
+                },
+                "scene_number": {
+                  "integerValue": "39"
+                },
+                "narration_context": {
+                  "stringValue": "El asesinato en la pista de aterrizaje"
+                },
+                "timestamp": {
+                  "stringValue": "03:10-03:15"
+                },
+                "prompt": {
+                  "stringValue": "A remote jungle airstrip at dusk. The camera captures the chaotic aftermath from a distant telephoto position, showing scattered luggage and an abandoned small aircraft on the runway. Jungle birds suddenly take flight from the treeline in a massive flock, their dark silhouettes against the orange sky. The camera slowly zooms in on the empty runway as shadows lengthen. No people visible, only environmental storytelling through abandoned objects. Documentary war photography aesthetic, long lens compression, golden hour lighting transitioning to darkness, handheld camera suggesting urgency, deeply ominous and tragic atmosphere."
+                },
+                "narration_text": {
+                  "stringValue": "Ordenó el asesinato de Ryan y su delegación en la pista de aterrizaje, luego regresó al campamento para implementar su 'Solución Revolucionaria Final': el suicidio masivo que había estado practicando mediante simulacros durante meses."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "scene_number": {
+                  "integerValue": "40"
+                },
+                "narration_context": {
+                  "stringValue": "La desintegración final de la máscara"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0040.png"
+                },
+                "prompt": {
+                  "stringValue": "An extreme close-up of weathered hands gripping a wooden podium, knuckles white with tension. The camera performs an impossibly slow push-in on the hands as they begin to tremble violently. Wood grain texture fills the frame, with dramatic side lighting creating deep shadows. A glass of water on the podium surface ripples from the vibration. The hands suddenly slam down, causing the water to splash. Hyper-detailed macro cinematography, dramatic chiaroscuro lighting, desaturated color palette except for subtle red undertones, psychological thriller aesthetic, building tension through minimal action, suffocating and intense atmosphere."
+                },
+                "narration_text": {
+                  "stringValue": "Su máscara de líder benevolente se desintegró por completo, revelando al tirano megalómano que siempre había estado debajo."
+                },
+                "timestamp": {
+                  "stringValue": "03:15-03:20"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0041.png"
+                },
+                "narration_context": {
+                  "stringValue": "Diagnóstico psicológico moderno de Jones"
+                },
+                "scene_number": {
+                  "integerValue": "41"
+                },
+                "timestamp": {
+                  "stringValue": "03:20-03:25"
+                },
+                "narration_text": {
+                  "stringValue": "Un análisis forense moderno diagnosticaría a Jones con trastorno narcisista de personalidad maligno, combinado con rasgos psicopáticos antisociales y síntomas de trastorno paranoide inducido por sustancias."
+                },
+                "prompt": {
+                  "stringValue": "A modern medical examination room with brain scan imagery displayed on multiple monitors. The camera slowly tracks across glowing MRI scans showing brain cross-sections with areas highlighted in red and blue. Clinical white walls reflect the ethereal glow of the medical displays. A desk holds psychiatric evaluation documents and diagnostic manuals spread open. The camera continues its lateral movement, revealing more complex brain imagery suggesting abnormalities. Sterile medical environment, cool blue-white lighting from monitors, scientific documentary style, precise technical cinematography, clinical yet unsettling atmosphere mixing medical precision with psychological horror."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0042.png"
+                },
+                "scene_number": {
+                  "integerValue": "42"
+                },
+                "narration_context": {
+                  "stringValue": "El deterioro neurológico y pérdida de empatía"
+                },
+                "timestamp": {
+                  "stringValue": "03:25-03:30"
+                },
+                "prompt": {
+                  "stringValue": "An advanced neuroscience laboratory with a large holographic brain projection rotating slowly in the center. The camera circles the translucent brain model as specific regions pulse with different colors indicating activity levels. Dark areas suggest damaged tissue while data streams cascade down nearby monitors. A researcher's silhouette moves past the projection, creating momentary shadows. The prefrontal cortex area notably appears darker than surrounding tissue. Futuristic medical visualization, volumetric lighting through the hologram, cool scientific color palette with strategic use of warning reds, smooth steadicam movement, blend of educational and thriller aesthetics, clinically disturbing atmosphere."
+                },
+                "narration_text": {
+                  "stringValue": "Su cerebro, moldeado por trauma infantil temprano y décadas de abuso de drogas, había perdido la capacidad de procesamiento empático normal. Las neuroimágenes revelarían probablemente atrofia en el córtex prefrontal, responsable de la regulación emocional y el juicio moral."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "timestamp": {
+                  "stringValue": "03:30-03:35"
+                },
+                "narration_text": {
+                  "stringValue": "Su comportamiento sexual compulsivo y sadismo creciente indicaban desregulación dopaminérgica severa."
+                },
+                "prompt": {
+                  "stringValue": "A stark medical consultation room with anatomical charts on the walls. The camera focuses on a detailed neurological diagram showing dopamine pathways, with certain areas marked with red indicators. Slowly, the camera pulls back to reveal multiple case files stacked on a desk, their tabs showing dates spanning years. A pen rolls off the desk, creating the only movement in the static scene. Harsh fluorescent lighting creates an uncomfortable clinical atmosphere. Medical documentary style, static camera with minimal movement, desaturated color palette with selective red highlights, educational yet unsettling tone, sterile and analytical atmosphere."
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0043.png"
+                },
+                "narration_context": {
+                  "stringValue": "Los síntomas de desregulación y sadismo"
+                },
+                "scene_number": {
+                  "integerValue": "43"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0044.png"
+                },
+                "narration_context": {
+                  "stringValue": "La cognición compartimental y las contradicciones"
+                },
+                "scene_number": {
+                  "integerValue": "44"
+                },
+                "timestamp": {
+                  "stringValue": "03:35-03:40"
+                },
+                "narration_text": {
+                  "stringValue": "Más perturbadoramente, exhibía lo que los psicólogos llaman 'cognición compartimental': la capacidad de mantener sistemas de creencias completamente contradictorios sin experimentar disonancia cognitiva, permitiéndole creer simultáneamente en su propia divinidad mientras planificaba conscientemente el asesinato masivo de sus seguidores."
+                },
+                "prompt": {
+                  "stringValue": "A split-screen psychological evaluation room where two contradictory scenes play out simultaneously. On one side, religious imagery and divine symbolism float in soft golden light. On the other, dark tactical planning documents and maps spread across a table under harsh light. The camera slowly zooms out to reveal both scenes are reflections in a two-way mirror, merging and separating in disturbing ways. A figure's silhouette stands between both realities. Surreal psychological thriller cinematography, complex lighting design mixing warm and cold tones, mirror effects creating visual fragmentation, deeply unsettling atmosphere suggesting fractured reality."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_text": {
+                  "stringValue": "Lo más inquietante de Jim Jones no era su maldad obvia, sino su capacidad de despertar lo mejor y lo peor de la naturaleza humana simultáneamente."
+                },
+                "prompt": {
+                  "stringValue": "Split-screen composition showing two contrasting scenes of one charismatic male leader in 1970s attire. Left side: warm golden light illuminates his gentle smile as he embraces three diverse community members in a peaceful garden. Right side: harsh shadows cast across his stern face as he points authoritatively at five kneeling followers in a dimly lit meeting hall. The camera performs a slow push-in on both frames simultaneously, emphasizing the stark duality. Subtle film grain, documentary-style cinematography, muted color palette transitioning from warm to cold. Photorealistic details capture every facial expression. 35mm film aesthetic, masterful composition highlighting psychological contrast."
+                },
+                "timestamp": {
+                  "stringValue": "03:40-03:45"
+                },
+                "narration_context": {
+                  "stringValue": "La dualidad perturbadora de Jim Jones"
+                },
+                "scene_number": {
+                  "integerValue": "45"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0045.png"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "narration_context": {
+                  "stringValue": "Ecos modernos de manipulación"
+                },
+                "scene_number": {
+                  "integerValue": "46"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0046.png"
+                },
+                "narration_text": {
+                  "stringValue": "Vemos ecos de sus técnicas en líderes empresariales tóxicos que exigen lealtad total mientras explotan empleados, en relaciones románticas donde el amor se weaponiza para control,"
+                },
+                "prompt": {
+                  "stringValue": "Modern glass office at night. One suited executive stands dominantly behind a mahogany desk while four exhausted employees work frantically at computers below. The camera starts with a low angle shot emphasizing power dynamics, then slowly arcs around to reveal the executive's cold expression reflected in the window. Blue computer screens cast harsh light on tired faces. Rain streaks down the windows creating distorted reflections. The executive slowly places both hands on the desk, leaning forward menacingly. Corporate dystopian atmosphere, stark contrast lighting, cinematic depth of field, photorealistic 8k resolution, modern noir aesthetic."
+                },
+                "timestamp": {
+                  "stringValue": "03:45-03:50"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "timestamp": {
+                  "stringValue": "03:50-03:55"
+                },
+                "prompt": {
+                  "stringValue": "Massive political rally in a concrete plaza. One speaker at a stark podium addresses thousands of identically dressed supporters holding pristine white flags. The camera begins with an extreme wide establishing shot, then slowly zooms through the crowd toward the speaker's intense face. Supporters move in perfect synchronization, raising their flags in unison. Harsh midday sun creates sharp shadows. The speaker's mouth moves passionately while gesturing dramatically with both hands. Desaturated color palette except for subtle red accents. Documentary-style handheld movement, photojournalistic aesthetic, high contrast lighting, cinematic 8k resolution."
+                },
+                "narration_text": {
+                  "stringValue": "en movimientos políticos que prometen pureza mientras practican crueldad. Su historia nos obliga a preguntarnos:"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0047.png"
+                },
+                "scene_number": {
+                  "integerValue": "47"
+                },
+                "narration_context": {
+                  "stringValue": "Movimientos políticos manipuladores"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "prompt": {
+                  "stringValue": "Dark auditorium filled with two hundred people sitting in meditation pose, eyes closed. One figure stands elevated on a simple wooden platform, arms outstretched in welcoming gesture. The camera performs a slow crane shot descending from above, revealing faces seeking enlightenment. Soft amber spotlights create dramatic rim lighting around the leader while followers remain in shadow. Incense smoke drifts through light beams. The leader slowly lowers their arms as followers begin swaying gently in unison. Ethereal atmosphere, volumetric lighting, shallow depth of field focusing on yearning expressions. Cinematic 8k quality."
+                },
+                "narration_text": {
+                  "stringValue": "¿cuánto de nuestro deseo de pertenencia, propósito y trascendencia nos hace vulnerables a manipuladores carismáticos?"
+                },
+                "timestamp": {
+                  "stringValue": "03:55-04:00"
+                },
+                "scene_number": {
+                  "integerValue": "48"
+                },
+                "narration_context": {
+                  "stringValue": "Vulnerabilidad humana ante la manipulación"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0048.png"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0049.png"
+                },
+                "narration_context": {
+                  "stringValue": "El conflicto entre creer y cuestionar"
+                },
+                "scene_number": {
+                  "integerValue": "49"
+                },
+                "timestamp": {
+                  "stringValue": "04:00-04:05"
+                },
+                "narration_text": {
+                  "stringValue": "¿En qué momento nuestra necesidad de creer se vuelve más importante que nuestra capacidad de cuestionar?"
+                },
+                "prompt": {
+                  "stringValue": "Intimate library corner at twilight. One person sits alone at an antique wooden desk, surrounded by towering bookshelves. Their hand hovers uncertainly between two books: one ornate religious text and one critical thinking textbook. The camera starts tight on their conflicted expression, then slowly pulls back through dusty light beams. They finally reach for the religious text, then hesitate, fingers trembling. Warm candlelight flickers across leather-bound spines. Deep shadows create chiaroscuro effect. Contemplative mood, Renaissance painting lighting, film grain, photorealistic detail capturing internal struggle. Masterful cinematography."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "timestamp": {
+                  "stringValue": "04:05-04:10"
+                },
+                "narration_text": {
+                  "stringValue": "La tragedia de Jonestown permanece como el recordatorio más visceral de que el mal raramente llega anunciándose como tal."
+                },
+                "prompt": {
+                  "stringValue": "Abandoned commune grounds at dusk. Empty wooden pavilion with weathered benches arranged in perfect rows faces an empty podium. The camera performs a slow, haunting tracking shot through tall grass that has reclaimed the pathways. Wind moves through broken shutters creating eerie sounds. One faded photograph lies face-down in the dirt. Golden hour light casts long shadows across the desolate scene. Nature slowly reclaims man-made structures. Melancholic atmosphere, documentary cinematography style, muted earth tones, shallow depth of field. Photorealistic environmental storytelling, cinematic 8k resolution."
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0050.png"
+                },
+                "narration_context": {
+                  "stringValue": "El recuerdo visceral de Jonestown"
+                },
+                "scene_number": {
+                  "integerValue": "50"
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0051.png"
+                },
+                "narration_context": {
+                  "stringValue": "El mal disfrazado de salvación"
+                },
+                "scene_number": {
+                  "integerValue": "51"
+                },
+                "timestamp": {
+                  "stringValue": "04:10-04:15"
+                },
+                "narration_text": {
+                  "stringValue": "Llega prometiendo salvación, ofreciendo comunidad, predicando amor. Y cuando finalmente revela su verdadera naturaleza, ya es demasiado tarde para escapar."
+                },
+                "prompt": {
+                  "stringValue": "Dramatic transformation sequence in a meeting hall. One charismatic speaker in white robes addresses fifty devoted followers. The camera starts on their benevolent smile, then performs a slow 360-degree rotation around them. As the camera moves, lighting shifts from warm golden to cold blue, casting increasingly ominous shadows. The speaker's gentle gestures become more commanding, their smile more rigid. Followers' expressions subtly change from joy to concern. Practical lighting effects create visual metamorphosis. Psychological thriller aesthetic, precise color grading showing tonal shift. Masterful cinematography, 8k photorealistic quality."
+                }
+              }
+            }
+          },
+          {
+            "mapValue": {
+              "fields": {
+                "prompt": {
+                  "stringValue": "Modern study room at night. One viewer sits alone before a glowing computer screen, their face illuminated by pale blue light. The camera slowly pushes in on their contemplative expression as they process heavy information. Behind them, a wall displays newspaper clippings and psychological diagrams connected by red string. Their hand slowly moves toward the subscribe button, then pauses thoughtfully. Rain patters against the window. Deep shadows fill the corners. Neo-noir atmosphere, cinematic lighting emphasizing isolation and revelation. High contrast, film grain, photorealistic emotional nuance. Masterful visual storytelling."
+                },
+                "narration_text": {
+                  "stringValue": "Si este análisis te perturbó tanto como debería, suscríbete para más exploraciones en la psicología más oscura de la humanidad. Porque entender estos patrones no es morbosidad: es supervivencia."
+                },
+                "timestamp": {
+                  "stringValue": "04:15-04:20"
+                },
+                "scene_number": {
+                  "integerValue": "52"
+                },
+                "narration_context": {
+                  "stringValue": "Llamado a la reflexión y supervivencia"
+                },
+                "imageUrl": {
+                  "stringValue": "http://100.99.207.113:8085/images/Jim_Jones_y_el_suicidio_masivo_de_Jonestown/scene_0052.png"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "agentFile": {
+      "stringValue": "agent_psicologia_oscura.md"
+    },
+    "agentId": {
+      "stringValue": "agent_psicologia_oscura"
+    },
+    "costs": {
+      "mapValue": {}
+    },
+    "progress": {
+      "mapValue": {
+        "fields": {
+          "stepName": {
+            "stringValue": "¡Video finalizado!"
+          },
+          "currentStep": {
+            "integerValue": "0"
+          },
+          "totalSteps": {
+            "integerValue": "6"
+          },
+          "percent": {
+            "integerValue": "100"
+          }
+        }
+      }
+    },
+    "userId": {
+      "stringValue": "BPlhzpYNgXPhgmnvkeKYw1T6Vtw2"
+    },
+    "title": {
+      "stringValue": "Jim Jones y el suicidio masivo de Jonestown"
+    }
+  },
+  "createTime": "2026-04-30T06:07:04.179593Z",
+  "updateTime": "2026-04-30T06:45:53.453236Z"
+}

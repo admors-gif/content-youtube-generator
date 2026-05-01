@@ -1,0 +1,43 @@
+{
+  "1": {
+    "inputs": {
+      "image": "input_image.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Cargar Imagen FLUX"
+    }
+  },
+  "2": {
+    "inputs": {
+      "prompt": "Subtle cinematic motion, atmospheric lighting shifts, slow dramatic camera drift",
+      "model": "ray-flash-2",
+      "resolution": "540p",
+      "duration": "5s",
+      "loop": false,
+      "seed": 0,
+      "first_image": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "LumaImageToVideoNode",
+    "_meta": {
+      "title": "Luma Image to Video"
+    }
+  },
+  "3": {
+    "inputs": {
+      "filename_prefix": "luma_clip",
+      "video": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Guardar Video Luma"
+    }
+  }
+}
