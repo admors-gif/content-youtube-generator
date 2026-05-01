@@ -1,9 +1,48 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { SYSTEM_AGENTS } from "@/lib/agents";
+
+// ── Virality Score Engine ──
+function computeViralityScore(text) {
+  if (!text || text.length < 50) return null;
+  const words = text.split(/\s+/);
+  const wordCount = words.length;
+  const sentences = text.split(/[.!?]+/).filter(Boolean);
+
+  // 1. Hooks (questions, exclamations, power phrases)
+  const hooks = (text.match(/\?/g) || []).length;
+  const exclamations = (text.match(/!/g) || []).length;
+  const powerPhrases = ['imagina', 'secreto', 'verdad', 'nadie te dice', 'increíble', 'impactante', 'descubre', 'revelado', 'sorprendente', 'poderoso', 'extraordinario', 'fascinante'];
+  const powerCount = powerPhrases.reduce((c, p) => c + (text.toLowerCase().match(new RegExp(p, 'gi')) || []).length, 0);
+  const hookScore = Math.min(100, ((hooks * 8) + (exclamations * 3) + (powerCount * 12)));
+
+  // 2. Emotional triggers
+  const emotionalWords = ['miedo', 'amor', 'muerte', 'odio', 'pasión', 'poder', 'dolor', 'sangre', 'traición', 'venganza', 'gloria', 'destino', 'guerra', 'locura', 'esperanza', 'terror', 'misterio', 'oscuro', 'prohibido', 'peligro'];
+  const emotionalCount = emotionalWords.reduce((c, w) => c + (text.toLowerCase().match(new RegExp(`\\b${w}`, 'gi')) || []).length, 0);
+  const emotionScore = Math.min(100, emotionalCount * 10);
+
+  // 3. Pacing (avg words per sentence — ideal 12-18)
+  const avgWordsPerSentence = wordCount / Math.max(sentences.length, 1);
+  const pacingScore = avgWordsPerSentence >= 10 && avgWordsPerSentence <= 20 ? 90 : avgWordsPerSentence < 10 ? 65 : 55;
+
+  // 4. SEO / Structure
+  const hasNumbers = /\d/.test(text);
+  const hasLists = text.includes('1.') || text.includes('•');
+  const paragraphs = text.split(/\n\n+/).length;
+  const structureScore = Math.min(100, (hasNumbers ? 20 : 0) + (hasLists ? 15 : 0) + Math.min(paragraphs * 5, 40) + (wordCount > 800 ? 25 : wordCount > 400 ? 15 : 5));
+
+  // 5. Retention (narrative arcs, cliffhangers)
+  const cliffhangers = ['pero', 'sin embargo', 'lo que no sabían', 'entonces', 'de pronto', 'hasta que', 'lo peor', 'lo mejor'];
+  const cliffCount = cliffhangers.reduce((c, p) => c + (text.toLowerCase().match(new RegExp(p, 'gi')) || []).length, 0);
+  const retentionScore = Math.min(100, cliffCount * 8 + (wordCount > 1000 ? 20 : 10));
+
+  const overall = Math.round((hookScore * 0.25) + (emotionScore * 0.2) + (pacingScore * 0.2) + (structureScore * 0.15) + (retentionScore * 0.2));
+
+  return { overall, hookScore: Math.round(hookScore), hooks, emotionScore: Math.round(emotionScore), pacingScore: Math.round(pacingScore), structureScore: Math.round(structureScore), retentionScore: Math.round(retentionScore), avgWordsPerSentence: Math.round(avgWordsPerSentence) };
+}
 
 export default function ProjectDetailsPage({ params }) {
   const resolvedParams = React.use(params);
@@ -11,8 +50,16 @@ export default function ProjectDetailsPage({ params }) {
   const { user } = useAuth();
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("script"); // script, scenes, audio
+  const [activeTab, setActiveTab] = useState("script");
   const [editedScript, setEditedScript] = useState("");
+
+  // ── Auto-approve timer ──
+  const AUTO_APPROVE_SECONDS = 180; // 3 minutes
+  const [timerActive, setTimerActive] = useState(false);
+  const [timerPaused, setTimerPaused] = useState(false);
+  const [timerSeconds, setTimerSeconds] = useState(AUTO_APPROVE_SECONDS);
+  const timerRef = useRef(null);
+  const autoApproveTriggered = useRef(false);
 
   // ── Smooth Progress Bar State ──
   const [displayPercent, setDisplayPercent] = useState(0);
@@ -100,22 +147,42 @@ export default function ProjectDetailsPage({ params }) {
   const isProcessing = project.progress?.percent > 0 && project.progress?.percent < 100 && project.status !== "error";
   const eta = getETA();
 
-  // Funciones para guardar cambios en el script y disparar producción
-  const handleSaveScript = async () => {
-    const confirmed = confirm(
-      "✅ ¿Aprobar guión y comenzar producción cinemática?\n\n" +
-      "Pipeline Cinemático:\n" +
-      "1. 🎨 Generación de imágenes (FLUX)\n" +
-      "2. 🎙️ Narración profesional (ElevenLabs)\n" +
-      "3. 🎥 Clips cinemáticos (Luma AI)\n" +
-      "4. 🎬 Ken Burns sincronizado\n" +
-      "5. 📽️ Ensamblaje final HD\n\n" +
-      "El proceso tarda ~10-15 min según la cantidad de escenas."
-    );
-    if (!confirmed) return;
+  // ── Auto-approve: start timer when script is ready ──
+  useEffect(() => {
+    if (project?.script?.plain && project?.status === "script_ready" && !project?.script?.approved && !autoApproveTriggered.current) {
+      setTimerActive(true);
+      setTimerPaused(false);
+      setTimerSeconds(AUTO_APPROVE_SECONDS);
+    } else {
+      setTimerActive(false);
+    }
+  }, [project?.script?.plain, project?.status, project?.script?.approved]);
 
+  useEffect(() => {
+    if (!timerActive || timerPaused) {
+      if (timerRef.current) clearInterval(timerRef.current);
+      return;
+    }
+    timerRef.current = setInterval(() => {
+      setTimerSeconds(prev => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current);
+          if (!autoApproveTriggered.current) {
+            autoApproveTriggered.current = true;
+            executeApproval();
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timerRef.current);
+  }, [timerActive, timerPaused]);
+
+  // Core approval logic (used by both manual and auto-approve)
+  const executeApproval = useCallback(async () => {
     try {
-      // 1. Guardar guión aprobado en Firebase
+      setTimerActive(false);
       await updateDoc(doc(db, "projects", id), {
         "script.plain": editedScript,
         "script.approved": true,
@@ -123,8 +190,6 @@ export default function ProjectDetailsPage({ params }) {
         "progress.percent": 2,
         "progress.stepName": "Iniciando producción...",
       });
-
-      // 2. Disparar pipeline de producción en el VPS
       const vpsUrl = process.env.NEXT_PUBLIC_VPS_API_URL;
       if (vpsUrl) {
         fetch(`${vpsUrl}/produce`, {
@@ -132,14 +197,16 @@ export default function ProjectDetailsPage({ params }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ projectId: id })
         }).catch(err => console.error("Error contactando VPS:", err));
-      } else {
-        console.warn("⚠️ Falta NEXT_PUBLIC_VPS_API_URL en .env.local");
       }
-
-      alert("🚀 ¡Producción iniciada! Puedes ver el progreso en la barra superior.");
     } catch(e) {
-      alert("Error al guardar: " + e.message);
+      alert("Error: " + e.message);
     }
+  }, [id, editedScript]);
+
+  const handleSaveScript = async () => {
+    autoApproveTriggered.current = true;
+    setTimerActive(false);
+    await executeApproval();
   };
 
   return (
@@ -250,9 +317,32 @@ export default function ProjectDetailsPage({ params }) {
                   ) : project.script?.approved && project.status !== "script_ready" ? (
                     <span className="badge badge-free">✅ Ya aprobado</span>
                   ) : (
-                    <button onClick={handleSaveScript} className="btn-glow" style={{ padding: "8px 16px", fontSize: "13px" }}>
-                      Aprobar y Producir 🚀
-                    </button>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      {/* Timer display */}
+                      {timerActive && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <div style={{
+                            position: "relative", width: "38px", height: "38px",
+                            borderRadius: "50%",
+                            background: `conic-gradient(${timerPaused ? '#facc15' : 'var(--accent)'} ${(timerSeconds / AUTO_APPROVE_SECONDS) * 360}deg, rgba(255,255,255,0.1) 0deg)`,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                          }}>
+                            <div style={{ width: "30px", height: "30px", borderRadius: "50%", background: "var(--bg-card)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontFamily: "monospace", fontWeight: "bold" }}>
+                              {Math.floor(timerSeconds / 60)}:{String(timerSeconds % 60).padStart(2, '0')}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => setTimerPaused(!timerPaused)}
+                            style={{ background: "none", border: "1px solid var(--border)", borderRadius: "6px", padding: "4px 10px", fontSize: "12px", cursor: "pointer", color: timerPaused ? "#facc15" : "var(--text-secondary)" }}
+                          >
+                            {timerPaused ? "▶️ Reanudar" : "⏸️ Pausar"}
+                          </button>
+                        </div>
+                      )}
+                      <button onClick={handleSaveScript} className="btn-glow" style={{ padding: "8px 16px", fontSize: "13px" }}>
+                        Aprobar y Producir 🚀
+                      </button>
+                    </div>
                   )
                 ) : (
                   <span className="badge badge-free" style={{ animation: "pulse 2s infinite" }}>Esperando a la IA...</span>
@@ -298,6 +388,53 @@ export default function ProjectDetailsPage({ params }) {
                 </li>
               </ul>
             </div>
+
+            {/* Virality Score Panel */}
+            {editedScript && (() => {
+              const score = computeViralityScore(editedScript);
+              if (!score) return null;
+              const scoreColor = score.overall >= 75 ? '#4ade80' : score.overall >= 50 ? '#facc15' : '#f87171';
+              const ScoreBar = ({ label, value, emoji }) => (
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px" }}>
+                  <span style={{ width: "16px" }}>{emoji}</span>
+                  <span style={{ flex: 1, color: "var(--text-secondary)" }}>{label}</span>
+                  <div style={{ width: "60px", height: "6px", background: "rgba(255,255,255,0.1)", borderRadius: "3px", overflow: "hidden" }}>
+                    <div style={{ width: `${value}%`, height: "100%", background: value >= 75 ? '#4ade80' : value >= 50 ? '#facc15' : '#f87171', borderRadius: "3px", transition: "width 0.5s" }} />
+                  </div>
+                  <span style={{ fontFamily: "monospace", fontSize: "11px", width: "28px", textAlign: "right" }}>{value}</span>
+                </div>
+              );
+              return (
+                <div className="glass-card" style={{ padding: "20px" }}>
+                  <h4 style={{ fontWeight: "bold", margin: "0 0 12px 0", display: "flex", alignItems: "center", gap: "8px" }}>🔥 Viralidad</h4>
+                  {/* Overall score circle */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "16px" }}>
+                    <div style={{
+                      width: "56px", height: "56px", borderRadius: "50%",
+                      background: `conic-gradient(${scoreColor} ${score.overall * 3.6}deg, rgba(255,255,255,0.08) 0deg)`,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                    }}>
+                      <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "var(--bg-card)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", fontWeight: "900", color: scoreColor }}>
+                        {score.overall}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: "13px", fontWeight: "700", color: scoreColor }}>
+                        {score.overall >= 80 ? "🚀 Viral" : score.overall >= 60 ? "👍 Bueno" : score.overall >= 40 ? "⚡ Mejorable" : "📝 Revisar"}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>{score.hooks} hooks detectados</div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <ScoreBar label="Hooks" value={score.hookScore} emoji="🎣" />
+                    <ScoreBar label="Emoción" value={score.emotionScore} emoji="❤️" />
+                    <ScoreBar label="Ritmo" value={score.pacingScore} emoji="🥁" />
+                    <ScoreBar label="Estructura" value={score.structureScore} emoji="📐" />
+                    <ScoreBar label="Retención" value={score.retentionScore} emoji="🧲" />
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
