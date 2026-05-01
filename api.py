@@ -6,6 +6,26 @@ import os
 import json
 from pathlib import Path
 
+# ── Escribir firebase-admin.json desde variable de entorno (si existe) ──
+firebase_creds = os.environ.get("FIREBASE_CREDENTIALS", "")
+if firebase_creds:
+    cred_path = "/app/firebase-admin.json"
+    try:
+        # Intentar decodificar base64 primero
+        import base64
+        try:
+            decoded = base64.b64decode(firebase_creds).decode("utf-8")
+            json.loads(decoded)  # Validar que es JSON
+            firebase_creds = decoded
+        except Exception:
+            pass  # Ya es JSON raw
+        
+        with open(cred_path, "w") as f:
+            f.write(firebase_creds)
+        print(f"✅ Firebase credentials written to {cred_path}", flush=True)
+    except Exception as e:
+        print(f"⚠️ Could not write Firebase credentials: {e}", flush=True)
+
 app = FastAPI(title="Content Factory API")
 
 # CORS para que el frontend pueda cargar imágenes

@@ -3,14 +3,19 @@ services:
     build:
       context: .
       args:
-        - CACHE_BUST=20260501v6-fresh
+        - CACHE_BUST=20260501v7-envfix
     container_name: content-factory-v5
     ports:
       - "8085:8000"
     restart: unless-stopped
-    env_file:
-      - .env
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.5}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - COMFYUI_API_KEY=${COMFYUI_API_KEY}
+      - LUMA_API_KEY=${LUMA_API_KEY}
+      - IMGBB_API_KEY=${IMGBB_API_KEY}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-admin.json
     volumes:
-      - ./firebase-admin.json:/app/firebase-admin.json:ro
-      - ./content-factory-tts-494706-0880f6d00a88.json:/app/content-factory-tts-494706-0880f6d00a88.json:ro
       - ./output:/app/output
