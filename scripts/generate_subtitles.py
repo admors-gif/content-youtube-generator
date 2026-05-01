@@ -294,7 +294,7 @@ def burn_subtitles(video_path: Path, ass_path: Path, output_path: Path = None) -
         str(output_path)
     ]
     
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     
     if result.returncode == 0 and output_path.exists():
         size_mb = output_path.stat().st_size / (1024 * 1024)
@@ -315,7 +315,7 @@ def burn_subtitles(video_path: Path, ass_path: Path, output_path: Path = None) -
             str(output_path)
         ]
         
-        result = subprocess.run(cmd_alt, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd_alt, capture_output=True, text=True, timeout=1800)
         
         if result.returncode == 0 and output_path.exists():
             size_mb = output_path.stat().st_size / (1024 * 1024)

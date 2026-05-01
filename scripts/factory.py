@@ -414,7 +414,7 @@ def assemble_final_video(scenes, project_dir, mode, luma_indices=None):
         str(master_visual)
     ]
     
-    result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=1800)
     vis_list.unlink(missing_ok=True)
     
     if result.returncode != 0 or not master_visual.exists():
