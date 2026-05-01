@@ -11,7 +11,8 @@ RUN apt-get update && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el código del proyecto
+# Copiar el código del proyecto (CACHE_BUST fuerza rebuild)
+ARG CACHE_BUST=unknown
 COPY . .
 
 EXPOSE 8000
