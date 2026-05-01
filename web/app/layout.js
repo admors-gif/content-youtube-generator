@@ -3,7 +3,7 @@ import { AuthProvider } from "@/context/AuthContext";
 
 export const metadata = {
   title: "Content Factory — Documentales con IA",
-  description: "Crea documentales cinematográficos de YouTube automatizados con inteligencia artificial. 10 agentes especializados, narración profesional, y video listo para publicar.",
+  description: "Crea documentales cinematográficos de YouTube automatizados con inteligencia artificial. 27+ agentes especializados, narración profesional, y video listo para publicar.",
 };
 
 export default function RootLayout({ children }) {
