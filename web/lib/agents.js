@@ -153,4 +153,259 @@ export const SYSTEM_AGENTS = [
     ],
     color: "#CD853F",
   },
+  {
+    agentId: "agent_true_crime",
+    name: "True Crime",
+    emoji: "🔪",
+    description: "Casos criminales reales narrados como thrillers. Investigaciones forenses, asesinos seriales y justicia.",
+    category: "crime",
+    promptFile: "agent_true_crime.md",
+    tier: "creator",
+    exampleTopics: [
+      "El caso del Zodiac Killer",
+      "Ted Bundy: el monstruo carismático",
+      "El misterio de Jack el Destripador"
+    ],
+    color: "#8B0000",
+  },
+  {
+    agentId: "agent_mitologia",
+    name: "Mitología Universal",
+    emoji: "⚡",
+    description: "Dioses, titanes y héroes de todas las culturas. Épicas inmortales narradas con poder cinematográfico.",
+    category: "mythology",
+    promptFile: "agent_mitologia.md",
+    tier: "starter",
+    exampleTopics: [
+      "La guerra entre Zeus y los Titanes",
+      "Quetzalcóatl: la serpiente emplumada",
+      "Thor y Ragnarök: el fin del mundo nórdico"
+    ],
+    color: "#FFD700",
+  },
+  {
+    agentId: "agent_conspiraciones",
+    name: "Conspiraciones",
+    emoji: "👁️",
+    description: "Sociedades secretas, encubrimientos gubernamentales y teorías que desafían la versión oficial.",
+    category: "mystery",
+    promptFile: "agent_conspiraciones.md",
+    tier: "creator",
+    exampleTopics: [
+      "Los Illuminati y el Nuevo Orden Mundial",
+      "Área 51: qué oculta realmente el gobierno",
+      "MK-Ultra: el programa de control mental de la CIA"
+    ],
+    color: "#2F4F4F",
+  },
+  {
+    agentId: "agent_tecnologia",
+    name: "Tecnología del Futuro",
+    emoji: "🤖",
+    description: "IA, implantes cerebrales, computación cuántica. El futuro que ya está aquí, explicado con claridad.",
+    category: "technology",
+    promptFile: "agent_tecnologia.md",
+    tier: "starter",
+    exampleTopics: [
+      "Neuralink: el chip que lee tu mente",
+      "La singularidad de la IA: ¿estamos listos?",
+      "Computación cuántica explicada sin dolor"
+    ],
+    color: "#00BFFF",
+  },
+  {
+    agentId: "agent_guerras",
+    name: "Guerras y Batallas",
+    emoji: "⚔️",
+    description: "Las batallas más épicas y brutales de la historia humana. Estrategia, sacrificio y destrucción.",
+    category: "history",
+    promptFile: "agent_guerras.md",
+    tier: "starter",
+    exampleTopics: [
+      "La batalla de Stalingrado: infierno en la tierra",
+      "D-Day: el día más largo",
+      "Las Termópilas: 300 espartanos vs un imperio"
+    ],
+    color: "#556B2F",
+  },
+  {
+    agentId: "agent_espionaje",
+    name: "Espionaje Real",
+    emoji: "🕵️",
+    description: "Operaciones encubiertas, agentes dobles y la Guerra Fría. Historias reales más intensas que la ficción.",
+    category: "mystery",
+    promptFile: "agent_espionaje.md",
+    tier: "creator",
+    exampleTopics: [
+      "La red de espías del Proyecto Manhattan",
+      "Aldrich Ames: el topo de la CIA",
+      "El Mossad y la caza de criminales nazis"
+    ],
+    color: "#363636",
+  },
+  {
+    agentId: "agent_apocalipsis",
+    name: "Apocalipsis y Catástrofes",
+    emoji: "🌋",
+    description: "Erupciones, tsunamis, pandemias y extinciones masivas. El poder destructivo de la naturaleza y el hombre.",
+    category: "science",
+    promptFile: "agent_apocalipsis.md",
+    tier: "starter",
+    exampleTopics: [
+      "La erupción de Pompeya en el año 79",
+      "El asteroide que mató a los dinosaurios",
+      "Chernóbil: la noche que envenenó Europa"
+    ],
+    color: "#FF4500",
+  },
+  {
+    agentId: "agent_religiones",
+    name: "Religiones del Mundo",
+    emoji: "🕌",
+    description: "Orígenes, rituales y misterios de las grandes religiones. Exploración respetuosa y fascinante.",
+    category: "philosophy",
+    promptFile: "agent_religiones.md",
+    tier: "starter",
+    exampleTopics: [
+      "Los orígenes del Islam",
+      "El budismo: de Siddhartha al Zen",
+      "Los misterios del Vaticano"
+    ],
+    color: "#9370DB",
+  },
+  {
+    agentId: "agent_metafisica",
+    name: "Metafísica y Consciencia",
+    emoji: "✨",
+    description: "Hermetismo, leyes universales, DMT y los límites de la realidad. Filosofía para despertar.",
+    category: "philosophy",
+    promptFile: "agent_metafisica.md",
+    tier: "creator",
+    exampleTopics: [
+      "El Kybalión: las 7 leyes del universo",
+      "¿Vivimos en una simulación?",
+      "DMT: la molécula del espíritu"
+    ],
+    color: "#7B68EE",
+  },
+  {
+    agentId: "agent_imperios",
+    name: "Imperios Legendarios",
+    emoji: "🦅",
+    description: "Ascenso, esplendor y caída de los imperios que dominaron el mundo. Poder absoluto y decadencia.",
+    category: "history",
+    promptFile: "agent_imperios.md",
+    tier: "starter",
+    exampleTopics: [
+      "El Imperio Mongol: la conquista más grande",
+      "El auge y caída del Imperio Británico",
+      "El Imperio Otomano: 600 años de poder"
+    ],
+    color: "#B8860B",
+  },
+  {
+    agentId: "agent_arte",
+    name: "Arte y Genios Creativos",
+    emoji: "🎨",
+    description: "Las mentes creativas más brillantes y torturadas. El arte como obsesión, locura y trascendencia.",
+    category: "biography",
+    promptFile: "agent_arte.md",
+    tier: "starter",
+    exampleTopics: [
+      "Van Gogh: genio, locura y girasoles",
+      "Da Vinci: el hombre que lo inventó todo",
+      "Frida Kahlo: dolor convertido en arte"
+    ],
+    color: "#FF69B4",
+  },
+  {
+    agentId: "agent_emprendimiento",
+    name: "Emprendimiento Extremo",
+    emoji: "🚀",
+    description: "Startups, fracasos épicos y fortunas creadas desde cero. Las historias reales detrás de los imperios modernos.",
+    category: "business",
+    promptFile: "agent_emprendimiento.md",
+    tier: "creator",
+    exampleTopics: [
+      "Elon Musk: de casi quebrar a Marte",
+      "WeWork: el fraude de $47 mil millones",
+      "Steve Jobs: el genio que fue despedido de su propia empresa"
+    ],
+    color: "#FF8C00",
+  },
+  {
+    agentId: "agent_negocios",
+    name: "Negocios y Estrategia",
+    emoji: "📊",
+    description: "Guerras corporativas, monopolios y las decisiones que crearon o destruyeron fortunas.",
+    category: "business",
+    promptFile: "agent_negocios.md",
+    tier: "creator",
+    exampleTopics: [
+      "La guerra Coca-Cola vs Pepsi",
+      "Amazon: cómo Jeff Bezos conquistó el comercio",
+      "Nokia: de gigante a irrelevante en 5 años"
+    ],
+    color: "#2E8B57",
+  },
+  {
+    agentId: "agent_liderazgo",
+    name: "Liderazgo y Poder",
+    emoji: "🎖️",
+    description: "Los líderes que cambiaron el curso de la historia. Carisma, estrategia y las sombras del poder.",
+    category: "biography",
+    promptFile: "agent_liderazgo.md",
+    tier: "starter",
+    exampleTopics: [
+      "Winston Churchill: liderazgo bajo fuego",
+      "Mandela: 27 años en prisión, cero rencor",
+      "Alejandro Magno: el conquistador de 25 años"
+    ],
+    color: "#4169E1",
+  },
+  {
+    agentId: "agent_biblico",
+    name: "Historias Bíblicas",
+    emoji: "📜",
+    description: "Las narrativas más poderosas de la Biblia con rigor histórico y cinematografía épica.",
+    category: "religion",
+    promptFile: "agent_biblico.md",
+    tier: "starter",
+    exampleTopics: [
+      "El Éxodo: la liberación de un pueblo",
+      "David vs Goliat: fe contra imposible",
+      "El Apocalipsis de Juan: visión del fin"
+    ],
+    color: "#8B4513",
+  },
+  {
+    agentId: "agent_viajes",
+    name: "Viajes y Exploraciones",
+    emoji: "🗺️",
+    description: "Las expediciones más peligrosas y los lugares más remotos del planeta. Aventura sin límites.",
+    category: "travel",
+    promptFile: "agent_viajes.md",
+    tier: "free",
+    exampleTopics: [
+      "La expedición perdida de Shackleton",
+      "Los lugares más peligrosos del mundo",
+      "Marco Polo: el viaje que cambió Occidente"
+    ],
+    color: "#20B2AA",
+  },
+  {
+    agentId: "agent_noticias_virales",
+    name: "Noticias Virales",
+    emoji: "📰",
+    description: "Los eventos más impactantes del momento explicados con profundidad. Contenido trending con contexto real.",
+    category: "news",
+    promptFile: "agent_noticias_virales.md",
+    tier: "creator",
+    exampleTopics: [
+      "Lo que nadie te dice sobre [evento actual]",
+      "La verdad detrás de la noticia viral",
+      "Por qué todo el mundo habla de esto"
+    ],
+    color: "#FF6347",
+  },
 ];
