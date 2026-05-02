@@ -57,6 +57,19 @@ GPT_MODEL = config["models"]["script_generation"]
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 CLAUDE_MODEL_SCRIPT = "claude-sonnet-4-6"
+
+# Tavily (Web Research)
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+tavily_client = None
+if TAVILY_API_KEY:
+    try:
+        from tavily import TavilyClient
+        tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
+        print("✅ Tavily Research Engine conectado.")
+    except ImportError:
+        print("⚠️ tavily-python no instalado — investigación web deshabilitada")
+else:
+    print("⚠️ TAVILY_API_KEY no configurada — guiones sin investigación web")
 CLAUDE_MODEL_PROMPTS = "claude-opus-4-7"
 
 # ============================================================
@@ -129,15 +142,73 @@ def load_prompt(filename: str) -> str:
 
 
 # ============================================================
+# MOTOR 0: INVESTIGACIÓN WEB (Tavily)
+# ============================================================
+def research_topic(topic: str, project_id: str = None) -> str:
+    """
+    Investiga un tema usando Tavily para obtener datos actuales y precisos.
+    Retorna un resumen de investigación formateado para inyectar en el prompt.
+    """
+    if not tavily_client:
+        print("   ⏭️ Tavily no disponible — generando sin investigación web")
+        return ""
+    
+    print(f"\n🔍 MOTOR 0: Investigando '{topic}' en la web...")
+    if project_id:
+        update_progress(project_id, "🔍 Investigando tema en la web...", 3)
+    
+    try:
+        # Búsqueda principal
+        result = tavily_client.search(
+            query=topic,
+            search_depth="advanced",
+            max_results=5,
+            include_answer=True,
+            include_raw_content=False,
+        )
+        
+        # Construir contexto de investigación
+        research_parts = []
+        
+        # Respuesta directa de Tavily
+        if result.get("answer"):
+            research_parts.append(f"RESUMEN: {result['answer']}")
+        
+        # Fuentes individuales
+        for i, source in enumerate(result.get("results", [])[:5], 1):
+            title = source.get("title", "")
+            content = source.get("content", "")[:500]
+            url = source.get("url", "")
+            research_parts.append(f"FUENTE {i}: {title}\n{content}\n({url})")
+        
+        research_text = "\n\n".join(research_parts)
+        
+        word_count = len(research_text.split())
+        source_count = len(result.get("results", []))
+        print(f"   ✅ Investigación completada: {source_count} fuentes, {word_count} palabras")
+        
+        if project_id:
+            update_progress(project_id, f"🔍 {source_count} fuentes encontradas", 5)
+        
+        return research_text
+        
+    except Exception as e:
+        print(f"   ⚠️ Error en investigación Tavily: {e}")
+        return ""
+
+
+# ============================================================
 # MOTOR 1: GUIÓN NARRATIVO (GPT-5.5)
 # ============================================================
-def generate_script(topic: str, agent_file: str = "agent_erotico_historico.md") -> dict:
+def generate_script(topic: str, agent_file: str = "agent_erotico_historico.md", project_id: str = None) -> dict:
     """
     Genera un guión narrativo completo usando GPT-5.5.
+    Incluye investigación web via Tavily cuando está disponible.
     
     Args:
         topic: El tema del video (ej: "La vida en Edo feudal 1700")
         agent_file: Archivo del agente personalidad a usar
+        project_id: ID del proyecto en Firebase para progreso
     
     Returns:
         dict con el guión, metadata y estadísticas
@@ -147,10 +218,22 @@ def generate_script(topic: str, agent_file: str = "agent_erotico_historico.md") 
     print(f"   Modelo: {GPT_MODEL}")
     print(f"   Agente: {agent_name} ({agent_file})")
     
+    # ── Paso 0: Investigación Web ──
+    research_context = research_topic(topic, project_id)
+    research_block = ""
+    if research_context:
+        research_block = f"""\n\n═══ INVESTIGACIÓN WEB ACTUAL ═══
+Usa los siguientes datos reales y actuales como base factual para tu narrativa.
+Incorpora nombres, fechas, cifras y hechos específicos de estas fuentes.
+NO copies el texto directamente — reformula con tu estilo cinematográfico.
+
+{research_context}
+═══ FIN DE INVESTIGACIÓN ═══\n"""
+    
     # Cargar el prompt del AI Agent seleccionado
     agent_prompt = load_prompt(agent_file)
     
-    # Llamada a IA (Priorizando Claude Sonnet 3.5 por tokens de OpenAI agotados)
+    # Llamada a IA (Priorizando Claude Sonnet por tokens de OpenAI agotados)
     if claude_client:
         response = claude_client.messages.create(
             model=CLAUDE_MODEL_SCRIPT,
@@ -162,7 +245,7 @@ def generate_script(topic: str, agent_file: str = "agent_erotico_historico.md") 
                     "content": f"""Genera una narrativa inmersiva completa sobre el siguiente tema:
 
 TEMA: {topic}
-
+{research_block}
 Requisitos:
 - 8,000 a 9,000 caracteres de narrativa fluida
 - 10 secciones que transicionen naturalmente
@@ -170,7 +253,8 @@ Requisitos:
 - Tono: Cinematográfico, inmersivo, educativo pero entretenido
 - Incluye detalles históricos específicos (nombres, fechas, costumbres)
 - NO uses viñetas ni encabezados — narrativa pura y fluida
-- Cada sección debe fluir orgánicamente hacia la siguiente"""
+- Cada sección debe fluir orgánicamente hacia la siguiente
+{"- IMPORTANTE: Incorpora datos y hechos de la investigación web proporcionada" if research_context else ""}"""
                 }
             ],
         )
@@ -203,7 +287,9 @@ Requisitos:
             "characters": char_count,
             "words": word_count,
             "estimated_duration_minutes": round(estimated_minutes, 1),
-            "generated_at": datetime.now().isoformat()
+            "generated_at": datetime.now().isoformat(),
+            "web_research": bool(research_context),
+            "research_sources": len(research_context.split("FUENTE")) - 1 if research_context else 0,
         }
     }
     
