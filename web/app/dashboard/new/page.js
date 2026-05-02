@@ -15,6 +15,50 @@ export default function NewProjectPage() {
   const [creating, setCreating] = useState(false);
   const [previewAgent, setPreviewAgent] = useState(null);
 
+  // Agent recommender — opcional, si el usuario tipea su idea le señalamos
+  // los 3 agentes más afines (resto siguen visibles por si quiere otro).
+  const [ideaInput, setIdeaInput] = useState("");
+  const [recommendations, setRecommendations] = useState([]); // [{agent_id, score, reason}]
+  const [recommending, setRecommending] = useState(false);
+  const [recommendError, setRecommendError] = useState(null);
+
+  const fetchRecommendations = async () => {
+    const idea = ideaInput.trim();
+    if (idea.length < 5) {
+      setRecommendError("Escribe al menos unas palabras de tu idea");
+      return;
+    }
+    setRecommending(true);
+    setRecommendError(null);
+    setRecommendations([]);
+    const apiBase = process.env.NEXT_PUBLIC_VPS_API_URL || "https://api.valtyk.com";
+    try {
+      const res = await fetch(`${apiBase}/recommend-agent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: idea }),
+      });
+      const data = await res.json();
+      if (data.recommendations?.length) {
+        setRecommendations(data.recommendations);
+        // Pre-cargar el topic con la idea para que en step 2 ya esté
+        if (!topic) setTopic(idea);
+      } else {
+        setRecommendError(data.error || "No se pudo sugerir, elige manualmente");
+      }
+    } catch (e) {
+      setRecommendError("Error de conexión, elige manualmente");
+    } finally {
+      setRecommending(false);
+    }
+  };
+
+  // Mapa rápido para saber si un agente está recomendado y en qué posición
+  const recommendationMap = recommendations.reduce((acc, r, i) => {
+    acc[r.agent_id] = { rank: i + 1, ...r };
+    return acc;
+  }, {});
+
   const creditsLeft = Math.max(0, (profile?.credits?.included || 0) - (profile?.credits?.used || 0)) + (profile?.credits?.extra || 0);
 
   const handleCreate = async () => {
@@ -96,25 +140,85 @@ export default function NewProjectPage() {
       {/* STEP 1: Agent Selection */}
       {step === 1 && (
         <div className="animate-fade-in">
+
+          {/* Recomendador inteligente — opcional */}
+          <div className="glass-card" style={{ padding: 20, marginBottom: 24 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
+              ✨ ¿No sabes cuál elegir? Cuéntanos tu idea
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 12 }}>
+              Te sugerimos los agentes que mejor encajan. Es opcional — también puedes elegir manualmente abajo.
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input
+                className="input-field"
+                placeholder='Ej: "La caída del Imperio Romano" o "Por qué los gatos ronronean"'
+                value={ideaInput}
+                onChange={(e) => setIdeaInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !recommending) fetchRecommendations(); }}
+                style={{ flex: "1 1 280px", fontSize: 14 }}
+              />
+              <button
+                className="btn-glow"
+                onClick={fetchRecommendations}
+                disabled={recommending || ideaInput.trim().length < 5}
+                style={{ padding: "10px 20px", fontSize: 13, whiteSpace: "nowrap" }}
+              >
+                {recommending ? "Pensando…" : "Sugerir agentes"}
+              </button>
+            </div>
+            {recommendError && (
+              <div style={{ marginTop: 10, fontSize: 12, color: "#fca5a5" }}>{recommendError}</div>
+            )}
+            {recommendations.length > 0 && (
+              <div style={{ marginTop: 14, fontSize: 12, color: "var(--text-muted)" }}>
+                💡 Los 3 agentes recomendados están marcados abajo. Click para seleccionar.
+              </div>
+            )}
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
-            {SYSTEM_AGENTS.map((agent, i) => (
+            {SYSTEM_AGENTS.map((agent, i) => {
+              const rec = recommendationMap[agent.agentId];
+              const rankLabel = rec ? (rec.rank === 1 ? "✨ Mejor opción" : rec.rank === 2 ? "🥈 Buena opción" : "🥉 Alternativa") : null;
+              return (
               <div
                 key={agent.agentId}
                 className={`agent-card animate-fade-in ${selectedAgent?.agentId === agent.agentId ? "selected" : ""}`}
-                style={{ "--agent-color": agent.color, animationDelay: `${i * 0.05}s`, opacity: 0 }}
+                style={{
+                  "--agent-color": agent.color,
+                  animationDelay: `${i * 0.05}s`,
+                  opacity: 0,
+                  // Resalta los recomendados con borde brillante
+                  ...(rec ? {
+                    boxShadow: `0 0 0 2px ${agent.color}, 0 0 24px ${agent.color}55`,
+                    transform: "scale(1.02)",
+                  } : {}),
+                }}
                 onClick={() => { setSelectedAgent(agent); setPreviewAgent(agent); }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                   <div style={{ fontSize: 32 }}>{agent.emoji}</div>
-                  <span className={`badge badge-${agent.tier}`}>{agent.tier}</span>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    {rankLabel && (
+                      <span className="badge badge-pro" style={{ fontSize: 10, fontWeight: 700 }}>{rankLabel}</span>
+                    )}
+                    <span className={`badge badge-${agent.tier}`}>{agent.tier}</span>
+                  </div>
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>{agent.name}</div>
                 <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 12 }}>{agent.description}</div>
+                {rec && rec.reason && (
+                  <div style={{ fontSize: 12, color: "var(--accent)", fontStyle: "italic", marginBottom: 8, padding: "6px 10px", background: "rgba(139, 0, 0, 0.08)", borderRadius: 6 }}>
+                    {rec.reason}
+                  </div>
+                )}
                 <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
                   Ejemplo: {agent.exampleTopics[0]}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Preview panel */}

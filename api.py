@@ -190,6 +190,101 @@ def serve_image(project: str, filename: str):
         return FileResponse(img_path, media_type="image/png")
     return {"error": "Image not found"}
 
+
+# Catálogo compacto de agentes para el clasificador (id + descripción de 1 línea).
+# Mantener sincronizado con web/lib/agents.js — si agregas un agente allá,
+# también aquí, en el mismo orden.
+_AGENT_CATALOG = """
+[agent_horror] Horror Histórico — torturas, plagas, castillos malditos, episodios oscuros documentados
+[agent_misterios] Misterios Sin Resolver — desapariciones, casos fríos, anomalías sin explicación
+[agent_biografias] Biografías Épicas — vidas legendarias con drama humano, figuras históricas
+[agent_ciencia] Ciencia Explicada — universo, física cuántica, biología, asombro cósmico
+[agent_finanzas] Catástrofes Financieras — crashes bursátiles, esquemas Ponzi, burbujas, fraudes
+[agent_filosofia] Filosofía Estoica — Marco Aurelio, Séneca, sabiduría aplicada al presente
+[agent_erotico_historico] Romance Histórico — cortes reales, cortesanas, poder y seducción de época
+[agent_historico] Documental Histórico — vida cotidiana en eras antiguas, "un día en la vida de"
+[agent_psicologia_oscura] Psicología Oscura — manipulación, narcisistas, psicópatas, cultos, control mental
+[agent_civilizaciones] Civilizaciones Perdidas — Mayas, Atlántida, Sumeria, descubrimientos arqueológicos
+[agent_true_crime] True Crime — asesinos seriales, crímenes famosos, investigaciones policiacas
+[agent_mitologia] Mitología Universal — dioses, mitos, leyendas de culturas del mundo
+[agent_conspiraciones] Conspiraciones — MK-Ultra, Area 51, gobiernos secretos, documentos clasificados
+[agent_tecnologia] Tecnología del Futuro — IA, neuralink, fusión nuclear, robots, computación cuántica
+[agent_guerras] Guerras y Batallas — Stalingrado, batallas decisivas, estrategia militar épica
+[agent_espionaje] Espionaje Real — espías reales, KGB, CIA, operaciones encubiertas
+[agent_apocalipsis] Apocalipsis y Catástrofes — Pompeya, Chernóbil, desastres naturales históricos
+[agent_religiones] Religiones del Mundo — Vaticano, sectas, misticismo, historia de creencias
+[agent_metafisica] Metafísica y Consciencia — Jung, DMT, simulación, experiencias cercanas a la muerte
+[agent_imperios] Imperios Legendarios — Mongol, Romano, Otomano, auge y caída de potencias
+[agent_arte] Arte y Genios Creativos — Van Gogh, Da Vinci, Picasso, vidas atormentadas de artistas
+[agent_emprendimiento] Emprendimiento Extremo — Musk, Jobs, fundadores que casi quiebran y resurgen
+[agent_negocios] Negocios y Estrategia — guerras corporativas, quiebras famosas, decisiones empresariales
+[agent_liderazgo] Liderazgo y Poder — Mandela, Churchill, líderes que cambiaron el mundo
+[agent_biblico] Historias Bíblicas — Éxodo, Apocalipsis, arqueología bíblica, relatos sagrados
+[agent_viajes] Viajes y Exploraciones — Shackleton, Everest, lugares peligrosos del mundo
+[agent_noticias_virales] Noticias Virales — eventos actuales que están en tendencia esta semana
+""".strip()
+
+
+@app.post("/recommend-agent")
+async def recommend_agent(request: Request):
+    """
+    Dado un tema/idea de video del usuario, devuelve los 3 agentes más adecuados
+    en orden de mejor a peor match. Cada uno con score (0-100) y razón corta.
+    """
+    try:
+        data = await request.json()
+        topic = (data.get("topic") or "").strip()
+        if len(topic) < 5:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=400,
+                content={"error": "topic too short (min 5 chars)"},
+            )
+
+        prompt = (
+            f"Tienes este catálogo de agentes especializados (cada uno con un id y descripción):\n"
+            f"{_AGENT_CATALOG}\n\n"
+            f'El usuario quiere hacer un video documental sobre: "{topic}"\n\n'
+            f"Responde EXCLUSIVAMENTE con un JSON array de los 3 mejores agentes, "
+            f"ordenados de mejor a peor match. Sin texto adicional, sin markdown, solo el JSON.\n"
+            f"Formato exacto:\n"
+            f'[\n'
+            f'  {{"agent_id": "agent_xxx", "score": 95, "reason": "frase corta en español"}},\n'
+            f'  {{"agent_id": "agent_xxx", "score": 80, "reason": "frase corta en español"}},\n'
+            f'  {{"agent_id": "agent_xxx", "score": 70, "reason": "frase corta en español"}}\n'
+            f"]\n"
+            f"Reglas: score 0-100. Reason en español, máximo 12 palabras, explica por qué encaja."
+        )
+
+        from anthropic import Anthropic
+        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = resp.content[0].text.strip()
+
+        # Por si el modelo envuelve en markdown a pesar de la instrucción
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text
+            text = text.rsplit("```", 1)[0].strip()
+
+        recommendations = json.loads(text)
+        if not isinstance(recommendations, list) or not recommendations:
+            raise ValueError("respuesta sin recomendaciones")
+
+        return {
+            "recommendations": recommendations[:3],
+            "tokens_used": resp.usage.input_tokens + resp.usage.output_tokens,
+        }
+    except Exception as e:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)[:200], "recommendations": []},
+        )
+
 @app.get("/video-url/{project_id}")
 def get_video_url(project_id: str):
     """
