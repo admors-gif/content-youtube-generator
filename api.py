@@ -56,7 +56,8 @@ def download_video(project: str):
         all_mp4 = [f for f in video_dir.glob("*.mp4") if "kenburns" not in str(f)]
         video_file = all_mp4[0] if all_mp4 else None
     if not video_file:
-        return {"error": "Video not found"}
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"error": f"Video not found in {video_dir}"})
     
     file_size = video_file.stat().st_size
     safe_name = video_file.name.encode('ascii', 'ignore').decode('ascii') or "video.mp4"
@@ -457,7 +458,28 @@ def run_production(project_id):
                     sys.path.insert(0, "/app/scripts")
                     from generate_subtitles import add_subtitles_to_video
                     
+                    # Buscar audio master en varias ubicaciones
                     master_audio = video_dir / "master_audio.mp3"
+                    if not master_audio.exists():
+                        # Concatenar narraciones individuales si existen
+                        audio_dir = video_dir / "audio"
+                        if audio_dir.exists():
+                            narrations = sorted(audio_dir.glob("narration_*.mp3"))
+                            if narrations:
+                                import subprocess as sp
+                                concat_list = video_dir / "_concat_audio.txt"
+                                with open(concat_list, "w") as cl:
+                                    for n in narrations:
+                                        cl.write(f"file '{n}'\n")
+                                sp.run([
+                                    "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                                    "-i", str(concat_list), "-c:a", "libmp3lame",
+                                    "-b:a", "192k", str(master_audio)
+                                ], capture_output=True, timeout=120)
+                                if concat_list.exists():
+                                    concat_list.unlink()
+                                print(f"   🎵 Master audio creado desde {len(narrations)} narraciones")
+                    
                     subtitled = add_subtitles_to_video(
                         video_path=regular_videos[0],
                         audio_path=master_audio if master_audio.exists() else None
@@ -495,6 +517,7 @@ def run_production(project_id):
             "progress.percent": 100,
             "progress.stepName": status_msg,
             "videoPath": final_path,
+            "videoFolder": safe_title,
             "hasSubtitles": has_subs,
         })
         

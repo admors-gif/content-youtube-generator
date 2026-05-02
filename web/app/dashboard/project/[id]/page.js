@@ -259,16 +259,19 @@ export default function ProjectDetailsPage({ params }) {
         {/* Botones de descarga */}
         {(project.status === "completed" || project.status === "producing") && (
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            {project.status === "completed" && (
-              <a
-                href={`/api/download/video/${encodeURIComponent(project.title?.replace(/ /g, '_').replace(/[^a-zA-Z0-9_\-]/g, '_'))}`}
-                className="btn-glow"
-                style={{ padding: "10px 20px", fontSize: "13px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "8px" }}
-                download
-              >
-                📥 Descargar Video
-              </a>
-            )}
+            {project.status === "completed" && (() => {
+                const folder = project.videoFolder || project.title?.replace(/ /g, '_').replace(/[^a-zA-Z0-9_\-]/g, '_');
+                return (
+                  <a
+                    href={`/api/download/video/${encodeURIComponent(folder)}`}
+                    className="btn-glow"
+                    style={{ padding: "10px 20px", fontSize: "13px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "8px" }}
+                    download
+                  >
+                    📥 Descargar Video
+                  </a>
+                );
+              })()}
             <a
               href={`/api/download/images/${encodeURIComponent(project.title?.replace(/ /g, '_').replace(/[^a-zA-Z0-9_\-]/g, '_'))}`}
               className="btn-secondary"
