@@ -321,10 +321,62 @@ C:\Users\admor\Downloads\Content You tube Generator\
    - Frontend del proyecto (`web/app/dashboard/project/[id]/page.js`) cambiado: el botón "Descargar Video" ahora llama a `/video-url/{id}` y abre la URL devuelta. Caduca en 7 días pero se renueva al click siguiente.
    - Test verificado: video del Zodiac (170MB) subido OK, signed URL probada con HEAD → HTTP 200, video/mp4, 178MB.
 
-**Pendientes:**
-- Paso 9: GitHub Actions con usuario `deploy` dedicado en VPS para CI/CD.
-- Paso 10: Test end-to-end produciendo un video corto.
-- Paso 11: Cierre de MANUAL.md.
+**Pendientes (para próxima sesión):**
+- Paso 10: Test end-to-end produciendo un video corto (~50 min + ~$3 USD; mejor hacerlo en vivo, no autónomo).
+- Limpiar las 3 service account keys huérfanas en GCP (mantener solo la nueva `9baf89e22c...`).
+- Eliminar commit que contiene `hostinger_env.txt` con la key expuesta.
+- Eliminar tab "Audio TTS" del frontend (ítem 11.10 del backlog).
+- Enable Node 24 in GitHub Actions runner (annotation aviso de deprecation Node 20).
+
+### Fase 5 — CI/CD self-hosted (2026-05-02 ~6 AM UTC, completada)
+
+**Objetivo:** automatizar deploys del backend para que `git push` a master deployee automáticamente al VPS.
+
+**Decisión arquitectónica:** **GitHub Actions self-hosted runner instalado en el propio VPS**, en vez de SSH-based deploy desde GitHub Cloud.
+
+**Por qué self-hosted en lugar de SSH desde GitHub Cloud:**
+- Hostinger bloquea puerto 22 público (mismo firewall que bloquea 8085). Abrirlo expondría SSH al internet (riesgo de brute-force, fail2ban como mitigación).
+- Tailscale GitHub Action funcionaría pero requiere gestionar auth keys que rotar.
+- Self-hosted runner solo necesita conexión OUTBOUND a GitHub (que ya funciona), sin abrir nada.
+- El runner corre como el usuario `deploy` (en grupo `docker`), con acceso directo a `docker compose` sin SSH overhead.
+- Free para repos privados.
+
+**Componentes instalados:**
+- Usuario `deploy` (no root) con home en `/home/deploy/`, miembro del grupo `docker`.
+- `/docker/content-factory/` reasignado a ownership `deploy:deploy`.
+- GitHub Actions runner v2.328.0 en `/home/deploy/actions-runner/`, registrado como `vps-srv1375702` con labels `[self-hosted, linux, vps, docker]`.
+- Servicio systemd: `actions.runner.admors-gif-content-youtube-generator.vps-srv1375702.service` (auto-start on boot).
+- SSH keypair Ed25519 dedicado en local (`~/.ssh/gh_actions_vps`) — usado solo para administración del usuario deploy desde local, NO usado por GitHub Cloud.
+
+**Workflow:** `.github/workflows/deploy-vps.yml`
+- Trigger: push a `master` que toque `api.py`, `scripts/**`, `prompts/**`, `Dockerfile`, `docker-compose.yaml`, `requirements.txt`, o el workflow mismo. Plus `workflow_dispatch` manual.
+- Pasos:
+  1. Checkout shallow.
+  2. `rsync` del source a `/docker/content-factory/`, excluyendo `.env`, `.git/`, `web/`, `output/`, `node_modules/`, `Backups/`, JSONs sensibles, MANUAL/README/CONTEXT (no van a la imagen).
+  3. `docker compose up -d --build --remove-orphans`.
+  4. Loop esperando hasta 90s a que el container reporte `healthy`.
+  5. Smoke test: `curl https://api.valtyk.com/` y verifica `"status":"online"` en respuesta.
+  6. Imprime últimos 20 logs del container (siempre, para troubleshooting).
+- Concurrency group `deploy-vps` evita deploys solapados.
+- `cancel-in-progress: false` — no cancelar deploys en curso (mejor terminar el actual que dejarlo a medias).
+
+**Primer deploy verificado:** `2026-05-02 06:10 UTC`, run ID `25245510349`, **completado en 16 segundos** end-to-end (de push a healthy + smoke test pasado).
+
+---
+
+## 14. Resumen de migración 2026-05-01/02
+
+| Antes | Después |
+|---|---|
+| Container roto (estado `Created`), API caída | Container `content-factory` healthy con healthcheck cada 30s |
+| Sin git como source of truth, drift Antigravity↔VPS | `git push` es la única forma de deployar |
+| API solo accesible vía Tailscale, mixed content | `https://api.valtyk.com` con HTTPS Let's Encrypt |
+| Descarga de videos rota | URL firmadas de Firebase Storage CDN, refresh on-demand vía `/video-url/{id}` |
+| Subtítulos fallaban silenciosamente | Validación robusta + doble fallback de concat |
+| Firebase key matemáticamente inconsistente (silent fail con cryptography ≥47) | Key nueva generada via `gcloud iam`, valida estricto |
+| Deploy manual artesanal con MCP de Antigravity | GitHub Actions self-hosted, 16s de push a producción verificada |
+| 7 videos producidos, sin tracking de ubicación | Los 7 en Firebase Storage + Firestore con `videoStoragePath` |
+| Sin documentación reproducible | Este MANUAL.md (~1400+ líneas) con todo el blueprint |
 
 ### Fase 4.5 — Incidente: Firebase service account key inconsistente (2026-05-01)
 
@@ -367,24 +419,41 @@ git push origin master
 # Vercel detecta el push y deploya en ~2 minutos
 ```
 
-### Backend → VPS (futuro: GitHub Actions)
-Una vez configurado GitHub Actions (Paso 9 de la migración), funcionará así:
+### Backend → VPS (GitHub Actions self-hosted runner)
+
+Cualquier push a `master` que toque archivos backend dispara el workflow `.github/workflows/deploy-vps.yml`, que corre en un runner self-hosted en el propio VPS:
 
 ```bash
-git add api.py scripts/ Dockerfile docker-compose.yml
-git commit -m "fix: ajuste backend"
+# Editar lo que sea
+git add api.py scripts/factory.py
+git commit -m "fix: ajuste pipeline"
 git push origin master
-# GitHub Actions detecta el push, construye imagen, hace SSH al VPS,
-# pull + docker compose up -d, verifica health endpoint, hace rollback si falla.
+
+# Esperar ~16 segundos. Listo.
+# Verificar estado del run:
+gh run list --workflow=deploy-vps.yml --limit 3
+# Ver logs en vivo del último run:
+gh run watch
 ```
 
-Mientras tanto (deploy manual via SSH):
+**El workflow hace automáticamente:**
+1. rsync del source a `/docker/content-factory/` (excluyendo .env, web/, secrets)
+2. `docker compose up -d --build --remove-orphans`
+3. Espera healthy (timeout 90s)
+4. Smoke test contra `https://api.valtyk.com/`
+5. Imprime logs
 
+**Si algo falla:** el workflow termina rojo. El container previo sigue corriendo (Docker no lo derriba si el nuevo falla en startup). Para diagnosticar:
 ```bash
-# Subir cambios al VPS
-scp -r api.py scripts/ Dockerfile docker-compose.yml root@100.99.207.113:/docker/content-factory/
+gh run view --log
+ssh root@100.99.207.113 "docker logs content-factory --tail 50"
+```
 
-# SSH y rebuild
+**Deploy manual (rara vez necesario, solo si el workflow está roto):**
+```bash
+ssh root@100.99.207.113 "cd /docker/content-factory && git pull <unused>" # repo no está en VPS
+# o
+scp api.py root@100.99.207.113:/docker/content-factory/
 ssh root@100.99.207.113 "cd /docker/content-factory && docker compose up -d --build"
 ```
 
