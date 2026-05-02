@@ -131,22 +131,6 @@ export default function ProjectDetailsPage({ params }) {
     return () => unsub();
   }, [user, id]);
 
-  if (loading) {
-    return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "60vh" }}>
-        <div className="spinner"></div>
-      </div>
-    );
-  }
-
-  if (!project) {
-    return <div>Proyecto no encontrado.</div>;
-  }
-
-  const agent = SYSTEM_AGENTS.find(a => a.agentId === project.agentId);
-  const isProcessing = project.progress?.percent > 0 && project.progress?.percent < 100 && project.status !== "error";
-  const eta = getETA();
-
   // ── Auto-approve: start timer when script is ready ──
   useEffect(() => {
     if (project?.script?.plain && project?.status === "script_ready" && !project?.script?.approved && !autoApproveTriggered.current) {
@@ -157,27 +141,6 @@ export default function ProjectDetailsPage({ params }) {
       setTimerActive(false);
     }
   }, [project?.script?.plain, project?.status, project?.script?.approved]);
-
-  useEffect(() => {
-    if (!timerActive || timerPaused) {
-      if (timerRef.current) clearInterval(timerRef.current);
-      return;
-    }
-    timerRef.current = setInterval(() => {
-      setTimerSeconds(prev => {
-        if (prev <= 1) {
-          clearInterval(timerRef.current);
-          if (!autoApproveTriggered.current) {
-            autoApproveTriggered.current = true;
-            executeApproval();
-          }
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timerRef.current);
-  }, [timerActive, timerPaused]);
 
   // Core approval logic (used by both manual and auto-approve)
   const executeApproval = useCallback(async () => {
@@ -202,6 +165,43 @@ export default function ProjectDetailsPage({ params }) {
       alert("Error: " + e.message);
     }
   }, [id, editedScript]);
+
+  useEffect(() => {
+    if (!timerActive || timerPaused) {
+      if (timerRef.current) clearInterval(timerRef.current);
+      return;
+    }
+    timerRef.current = setInterval(() => {
+      setTimerSeconds(prev => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current);
+          if (!autoApproveTriggered.current) {
+            autoApproveTriggered.current = true;
+            executeApproval();
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timerRef.current);
+  }, [timerActive, timerPaused, executeApproval]);
+
+  if (loading) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "60vh" }}>
+        <div className="spinner"></div>
+      </div>
+    );
+  }
+
+  if (!project) {
+    return <div>Proyecto no encontrado.</div>;
+  }
+
+  const agent = SYSTEM_AGENTS.find(a => a.agentId === project.agentId);
+  const isProcessing = project.progress?.percent > 0 && project.progress?.percent < 100 && project.status !== "error";
+  const eta = getETA();
 
   const handleSaveScript = async () => {
     autoApproveTriggered.current = true;
