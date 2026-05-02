@@ -4,7 +4,7 @@
  */
 export async function GET(request, { params }) {
   const { project } = await params;
-  const vpsUrl = process.env.NEXT_PUBLIC_VPS_API_URL || "http://100.99.207.113:8085";
+  const vpsUrl = process.env.NEXT_PUBLIC_VPS_API_URL || "http://187.77.30.158:8085";
 
   try {
     const response = await fetch(`${vpsUrl}/download/video/${encodeURIComponent(project)}`, {
