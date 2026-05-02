@@ -78,7 +78,9 @@ def _upload_video_to_storage(local_path: Path, project_id: str) -> dict | None:
     try:
         _ensure_firebase_initialized()
         from firebase_admin import storage
-        bucket = storage.bucket()
+        # Pasar bucket name explícito: si firebase_admin fue inicializado en otra
+        # parte del código sin storageBucket, storage.bucket() sin argumento falla
+        bucket = storage.bucket(FIREBASE_STORAGE_BUCKET)
         blob_name = f"videos/{project_id}/{local_path.name}"
         blob = bucket.blob(blob_name)
         size_mb = local_path.stat().st_size / (1024 * 1024)
@@ -208,7 +210,7 @@ def get_video_url(project_id: str):
         gs_path = data.get("videoStoragePath", "")
         if gs_path and gs_path.startswith("gs://"):
             blob_name = gs_path.split("/", 3)[3]  # remove gs://bucket/
-            bucket = storage.bucket()
+            bucket = storage.bucket(FIREBASE_STORAGE_BUCKET)
             blob = bucket.blob(blob_name)
             if blob.exists():
                 signed_url = blob.generate_signed_url(
