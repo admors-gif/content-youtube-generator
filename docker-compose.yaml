@@ -3,8 +3,9 @@ services:
     build:
       context: .
       args:
-        - CACHE_BUST=20260501v10-https
-    container_name: content-factory-v5
+        - CACHE_BUST=2026-05-01-migration-v8
+    image: content-factory-content-api:latest
+    container_name: content-factory
     ports:
       - "8085:8000"
     restart: unless-stopped
@@ -12,3 +13,12 @@ services:
       - .env
     volumes:
       - /opt/content-factory/output:/app/output
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "project=content-factory"
+      - "managed-by=docker-compose"
