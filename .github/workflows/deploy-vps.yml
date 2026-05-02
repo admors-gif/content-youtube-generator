@@ -1,0 +1,96 @@
+name: Deploy backend to VPS
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'api.py'
+      - 'scripts/**'
+      - 'prompts/**'
+      - 'Dockerfile'
+      - 'docker-compose.yaml'
+      - 'requirements.txt'
+      - '.github/workflows/deploy-vps.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build & deploy on srv1375702
+    runs-on: [self-hosted, linux, vps, docker]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Sync source to /docker/content-factory
+        run: |
+          set -euo pipefail
+          rsync -av --delete \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='node_modules/' \
+            --exclude='output/' \
+            --exclude='web/' \
+            --exclude='Backups/' \
+            --exclude='__pycache__/' \
+            --exclude='*.pyc' \
+            --exclude='*-key.json' \
+            --exclude='*-key*.json' \
+            --exclude='firebase-admin*.json' \
+            --exclude='content-factory-tts-*.json' \
+            --exclude='hostinger_env.txt' \
+            --exclude='CONTEXT_COMPLETO.md' \
+            --exclude='MANUAL.md' \
+            --exclude='README.md' \
+            ./ /docker/content-factory/
+          ls -la /docker/content-factory/
+
+      - name: Build and start container
+        run: |
+          set -euo pipefail
+          cd /docker/content-factory
+          docker compose up -d --build --remove-orphans
+
+      - name: Wait for healthcheck
+        run: |
+          set -euo pipefail
+          echo "Esperando hasta 90s a que el container reporte healthy..."
+          for i in $(seq 1 18); do
+            STATUS=$(docker inspect --format '{{.State.Health.Status}}' content-factory 2>/dev/null || echo "missing")
+            echo "  intento $i/18: status=$STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "Container healthy"
+              exit 0
+            fi
+            if [ "$STATUS" = "unhealthy" ]; then
+              echo "Container reporta UNHEALTHY"
+              docker logs content-factory --tail 40
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "Timeout esperando healthcheck"
+          docker logs content-factory --tail 40
+          exit 1
+
+      - name: Smoke test public HTTPS endpoint
+        run: |
+          set -euo pipefail
+          RESP=$(curl -sf https://api.valtyk.com/)
+          echo "Response: $RESP"
+          echo "$RESP" | grep -q '"status":"online"' || (echo "Respuesta no esperada" && exit 1)
+
+      - name: Show recent container logs
+        if: always()
+        run: |
+          docker logs content-factory --tail 20 2>&1 || true
