@@ -351,16 +351,16 @@ export default function ProjectDetailsPage({ params }) {
               </button>
             )}
             {videoState.loading && (
-              <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>Cargando URL firmada…</span>
+              <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>Preparando reproductor…</span>
             )}
             {videoState.url && (
               <button
                 onClick={copyVideoUrl}
                 className="btn-secondary"
                 style={{ padding: "6px 12px", fontSize: "12px", cursor: "pointer" }}
-                title="Copiar URL al portapapeles (válida 7 días)"
+                title="Copiar enlace al portapapeles"
               >
-                📋 Copiar URL
+                📋 Copiar enlace
               </button>
             )}
           </div>
@@ -385,11 +385,6 @@ export default function ProjectDetailsPage({ params }) {
             </video>
           )}
 
-          {!videoState.url && !videoState.loading && !videoState.error && (
-            <p style={{ margin: "12px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>
-              El video se sirve desde Firebase Storage con URL firmada (válida 7 días, se renueva al cargar).
-            </p>
-          )}
         </div>
       )}
 
