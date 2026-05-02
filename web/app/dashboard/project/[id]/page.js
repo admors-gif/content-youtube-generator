@@ -65,6 +65,35 @@ export default function ProjectDetailsPage({ params }) {
   const [displayPercent, setDisplayPercent] = useState(0);
   const [startTime, setStartTime] = useState(null);
 
+  // ── Inline video player state (lazy-loaded, fetches signed URL on click) ──
+  const [videoState, setVideoState] = useState({ url: null, loading: false, error: null });
+
+  const loadVideoPlayer = async () => {
+    setVideoState({ url: null, loading: true, error: null });
+    const vpsBase = process.env.NEXT_PUBLIC_VPS_API_URL || "https://api.valtyk.com";
+    try {
+      const res = await fetch(`${vpsBase}/video-url/${encodeURIComponent(id)}`);
+      const data = await res.json();
+      if (data.url) {
+        const finalUrl = data.url.startsWith("http") ? data.url : `${vpsBase}${data.url}`;
+        setVideoState({ url: finalUrl, loading: false, error: null });
+      } else {
+        setVideoState({ url: null, loading: false, error: data.error || "URL no disponible" });
+      }
+    } catch (err) {
+      setVideoState({ url: null, loading: false, error: err.message });
+    }
+  };
+
+  const copyVideoUrl = async () => {
+    if (!videoState.url) return;
+    try {
+      await navigator.clipboard.writeText(videoState.url);
+    } catch (e) {
+      // Silent fail; copy is nice-to-have
+    }
+  };
+
   // Track when generation starts
   useEffect(() => {
     if (project?.progress?.percent > 0 && project?.progress?.percent < 100 && !startTime) {
@@ -302,6 +331,67 @@ export default function ProjectDetailsPage({ params }) {
         )}
 
       </div>
+
+      {/* Reproductor de video (solo cuando el proyecto está completado) */}
+      {project.status === "completed" && (
+        <div className="glass-card animate-fade-in" style={{ marginBottom: "32px", padding: "20px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: videoState.url ? "16px" : "0" }}>
+            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "bold", display: "flex", alignItems: "center", gap: "8px" }}>
+              🎬 Reproductor
+              {project.hasSubtitles && <span className="badge badge-free" style={{ fontSize: "10px" }}>Con subtítulos</span>}
+              {project.videoSizeMB && <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "normal" }}>{project.videoSizeMB} MB</span>}
+            </h3>
+            {!videoState.url && !videoState.loading && (
+              <button
+                onClick={loadVideoPlayer}
+                className="btn-glow"
+                style={{ padding: "8px 16px", fontSize: "13px", border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                ▶️ Cargar reproductor
+              </button>
+            )}
+            {videoState.loading && (
+              <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>Cargando URL firmada…</span>
+            )}
+            {videoState.url && (
+              <button
+                onClick={copyVideoUrl}
+                className="btn-secondary"
+                style={{ padding: "6px 12px", fontSize: "12px", cursor: "pointer" }}
+                title="Copiar URL al portapapeles (válida 7 días)"
+              >
+                📋 Copiar URL
+              </button>
+            )}
+          </div>
+
+          {videoState.error && (
+            <div style={{ padding: "12px", background: "rgba(220, 38, 38, 0.1)", border: "1px solid rgba(220, 38, 38, 0.3)", borderRadius: "8px", color: "#fca5a5", fontSize: "13px" }}>
+              ❌ {videoState.error}
+              <button onClick={loadVideoPlayer} style={{ marginLeft: "12px", padding: "4px 10px", fontSize: "12px", background: "transparent", border: "1px solid currentColor", color: "inherit", borderRadius: "4px", cursor: "pointer" }}>
+                Reintentar
+              </button>
+            </div>
+          )}
+
+          {videoState.url && (
+            <video
+              src={videoState.url}
+              controls
+              preload="metadata"
+              style={{ width: "100%", maxHeight: "70vh", background: "#000", borderRadius: "8px", display: "block" }}
+            >
+              Tu navegador no soporta video HTML5.
+            </video>
+          )}
+
+          {!videoState.url && !videoState.loading && !videoState.error && (
+            <p style={{ margin: "12px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>
+              El video se sirve desde Firebase Storage con URL firmada (válida 7 días, se renueva al cargar).
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Tabs Menu */}
       <div style={{ display: "flex", gap: "16px", marginBottom: "24px", borderBottom: "1px solid var(--border)", paddingBottom: "8px" }}>
