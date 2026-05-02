@@ -59,7 +59,9 @@ jobs:
         run: |
           set -euo pipefail
           cd /docker/content-factory
-          docker compose up -d --build --remove-orphans
+          # --scale content-worker=3: mantiene 3 workers paralelos en cada deploy
+          # Sin esto, docker compose up resetearía a 1 réplica por defecto.
+          docker compose up -d --build --remove-orphans --scale content-worker=3
 
       - name: Wait for healthcheck
         run: |
