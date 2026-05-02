@@ -307,6 +307,7 @@ export default function ProjectDetailsPage({ params }) {
         {(project.status === "completed" || project.status === "producing") && (
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             {project.status === "completed" && (
+              <>
                 <button
                   onClick={async () => {
                     const vpsBase = process.env.NEXT_PUBLIC_VPS_API_URL || "https://api.valtyk.com";
@@ -314,14 +315,13 @@ export default function ProjectDetailsPage({ params }) {
                       const res = await fetch(`${vpsBase}/video-url/${encodeURIComponent(id)}`);
                       const data = await res.json();
                       if (data.url) {
-                        // Storage signed URL o fallback a /download/video del VPS
                         const finalUrl = data.url.startsWith("http") ? data.url : `${vpsBase}${data.url}`;
                         window.open(finalUrl, "_blank", "noopener,noreferrer");
                       } else {
-                        alert(`No se pudo obtener URL: ${data.error || "desconocido"}`);
+                        alert(`No se pudo obtener el enlace: ${data.error || "desconocido"}`);
                       }
                     } catch (err) {
-                      alert(`Error al obtener URL de descarga: ${err.message}`);
+                      alert(`Error al obtener el enlace: ${err.message}`);
                     }
                   }}
                   className="btn-glow"
@@ -329,7 +329,18 @@ export default function ProjectDetailsPage({ params }) {
                 >
                   📥 Descargar Video
                 </button>
-              )}
+                <a
+                  href={`${process.env.NEXT_PUBLIC_VPS_API_URL || "https://api.valtyk.com"}/download/all/${encodeURIComponent(id)}`}
+                  className="btn-secondary"
+                  style={{ padding: "10px 20px", fontSize: "13px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "8px" }}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Todo el material del proyecto en un ZIP organizado"
+                >
+                  📦 Descargar todo el material
+                </a>
+              </>
+            )}
           </div>
         )}
 

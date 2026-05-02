@@ -1,10 +1,10 @@
 from fastapi import FastAPI, BackgroundTasks, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import subprocess
 import os
 import json
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 from pathlib import Path
 
 FIREBASE_STORAGE_BUCKET = os.environ.get(
@@ -323,6 +323,119 @@ def get_video_url(project_id: str):
     except Exception as e:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+@app.get("/download/all/{project_id}")
+def download_all(project_id: str):
+    """
+    Streamea un ZIP con TODO el material del proyecto organizado en carpetas:
+    video/, audio/narrations/, images/, luma_clips/, ken_burns/, composites/,
+    + subtitulos.ass + transcripcion.json + guion.txt + proyecto.json.
+
+    Usa zipstream-ng para construir el ZIP on-the-fly (no en memoria),
+    crítico cuando hay 88+ archivos por proyecto y video final de 150-200MB.
+    """
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        from zipstream import ZipStream
+
+        db = firestore.client()
+        doc = db.collection("projects").document(project_id).get()
+        if not doc.exists:
+            return JSONResponse(status_code=404, content={"error": "project not found"})
+        data = doc.to_dict()
+
+        folder = data.get("videoFolder") or ""
+        title = data.get("title") or "proyecto"
+        if not folder:
+            return JSONResponse(status_code=404, content={"error": "project has no videoFolder"})
+
+        video_dir = Path(f"/app/output/videos/{folder}")
+        if not video_dir.is_dir():
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"folder {folder} not found on disk"},
+            )
+
+        zs = ZipStream(sized=True)
+
+        def add_glob(directory: Path, pattern: str, archive_subdir: str):
+            if not directory.is_dir():
+                return
+            for f in sorted(directory.glob(pattern)):
+                if f.is_file():
+                    zs.add_path(str(f), arcname=f"{folder}/{archive_subdir}/{f.name}")
+
+        def add_if(file_path: Path, arcname_rel: str):
+            if file_path.is_file():
+                zs.add_path(str(file_path), arcname=f"{folder}/{arcname_rel}")
+
+        # Videos finales (con y sin subtítulos)
+        for mp4 in sorted(video_dir.glob("FINAL_*.mp4")):
+            zs.add_path(str(mp4), arcname=f"{folder}/video/{mp4.name}")
+
+        # Audio: master + narraciones individuales
+        add_if(video_dir / "master_audio.mp3", "audio/master.mp3")
+        add_glob(video_dir / "audio", "narration_*.mp3", "audio/narrations")
+
+        # Imágenes
+        add_glob(video_dir / "images", "*.png", "images")
+        add_glob(video_dir / "images", "*.jpg", "images")
+
+        # Clips Luma
+        add_glob(video_dir / "luma_clips", "*.mp4", "luma_clips")
+
+        # Ken Burns (carpeta puede ser 'kenburns' o 'ken_burns' según versión)
+        for kb_name in ["kenburns", "ken_burns"]:
+            add_glob(video_dir / kb_name, "*.mp4", "ken_burns")
+
+        # Composites (mezclas intermedias)
+        add_glob(video_dir / "composites", "*.mp4", "composites")
+
+        # Otros activos sueltos del root del folder
+        add_if(video_dir / "subtitles.ass", "subtitulos.ass")
+        add_if(video_dir / "transcript.json", "transcripcion.json")
+        add_if(video_dir / "master_visual.mp4", "master_visual.mp4")
+
+        # Guión desde Firestore (no está en disco como .txt)
+        script_text = (data.get("script") or {}).get("plain") or ""
+        if script_text:
+            zs.add(script_text.encode("utf-8"), arcname=f"{folder}/guion.txt")
+
+        # Metadata del proyecto en JSON
+        meta = {
+            "id": project_id,
+            "title": title,
+            "agentId": data.get("agentId"),
+            "createdAt": str(data.get("createdAt")),
+            "completedAt": str(data.get("completedAt")),
+            "hasSubtitles": data.get("hasSubtitles"),
+            "videoFolder": folder,
+            "videoSizeMB": data.get("videoSizeMB"),
+            "viralityScore": data.get("viralityScore"),
+            "scenesCount": len(data.get("scenes") or []),
+            "downloadedAt": datetime.now(timezone.utc).isoformat(),
+        }
+        zs.add(
+            json.dumps(meta, indent=2, default=str).encode("utf-8"),
+            arcname=f"{folder}/proyecto.json",
+        )
+
+        # Sanitizar nombre del archivo descargado
+        safe_filename = "".join(c if (c.isalnum() or c in "_-") else "_" for c in folder)[:100]
+
+        return StreamingResponse(
+            iter(zs),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_filename}.zip"',
+                "Content-Length": str(len(zs)),
+                "Cache-Control": "no-cache",
+            },
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:300]})
 
 
 @app.get("/download/video/{project}")
