@@ -317,12 +317,6 @@ export default function ProjectDetailsPage({ params }) {
         >
           🎬 Escenas Visuales
         </button>
-        <button 
-          style={{ padding: "8px 16px", fontSize: "14px", fontWeight: "bold", transition: "all 0.3s", color: activeTab === 'audio' ? 'var(--accent)' : 'var(--text-secondary)', borderBottom: activeTab === 'audio' ? '2px solid var(--accent)' : '2px solid transparent', background: "none", borderTop: "none", borderLeft: "none", borderRight: "none", cursor: "pointer" }} 
-          onClick={() => setActiveTab("audio")}
-        >
-          🔊 Audio TTS
-        </button>
       </div>
 
       {/* Tab: Script */}
@@ -539,19 +533,6 @@ export default function ProjectDetailsPage({ params }) {
         </div>
       )}
 
-      {/* Tab: Audio */}
-      {activeTab === "audio" && (
-        <div className="glass-card animate-fade-in" style={{ padding: "48px", textAlign: "center" }}>
-          <div style={{ fontSize: "48px", marginBottom: "24px" }}>🎙️</div>
-          <h3 style={{ fontSize: "24px", fontWeight: "bold", margin: "0 0 12px 0" }}>Estudio de Audio TTS</h3>
-          <p style={{ color: "var(--text-secondary)", maxWidth: "400px", margin: "0 auto 24px auto", lineHeight: "1.5" }}>
-            Una vez apruebes el guión, el motor de voces neuronales generará la narración perfecta para tu documental.
-          </p>
-          <button className="btn-secondary" disabled style={{ opacity: 0.5, cursor: "not-allowed" }}>
-            Aprobar guión primero
-          </button>
-        </div>
-      )}
     </div>
   );
 }
