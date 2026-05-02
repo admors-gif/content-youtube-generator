@@ -36,6 +36,88 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+def _build_master_audio(video_dir: Path) -> Path | None:
+    """
+    Concatena narration_*.mp3 en master_audio.mp3 con validación robusta.
+
+    Estrategia:
+      1. Intenta concat demuxer (rápido). Funciona si todos los MP3 tienen mismo formato.
+      2. Si falla, intenta filter_complex (re-decodifica todo a un formato común).
+      3. Verifica que el archivo final exista y tenga tamaño > 0 antes de retornarlo.
+
+    Retorna Path al master_audio.mp3 si tuvo éxito, None si todo falló.
+    Loggea claramente cada paso para que el operador pueda diagnosticar.
+    """
+    audio_dir = video_dir / "audio"
+    if not audio_dir.is_dir():
+        print(f"   ⚠️ No existe {audio_dir} — no hay narraciones para concatenar")
+        return None
+
+    narrations = sorted(audio_dir.glob("narration_*.mp3"))
+    if not narrations:
+        print(f"   ⚠️ No se encontraron archivos narration_*.mp3 en {audio_dir}")
+        return None
+
+    print(f"   🔗 Concatenando {len(narrations)} narraciones en master_audio.mp3")
+    master_audio = video_dir / "master_audio.mp3"
+    concat_list = video_dir / "_concat_audio.txt"
+
+    try:
+        # Intento 1: concat demuxer (rápido, requiere mismo formato)
+        with open(concat_list, "w") as cl:
+            for n in narrations:
+                cl.write(f"file '{n}'\n")
+
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+             "-i", str(concat_list), "-c:a", "libmp3lame",
+             "-b:a", "192k", str(master_audio)],
+            capture_output=True, text=True, timeout=180,
+        )
+
+        if result.returncode == 0 and master_audio.exists() and master_audio.stat().st_size > 0:
+            print(f"   ✅ Concat demuxer OK ({master_audio.stat().st_size // 1024} KB)")
+            return master_audio
+
+        print(f"   ⚠️ Concat demuxer falló (rc={result.returncode}); intentando filter_complex")
+        if result.stderr:
+            print(f"      stderr: {result.stderr[-300:]}")
+
+        # Intento 2: filter_complex (lento pero robusto, re-decodifica todo)
+        inputs = []
+        for n in narrations:
+            inputs.extend(["-i", str(n)])
+        filter_str = "".join(f"[{i}:a]" for i in range(len(narrations))) + f"concat=n={len(narrations)}:v=0:a=1[out]"
+
+        result = subprocess.run(
+            ["ffmpeg", "-y", *inputs,
+             "-filter_complex", filter_str,
+             "-map", "[out]", "-c:a", "libmp3lame",
+             "-b:a", "192k", str(master_audio)],
+            capture_output=True, text=True, timeout=300,
+        )
+
+        if result.returncode == 0 and master_audio.exists() and master_audio.stat().st_size > 0:
+            print(f"   ✅ filter_complex OK ({master_audio.stat().st_size // 1024} KB)")
+            return master_audio
+
+        print(f"   ❌ filter_complex también falló (rc={result.returncode})")
+        if result.stderr:
+            print(f"      stderr: {result.stderr[-500:]}")
+        return None
+
+    except subprocess.TimeoutExpired:
+        print(f"   ❌ Timeout concatenando audio ({len(narrations)} archivos)")
+        return None
+    except Exception as e:
+        print(f"   ❌ Excepción concatenando audio: {e}")
+        return None
+    finally:
+        if concat_list.exists():
+            concat_list.unlink()
+
+
 @app.get("/images/{project}/{filename}")
 def serve_image(project: str, filename: str):
     """Sirve imágenes generadas desde el filesystem del VPS."""
@@ -457,38 +539,24 @@ def run_production(project_id):
                 try:
                     sys.path.insert(0, "/app/scripts")
                     from generate_subtitles import add_subtitles_to_video
-                    
-                    # Buscar audio master en varias ubicaciones
+
                     master_audio = video_dir / "master_audio.mp3"
                     if not master_audio.exists():
-                        # Concatenar narraciones individuales si existen
-                        audio_dir = video_dir / "audio"
-                        if audio_dir.exists():
-                            narrations = sorted(audio_dir.glob("narration_*.mp3"))
-                            if narrations:
-                                import subprocess as sp
-                                concat_list = video_dir / "_concat_audio.txt"
-                                with open(concat_list, "w") as cl:
-                                    for n in narrations:
-                                        cl.write(f"file '{n}'\n")
-                                sp.run([
-                                    "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-                                    "-i", str(concat_list), "-c:a", "libmp3lame",
-                                    "-b:a", "192k", str(master_audio)
-                                ], capture_output=True, timeout=120)
-                                if concat_list.exists():
-                                    concat_list.unlink()
-                                print(f"   🎵 Master audio creado desde {len(narrations)} narraciones")
-                    
-                    subtitled = add_subtitles_to_video(
-                        video_path=regular_videos[0],
-                        audio_path=master_audio if master_audio.exists() else None
-                    )
-                    if subtitled:
-                        sub_videos = [subtitled]
-                        print(f"   ✅ Subtítulos generados: {subtitled.name}")
+                        master_audio = _build_master_audio(video_dir)
+
+                    if master_audio is None or not master_audio.exists() or master_audio.stat().st_size == 0:
+                        print("   ⚠️ Sin audio maestro válido — saltando subtítulos")
                     else:
-                        print("   ⚠️ Subtítulos fallaron — continuando sin subs")
+                        print(f"   🎤 Audio maestro listo ({master_audio.stat().st_size // 1024} KB) → Whisper")
+                        subtitled = add_subtitles_to_video(
+                            video_path=regular_videos[0],
+                            audio_path=master_audio,
+                        )
+                        if subtitled:
+                            sub_videos = [subtitled]
+                            print(f"   ✅ Subtítulos generados: {subtitled.name}")
+                        else:
+                            print("   ⚠️ Subtítulos fallaron — continuando sin subs")
                 except Exception as sub_err:
                     print(f"   ⚠️ Error subtítulos: {sub_err}")
         
