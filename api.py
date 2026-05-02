@@ -3,7 +3,9 @@ from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import subprocess
 import os
+import sys
 import json
+import logging
 from datetime import timedelta, datetime, timezone
 from pathlib import Path
 
@@ -11,6 +13,57 @@ FIREBASE_STORAGE_BUCKET = os.environ.get(
     "FIREBASE_STORAGE_BUCKET",
     "content-factory-5cbcb.firebasestorage.app",
 )
+
+# ── Observabilidad ────────────────────────────────────────────────────────────
+# 1) Sentry: captura errores no-handleados con stack trace.
+#    Se activa solo si SENTRY_DSN está en .env, así dev local no envía nada.
+SENTRY_DSN = os.environ.get("SENTRY_DSN", "").strip()
+if SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.logging import LoggingIntegration
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            integrations=[
+                FastApiIntegration(),
+                LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+            ],
+            traces_sample_rate=0.1,    # 10% de requests trackean performance
+            profiles_sample_rate=0.0,   # Profiling desactivado (caro)
+            environment=os.environ.get("ENV", "production"),
+            release=os.environ.get("GIT_SHA", "unknown"),
+            send_default_pii=False,     # No enviar IPs ni headers sensibles
+        )
+        print(f"Sentry initialized (env={os.environ.get('ENV','production')})", flush=True)
+    except Exception as e:
+        print(f"Sentry init failed: {e}", flush=True)
+
+# 2) structlog: logs estructurados (JSON en prod, pretty en dev).
+#    Reemplaza print() con logger.info(event, **kwargs).
+try:
+    import structlog
+    _is_tty = sys.stderr.isatty()
+    structlog.configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso", utc=True),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            (structlog.dev.ConsoleRenderer(colors=True) if _is_tty
+             else structlog.processors.JSONRenderer()),
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+        cache_logger_on_first_use=True,
+    )
+    log = structlog.get_logger("content-factory")
+    log.info("logger_initialized", env=os.environ.get("ENV", "production"))
+except Exception as _log_err:
+    # Fallback a logging stdlib si structlog no está
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    log = logging.getLogger("content-factory")
+    log.warning(f"structlog init failed, using stdlib logging: {_log_err}")
 
 # ── Escribir firebase-admin.json desde variable de entorno (si existe) ──
 firebase_creds = os.environ.get("FIREBASE_CREDENTIALS", "")
@@ -496,6 +549,87 @@ def download_images_zip(project: str):
 @app.get("/")
 def health_check():
     return {"status": "online", "service": "Content Factory API"}
+
+
+@app.get("/metrics")
+def metrics():
+    """
+    Snapshot operacional del sistema. Pensado para chequeo rápido del operador
+    (curl o dashboard interno futuro), no expuesto al usuario final.
+
+    Devuelve:
+      - jobs.active: proyectos en producción ahora mismo
+      - jobs.completed_24h: producciones exitosas últimas 24h
+      - jobs.errored_24h: producciones con error últimas 24h
+      - sizes.total_storage_mb: suma de videoSizeMB de todos los completados
+      - api_uptime_seconds: cuánto lleva corriendo este worker
+    """
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=24)
+
+        # Solo agregamos métricas baratas (sin scan completo de la colección).
+        # En producción a escala, esto debe migrar a contadores agregados o cache.
+        all_projects = list(db.collection("projects").stream())
+
+        active = 0
+        completed_24h = 0
+        errored_24h = 0
+        total_size_mb = 0.0
+
+        for p in all_projects:
+            d = p.to_dict() or {}
+            status = d.get("status", "")
+            if status == "producing":
+                active += 1
+            size = d.get("videoSizeMB")
+            if isinstance(size, (int, float)):
+                total_size_mb += size
+            completed_at = d.get("completedAt")
+            if completed_at and hasattr(completed_at, "timestamp"):
+                if datetime.fromtimestamp(completed_at.timestamp(), tz=timezone.utc) >= cutoff:
+                    if status == "completed":
+                        completed_24h += 1
+                    elif status == "error":
+                        errored_24h += 1
+
+        uptime = (datetime.now(timezone.utc) - _STARTED_AT).total_seconds()
+
+        return {
+            "jobs": {
+                "active": active,
+                "completed_24h": completed_24h,
+                "errored_24h": errored_24h,
+                "total_known": len(all_projects),
+            },
+            "storage": {
+                "total_video_mb": round(total_size_mb, 1),
+            },
+            "api": {
+                "uptime_seconds": int(uptime),
+                "uptime_human": _humanize_seconds(uptime),
+                "started_at": _STARTED_AT.isoformat(),
+            },
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+_STARTED_AT = datetime.now(timezone.utc)
+
+
+def _humanize_seconds(s: float) -> str:
+    s = int(s)
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m {s % 60}s"
+    h = s // 3600
+    return f"{h}h {(s % 3600) // 60}m"
 
 @app.post("/generate")
 async def trigger_generation(request: Request, background_tasks: BackgroundTasks):
