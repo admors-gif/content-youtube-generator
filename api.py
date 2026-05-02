@@ -551,6 +551,47 @@ def health_check():
     return {"status": "online", "service": "Content Factory API"}
 
 
+@app.get("/queue/status/{task_id}")
+def queue_status(task_id: str):
+    """
+    Estado de un job en la cola Celery. Útil para debug y para que
+    el frontend pueda confirmar que un job sigue vivo.
+    """
+    try:
+        from worker_app import celery_app
+        result = celery_app.AsyncResult(task_id)
+        return {
+            "task_id": task_id,
+            "state": result.state,        # PENDING, STARTED, SUCCESS, FAILURE, RETRY, REVOKED
+            "ready": result.ready(),
+            "successful": result.successful() if result.ready() else None,
+            "result": str(result.result) if result.ready() else None,
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+@app.get("/queue/health")
+def queue_health():
+    """Verifica que el broker (Redis) esté accesible y haya workers conectados."""
+    try:
+        from worker_app import celery_app
+        i = celery_app.control.inspect(timeout=2)
+        active = i.active() or {}
+        scheduled = i.scheduled() or {}
+        registered = i.registered() or {}
+        worker_count = len(active)
+        return {
+            "broker_connected": worker_count > 0 or registered != {},
+            "workers": worker_count,
+            "active_tasks": sum(len(v) for v in active.values()),
+            "scheduled_tasks": sum(len(v) for v in scheduled.values()),
+            "worker_names": list(active.keys()) if active else list(registered.keys()),
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
 @app.get("/metrics")
 def metrics():
     """
@@ -651,19 +692,42 @@ async def trigger_generation(request: Request, background_tasks: BackgroundTasks
 
 @app.post("/produce")
 async def trigger_production(request: Request, background_tasks: BackgroundTasks):
-    """Dispara el pipeline de producción: Imágenes → Audio → Video Final."""
+    """
+    Encola la producción del video en la cola Celery.
+    Devuelve inmediato con un task_id (no bloquea esperando que termine).
+    Workers paralelos pickan el job y lo ejecutan; si uno muere, otro retoma.
+    """
     data = await request.json()
     project_id = data.get("projectId")
-    
+
     if not project_id:
         return {"status": "error", "message": "Missing 'projectId'"}
-    
-    background_tasks.add_task(run_production, project_id)
-    
-    return {
-        "status": "accepted",
-        "message": f"Production pipeline started for project {project_id}"
-    }
+
+    try:
+        from worker_tasks import produce_video
+        task = produce_video.delay(project_id)
+        return {
+            "status": "queued",
+            "task_id": task.id,
+            "project_id": project_id,
+            "message": f"Production enqueued for project {project_id}",
+        }
+    except Exception as queue_err:
+        # Fallback defensivo: si Redis/Celery no está disponible (worker container
+        # caído, network down), corremos inline como antes para no romper UX.
+        # Sentry captura el problema; el operador debe revisar.
+        print(f"[API] queue unavailable, falling back to inline: {queue_err}", flush=True)
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(queue_err)
+        except Exception:
+            pass
+        background_tasks.add_task(run_production, project_id)
+        return {
+            "status": "accepted",
+            "fallback": "inline",
+            "message": f"Production started inline for project {project_id} (queue unavailable)",
+        }
 
 @app.post("/retry")
 async def retry_production(request: Request, background_tasks: BackgroundTasks):
@@ -699,13 +763,25 @@ async def retry_production(request: Request, background_tasks: BackgroundTasks):
             "progress.percent": 5,
             "progress.stepName": "Retrying production...",
         })
-        
-        background_tasks.add_task(run_production, project_id)
-        
-        return {
-            "status": "accepted",
-            "message": f"Retry started for project {project_id}"
-        }
+
+        # Encolar via Celery (mismo patron que /produce)
+        try:
+            from worker_tasks import produce_video
+            task = produce_video.delay(project_id)
+            return {
+                "status": "queued",
+                "task_id": task.id,
+                "project_id": project_id,
+                "message": f"Retry enqueued for project {project_id}",
+            }
+        except Exception as queue_err:
+            print(f"[API] queue unavailable on retry, falling back to inline: {queue_err}", flush=True)
+            background_tasks.add_task(run_production, project_id)
+            return {
+                "status": "accepted",
+                "fallback": "inline",
+                "message": f"Retry started inline for project {project_id}",
+            }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

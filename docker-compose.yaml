@@ -1,9 +1,31 @@
 services:
+  # ── Redis dedicado para Content Factory ───────────────────────────────────
+  # Usado como broker + result backend de Celery (cola de jobs).
+  # Persistencia AOF activada (appendonly) para no perder cola en reinicio.
+  content-redis:
+    image: redis:7-alpine
+    container_name: content-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --save 60 1
+    volumes:
+      - /opt/content-factory/redis-data:/data
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "project=content-factory"
+      - "managed-by=docker-compose"
+
+  # ── API HTTP (FastAPI) — recibe requests, encola jobs ─────────────────────
   content-api:
     build:
       context: .
       args:
-        - CACHE_BUST=2026-05-01-migration-v8
+        - CACHE_BUST=2026-05-02-celery-v9
     image: content-factory-content-api:latest
     container_name: content-factory
     ports:
@@ -16,12 +38,43 @@ services:
     networks:
       - default
       - proxy
+    depends_on:
+      content-redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/').read()"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    labels:
+      - "project=content-factory"
+      - "managed-by=docker-compose"
+
+  # ── Workers Celery — pickan jobs de la cola y ejecutan la pipeline ───────
+  # Arrancamos con 1 worker (concurrency=1, 1 job a la vez por worker).
+  # Para escalar a N: docker compose up -d --scale content-worker=3
+  content-worker:
+    image: content-factory-content-api:latest
+    restart: unless-stopped
+    command: celery -A worker_app worker --loglevel=info --concurrency=1 -n worker@%h
+    env_file:
+      - .env
+    volumes:
+      - /opt/content-factory/output:/app/output
+    networks:
+      - default
+    depends_on:
+      content-redis:
+        condition: service_healthy
+      content-api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A worker_app inspect ping -t 10 || exit 1"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
     labels:
       - "project=content-factory"
       - "managed-by=docker-compose"
