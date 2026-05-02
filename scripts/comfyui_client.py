@@ -106,22 +106,35 @@ def check_status(prompt_id: str) -> dict:
     """
     Verifica el estado de un workflow en ejecución.
     Returns: dict con status y outputs si están listos.
+
+    Cloud Comfy API change (2026): el endpoint legacy /history/{id} fue removido,
+    ahora usa /jobs/{prompt_id} con shape de respuesta plana (no envuelto por id).
+    Mantenemos compatibilidad con ambos shapes por si entran en transición.
     """
     try:
         with httpx.Client(timeout=30.0) as client:
             response = client.get(
-                f"{COMFYUI_BASE_URL}/history/{prompt_id}",
-                headers=HEADERS
+                f"{COMFYUI_BASE_URL}/jobs/{prompt_id}",
+                headers=HEADERS,
             )
-            
+
             if response.status_code == 200:
                 data = response.json()
+                # Shape nuevo: respuesta plana con 'outputs' directo
+                if "outputs" in data:
+                    return data
+                # Shape legacy: respuesta envuelta por prompt_id
                 if prompt_id in data:
                     return data[prompt_id]
+                # Status sin outputs aún (job en progreso)
+                return data
+            elif response.status_code == 404:
+                # Job aún no aparece o id inválido — devolver vacío y seguir polleando
+                return None
             else:
-                print(f"   ⚠️  ComfyUI status code: {response.status_code} - {response.text[:100]}")
-            return None
-            
+                print(f"   ⚠️  ComfyUI status code: {response.status_code} - {response.text[:150]}")
+                return None
+
     except Exception as e:
         print(f"   ⚠️  Error checking status: {e}")
         return None
