@@ -31,3 +31,6 @@ web/.env.*
 
 # Generated Content
 output/videos/
+
+# Archivo legacy con keys, jamás re-incluir
+hostinger_env.txt
