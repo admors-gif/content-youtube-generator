@@ -4,27 +4,44 @@ from fastapi.middleware.cors import CORSMiddleware
 import subprocess
 import os
 import json
+from datetime import timedelta
 from pathlib import Path
+
+FIREBASE_STORAGE_BUCKET = os.environ.get(
+    "FIREBASE_STORAGE_BUCKET",
+    "content-factory-5cbcb.firebasestorage.app",
+)
 
 # ── Escribir firebase-admin.json desde variable de entorno (si existe) ──
 firebase_creds = os.environ.get("FIREBASE_CREDENTIALS", "")
 if firebase_creds:
     cred_path = "/app/firebase-admin.json"
     try:
-        # Intentar decodificar base64 primero
         import base64
         try:
             decoded = base64.b64decode(firebase_creds).decode("utf-8")
-            json.loads(decoded)  # Validar que es JSON
+            json.loads(decoded)
             firebase_creds = decoded
         except Exception:
             pass  # Ya es JSON raw
-        
+
+        # Normalización defensiva: des-escapar \\n en private_key si viene
+        # doble-escapado (problema común con creds pegados desde JSON anidado).
+        try:
+            data = json.loads(firebase_creds)
+            pk = data.get("private_key", "")
+            if "\\n" in pk and "BEGIN" in pk:
+                data["private_key"] = pk.replace("\\n", "\n")
+                firebase_creds = json.dumps(data)
+                print("Firebase credentials: private_key un-escaped \\n", flush=True)
+        except Exception as norm_err:
+            print(f"Firebase credentials: could not normalize: {norm_err}", flush=True)
+
         with open(cred_path, "w") as f:
             f.write(firebase_creds)
-        print(f"✅ Firebase credentials written to {cred_path}", flush=True)
+        print(f"Firebase credentials written to {cred_path}", flush=True)
     except Exception as e:
-        print(f"⚠️ Could not write Firebase credentials: {e}", flush=True)
+        print(f"Could not write Firebase credentials: {e}", flush=True)
 
 app = FastAPI(title="Content Factory API")
 
@@ -35,6 +52,51 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _ensure_firebase_initialized():
+    """Inicializa firebase_admin con storageBucket si no está activo. Idempotente."""
+    import firebase_admin
+    from firebase_admin import credentials
+    try:
+        firebase_admin.get_app()
+    except ValueError:
+        cred_path = "/app/firebase-admin.json"
+        if not os.path.exists(cred_path):
+            raise RuntimeError("firebase-admin.json no encontrado")
+        cred = credentials.Certificate(cred_path)
+        firebase_admin.initialize_app(cred, {"storageBucket": FIREBASE_STORAGE_BUCKET})
+
+
+def _upload_video_to_storage(local_path: Path, project_id: str) -> dict | None:
+    """
+    Sube un .mp4 a Firebase Storage en 'videos/{project_id}/{filename}'.
+
+    Retorna {"gs_path": "gs://bucket/videos/...", "signed_url": "https://..."}
+    o None si falla. La signed URL dura 7 días (máximo permitido por v4 signing).
+    """
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import storage
+        bucket = storage.bucket()
+        blob_name = f"videos/{project_id}/{local_path.name}"
+        blob = bucket.blob(blob_name)
+        size_mb = local_path.stat().st_size / (1024 * 1024)
+        print(f"   ☁️ Subiendo a Storage: {blob_name} ({size_mb:.1f} MB)")
+        blob.upload_from_filename(str(local_path), content_type="video/mp4")
+        signed_url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(days=7),
+            method="GET",
+        )
+        print(f"   ✅ Storage upload OK ({size_mb:.1f} MB)")
+        return {
+            "gs_path": f"gs://{bucket.name}/{blob_name}",
+            "signed_url": signed_url,
+        }
+    except Exception as e:
+        print(f"   ❌ Storage upload failed: {e}")
+        return None
 
 
 def _build_master_audio(video_dir: Path) -> Path | None:
@@ -125,6 +187,46 @@ def serve_image(project: str, filename: str):
     if img_path.exists():
         return FileResponse(img_path, media_type="image/png")
     return {"error": "Image not found"}
+
+@app.get("/video-url/{project_id}")
+def get_video_url(project_id: str):
+    """
+    Devuelve una URL firmada fresca (7 días) para el video del proyecto.
+    El frontend llama a este endpoint para obtener un link de descarga válido.
+    """
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore, storage
+
+        db = firestore.client()
+        doc = db.collection("projects").document(project_id).get()
+        if not doc.exists:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=404, content={"error": "project not found"})
+        data = doc.to_dict()
+
+        gs_path = data.get("videoStoragePath", "")
+        if gs_path and gs_path.startswith("gs://"):
+            blob_name = gs_path.split("/", 3)[3]  # remove gs://bucket/
+            bucket = storage.bucket()
+            blob = bucket.blob(blob_name)
+            if blob.exists():
+                signed_url = blob.generate_signed_url(
+                    version="v4", expiration=timedelta(days=7), method="GET",
+                )
+                return {"url": signed_url, "expiresInDays": 7, "source": "storage"}
+
+        # Fallback: video aún en VPS (proyecto producido antes de la migración)
+        video_folder = data.get("videoFolder", "")
+        if video_folder:
+            return {"url": f"/download/video/{video_folder}", "source": "vps", "note": "video not yet in Storage"}
+
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=404, content={"error": "no video available"})
+    except Exception as e:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
 
 @app.get("/download/video/{project}")
 def download_video(project: str):
@@ -342,18 +444,13 @@ def run_production(project_id):
     
     print(f"🏭 [PRODUCE] Starting CINEMATIC production for project {project_id}...")
     
-    # Inicializar Firebase si no está activo
+    # Inicializar Firebase con storageBucket (necesario para upload del video final)
     try:
-        firebase_admin.get_app()
-    except ValueError:
-        cred_path = "/app/firebase-admin.json"
-        if os.path.exists(cred_path):
-            cred = credentials.Certificate(cred_path)
-            firebase_admin.initialize_app(cred)
-        else:
-            print("❌ [PRODUCE] firebase-admin.json not found")
-            return
-    
+        _ensure_firebase_initialized()
+    except Exception as init_err:
+        print(f"❌ [PRODUCE] firebase init failed: {init_err}")
+        return
+
     db = firestore.client()
     doc_ref = db.collection("projects").document(project_id)
     
@@ -578,18 +675,30 @@ def run_production(project_id):
             final_path = ""
             has_subs = False
         
+        # Subir video final a Firebase Storage para entrega via CDN (sin pegar al VPS)
+        storage_info = None
+        if final_path:
+            update_progress(96, "☁️ Subiendo a Storage...")
+            storage_info = _upload_video_to_storage(Path(final_path), project_id)
+
         status_msg = "🏆 ¡Video cinemático finalizado!" if not has_subs else "🏆 ¡Video cinemático con subtítulos finalizado!"
-        
-        doc_ref.update({
+
+        update_payload = {
             "status": "completed",
             "progress.percent": 100,
             "progress.stepName": status_msg,
             "videoPath": final_path,
             "videoFolder": safe_title,
             "hasSubtitles": has_subs,
-        })
-        
-        print(f"🏆 [PRODUCE] Cinematic production complete! Subs: {has_subs} | {final_path}")
+        }
+        if storage_info:
+            update_payload["videoStoragePath"] = storage_info["gs_path"]
+            update_payload["videoUrl"] = storage_info["signed_url"]
+            update_payload["videoUrlExpiresAt"] = firestore.SERVER_TIMESTAMP
+
+        doc_ref.update(update_payload)
+
+        print(f"🏆 [PRODUCE] Cinematic production complete! Subs: {has_subs} | Storage: {bool(storage_info)} | {final_path}")
         
     except Exception as e:
         update_progress(0, f"Error: {str(e)[:100]}", "error")

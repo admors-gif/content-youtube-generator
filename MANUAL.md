@@ -284,13 +284,73 @@ C:\Users\admor\Downloads\Content You tube Generator\
 - Bug 1: descarga de video desde frontend no funciona (mixed content + Vercel no alcanza VPS).
 - Bug 2: subtítulos no se generan (Whisper nunca corre, $0 consumo OpenAI).
 
-### Fase 4 — Migración de arquitectura (en curso, 2026-05-01)
-- Detectado: contenedor `v7` en estado `Created` por conflicto de puerto 80 con nginx-proxy-manager.
-- Detectado: deploy via Antigravity → MCP Hostinger desincroniza el repo de git de la realidad del VPS.
-- Decisión: migrar deploy a `git push` → GitHub Actions → SSH al VPS.
-- Decisión: enrutar API por nginx-proxy-manager con HTTPS Let's Encrypt en `api.valtyk.com`.
-- Decisión: migrar entrega de videos a Firebase Storage para descargas confiables sin VPS.
-- Respaldo completo creado: `C:\Users\admor\Backups\content-factory-2026-05-01\`.
+### Fase 4 — Migración de arquitectura (2026-05-01, completada en gran parte)
+
+**Diagnósticos iniciales:**
+- Contenedor `v7` en estado `Created` por conflicto de puerto 80 con nginx-proxy-manager.
+- Deploy via Antigravity → MCP Hostinger desincroniza el repo de git de la realidad del VPS.
+
+**Decisiones tomadas:**
+- Migrar deploy a `git push` → GitHub Actions → SSH al VPS.
+- Enrutar API por nginx-proxy-manager con HTTPS Let's Encrypt en `api.valtyk.com`.
+- Migrar entrega de videos a Firebase Storage para descargas confiables sin VPS.
+
+**Acciones completadas:**
+
+1. ✅ **Respaldo completo** — `C:\Users\admor\Backups\content-factory-2026-05-01\` (configs VPS + inventario + imagen Docker 385MB + git tag `pre-migration-2026-05-01`).
+
+2. ✅ **Sync repo local con VPS** — corregido `docker-compose.yaml`: container name limpio (`content-factory`, sin sufijo de versión), removido conflicto puerto 80, agregado healthcheck contra `/`, agregado restart policy `unless-stopped`, agregado labels.
+
+3. ✅ **Manual blueprint creado** — este documento (MANUAL.md).
+
+4. ✅ **DNS `api.valtyk.com`** — A record en Namecheap → `187.77.30.158`. Propagó en <5 min.
+
+5. ✅ **Container deployado correctamente** — desde nuevo `docker-compose.yaml`, healthy, respondiendo en `8085:8000` via Tailscale.
+
+6. ✅ **nginx-proxy-manager configurado** — proxy host id=8 enrutando `api.valtyk.com` → `content-factory:8000`. SSL Let's Encrypt activo (cert id=12). HTTP/2 habilitado, HSTS habilitado, redirect HTTPS forzado.
+   - Conexión interna: `content-factory` agregado a la red Docker `evolution-network` (donde vive NPM) además de su `default`. Permite resolución por nombre sin depender de port mapping del host.
+
+6.1. ✅ **Vercel env actualizado** — `NEXT_PUBLIC_VPS_API_URL` cambió de `http://100.99.207.113:8085` (Tailscale only) a `https://api.valtyk.com` (público con HTTPS). Deployment forzado.
+
+7. ✅ **Fix de subtítulos endurecido** — `_build_master_audio()` extraído como helper en `api.py` con validación explícita de returncode, file existence, file size > 0. Doble fallback: concat demuxer rápido → filter_complex robusto si falla.
+
+8. ✅ **Firebase Storage habilitado y migrado** — usuario activó Storage en Firebase Console (one-time). Bucket: `content-factory-5cbcb.firebasestorage.app`.
+   - Función `_upload_video_to_storage()` agregada en `api.py` que sube el video final tras el ensamblaje.
+   - Endpoint `GET /video-url/{project_id}` agregado: devuelve URL firmada V4 fresca (7 días) on-demand.
+   - Firestore guarda `videoStoragePath` (gs://) permanente + `videoUrl` (signed URL inicial).
+   - Frontend del proyecto (`web/app/dashboard/project/[id]/page.js`) cambiado: el botón "Descargar Video" ahora llama a `/video-url/{id}` y abre la URL devuelta. Caduca en 7 días pero se renueva al click siguiente.
+   - Test verificado: video del Zodiac (170MB) subido OK, signed URL probada con HEAD → HTTP 200, video/mp4, 178MB.
+
+**Pendientes:**
+- Paso 9: GitHub Actions con usuario `deploy` dedicado en VPS para CI/CD.
+- Paso 10: Test end-to-end produciendo un video corto.
+- Paso 11: Cierre de MANUAL.md.
+
+### Fase 4.5 — Incidente: Firebase service account key inconsistente (2026-05-01)
+
+**Síntoma:** después del rebuild del container, ningún call a Firebase funcionaba con error `Invalid private key`.
+
+**Diagnóstico (qué se descubrió investigando):**
+- La librería `cryptography 47.0.0` (recién instalada en el rebuild) introduced strict RSA key validation.
+- El service account key existente (`private_key_id: 3950fecffe6f...`) era matemáticamente inconsistente: `p × q ≠ n` (los dos primos secretos no multiplicaban al módulo público).
+- `cryptography 46.x` (anterior) era más lenient y aceptaba la key.
+- OpenSSL también es lenient — por eso producir videos parecía funcionar antes.
+
+**Resolución:**
+- Generada nueva key via gcloud CLI (`9baf89e22c960ed654ea04dcca9f51e00b685804`).
+- La nueva key es matemáticamente consistente y pasa validación estricta.
+- `FIREBASE_CREDENTIALS` en `.env` del VPS reemplazado con base64 de la nueva key.
+- Backup del `.env` viejo guardado en VPS antes del cambio.
+
+**⚠️ Pendiente de seguridad:**
+- Hay 4 keys del service account en Google Cloud (debería haber solo 1):
+  - `6d4d16bb...` — DISABLED por Google (fue **expuesta en GitHub** en commit `20d9c528` del archivo `hostinger_env.txt`)
+  - `80864821bb...` — activa, sin uso conocido
+  - `3950fecffe6f...` — activa, era la corrupta que reemplazamos
+  - `9baf89e22c...` — la nueva, en uso
+  - `fbc2c0d6...` — activa, sin uso conocido
+- Acción recomendada: **borrar las 3 keys huérfanas** vía gcloud (`gcloud iam service-accounts keys delete <id>`).
+- Acción también recomendada: **examinar `hostinger_env.txt` en el repo** y borrar/limpiar el commit `20d9c528` que expuso la key (aunque ya está disabled, sigue siendo material sensible visible en el historial).
 
 ---
 
@@ -357,15 +417,11 @@ Pasos generales:
 
 > Lista de bugs activos. Se actualizan conforme se resuelven.
 
-### 🔴 Bug 1 — Descarga de video falla
-**Estado:** En proceso de fix (Pasos 5, 6, 8 de migración actual)
-**Causa raíz:** Frontend HTTPS intenta llamar a backend HTTP, browser bloquea por mixed content. Adicionalmente, Vercel no puede alcanzar VPS si está detrás de Tailscale.
-**Fix planeado:** API expuesta por `https://api.valtyk.com` (NPM + Let's Encrypt) + entrega final del video por URL firmada de Firebase Storage.
+### 🟢 Bug 1 — Descarga de video falla — **RESUELTO 2026-05-01**
+**Solución:** API ahora vive en `https://api.valtyk.com` (HTTPS via NPM + Let's Encrypt). Videos finales se suben automáticamente a Firebase Storage. Frontend descarga via URL firmada V4 que se renueva on-demand cada vez que se hace click en "Descargar Video". Cero dependencia del VPS para descargas.
 
-### 🔴 Bug 2 — Subtítulos no se generan
-**Estado:** Fix aplicado en `api.py:457-482` (fallback) pero no probado en producción.
-**Causa raíz:** El paso original en `factory.py` falla silenciosamente. El fallback en `api.py` concatena las narraciones individuales en `master_audio.mp3` antes de Whisper, pero no valida que el concat haya tenido éxito.
-**Fix planeado:** Endurecer validación en Paso 7 — verificar `result.returncode == 0` y `master_audio.exists()` y `size > 0` antes de llamar a Whisper.
+### 🟢 Bug 2 — Subtítulos no se generan — **FIX DEPLOYADO, pendiente verificación con video real**
+**Solución:** `_build_master_audio()` extraído como helper con validación robusta de returncode + file size. Doble fallback (concat demuxer → filter_complex). Si todo falla, no llama a Whisper (antes lo hacía con archivo inválido y fallaba silenciosamente). Pendiente: producir un video real para verificar (Paso 10).
 
 ### 🟡 Bug 3 — `factory.py` no genera subtítulos en el flujo principal
 **Estado:** Pendiente investigación.

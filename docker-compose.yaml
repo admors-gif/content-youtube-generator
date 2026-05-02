@@ -13,6 +13,9 @@ services:
       - .env
     volumes:
       - /opt/content-factory/output:/app/output
+    networks:
+      - default
+      - proxy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/').read()"]
       interval: 30s
@@ -22,3 +25,10 @@ services:
     labels:
       - "project=content-factory"
       - "managed-by=docker-compose"
+
+networks:
+  default:
+    driver: bridge
+  proxy:
+    external: true
+    name: evolution-network

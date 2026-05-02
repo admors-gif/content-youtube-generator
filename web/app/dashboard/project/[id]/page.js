@@ -259,21 +259,30 @@ export default function ProjectDetailsPage({ params }) {
         {/* Botones de descarga */}
         {(project.status === "completed" || project.status === "producing") && (
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            {project.status === "completed" && (() => {
-                const folder = project.videoFolder || project.title?.replace(/ /g, '_').replace(/[^a-zA-Z0-9_\-]/g, '_');
-                const vpsBase = process.env.NEXT_PUBLIC_VPS_API_URL || "http://100.99.207.113:8085";
-                return (
-                  <a
-                    href={`${vpsBase}/download/video/${encodeURIComponent(folder)}`}
-                    className="btn-glow"
-                    style={{ padding: "10px 20px", fontSize: "13px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "8px" }}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    📥 Descargar Video
-                  </a>
-                );
-              })()}
+            {project.status === "completed" && (
+                <button
+                  onClick={async () => {
+                    const vpsBase = process.env.NEXT_PUBLIC_VPS_API_URL || "https://api.valtyk.com";
+                    try {
+                      const res = await fetch(`${vpsBase}/video-url/${encodeURIComponent(id)}`);
+                      const data = await res.json();
+                      if (data.url) {
+                        // Storage signed URL o fallback a /download/video del VPS
+                        const finalUrl = data.url.startsWith("http") ? data.url : `${vpsBase}${data.url}`;
+                        window.open(finalUrl, "_blank", "noopener,noreferrer");
+                      } else {
+                        alert(`No se pudo obtener URL: ${data.error || "desconocido"}`);
+                      }
+                    } catch (err) {
+                      alert(`Error al obtener URL de descarga: ${err.message}`);
+                    }
+                  }}
+                  className="btn-glow"
+                  style={{ padding: "10px 20px", fontSize: "13px", border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "8px" }}
+                >
+                  📥 Descargar Video
+                </button>
+              )}
             {(() => {
                 const folder = project.videoFolder || project.title?.replace(/ /g, '_').replace(/[^a-zA-Z0-9_\-]/g, '_');
                 const vpsBase = process.env.NEXT_PUBLIC_VPS_API_URL || "http://100.99.207.113:8085";
