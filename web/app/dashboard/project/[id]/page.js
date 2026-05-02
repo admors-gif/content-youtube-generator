@@ -261,25 +261,34 @@ export default function ProjectDetailsPage({ params }) {
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             {project.status === "completed" && (() => {
                 const folder = project.videoFolder || project.title?.replace(/ /g, '_').replace(/[^a-zA-Z0-9_\-]/g, '_');
+                const vpsBase = process.env.NEXT_PUBLIC_VPS_API_URL || "http://100.99.207.113:8085";
                 return (
                   <a
-                    href={`/api/download/video/${encodeURIComponent(folder)}`}
+                    href={`${vpsBase}/download/video/${encodeURIComponent(folder)}`}
                     className="btn-glow"
                     style={{ padding: "10px 20px", fontSize: "13px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "8px" }}
-                    download
+                    target="_blank"
+                    rel="noopener noreferrer"
                   >
                     📥 Descargar Video
                   </a>
                 );
               })()}
-            <a
-              href={`/api/download/images/${encodeURIComponent(project.title?.replace(/ /g, '_').replace(/[^a-zA-Z0-9_\-]/g, '_'))}`}
-              className="btn-secondary"
-              style={{ padding: "10px 20px", fontSize: "13px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "8px" }}
-              download
-            >
-              🖼️ Descargar Imágenes (ZIP)
-            </a>
+            {(() => {
+                const folder = project.videoFolder || project.title?.replace(/ /g, '_').replace(/[^a-zA-Z0-9_\-]/g, '_');
+                const vpsBase = process.env.NEXT_PUBLIC_VPS_API_URL || "http://100.99.207.113:8085";
+                return (
+                  <a
+                    href={`${vpsBase}/download/images/${encodeURIComponent(folder)}`}
+                    className="btn-secondary"
+                    style={{ padding: "10px 20px", fontSize: "13px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "8px" }}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    🖼️ Descargar Imágenes (ZIP)
+                  </a>
+                );
+              })()}
           </div>
         )}
 
