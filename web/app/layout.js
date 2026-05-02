@@ -1,19 +1,24 @@
 import "./globals.css";
+import { Inter } from "next/font/google";
 import { AuthProvider } from "@/context/AuthContext";
+
+// next/font self-hostea Inter, evita FOUT y request externo en runtime.
+// Reemplaza el <link> manual a fonts.googleapis.com (next/font/google
+// es la forma blessed por Next 13+).
+const inter = Inter({
+  weight: ["400", "500", "600", "700", "800"],
+  subsets: ["latin"],
+  display: "swap",
+});
 
 export const metadata = {
   title: "Content Factory — Documentales con IA",
-  description: "Crea documentales cinematográficos de YouTube automatizados con inteligencia artificial. 27+ agentes especializados, narración profesional, y video listo para publicar.",
+  description: "Crea documentales cinematográficos de YouTube automatizados con inteligencia artificial. Decenas de agentes especializados, narración profesional, y video listo para publicar.",
 };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="es">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-      </head>
+    <html lang="es" className={inter.className}>
       <body>
         <AuthProvider>{children}</AuthProvider>
       </body>

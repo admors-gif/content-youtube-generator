@@ -1,5 +1,6 @@
 "use client";
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import Image from "next/image";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
@@ -64,6 +65,9 @@ export default function ProjectDetailsPage({ params }) {
   // ── Smooth Progress Bar State ──
   const [displayPercent, setDisplayPercent] = useState(0);
   const [startTime, setStartTime] = useState(null);
+  // 'now' tick que se actualiza cada segundo mientras haya producción activa
+  // — evita llamar Date.now() durante render (impure function rule de React 19)
+  const [now, setNow] = useState(() => Date.now());
 
   // ── Inline video player state (lazy-loaded, fetches signed URL on click) ──
   const [videoState, setVideoState] = useState({ url: null, loading: false, error: null });
@@ -94,45 +98,55 @@ export default function ProjectDetailsPage({ params }) {
     }
   };
 
-  // Track when generation starts
+  // Track when generation starts.
+  // NOTA: el compiler de React 19 marca setState dentro de useEffect como
+  // "cascading renders potential". Este caso es legítimo y no causa cascada
+  // porque (a) usamos functional setter idempotente y (b) startTime no está
+  // en deps. La alternativa con useRef genera otro lint error ("read ref in
+  // render") al usarlo en getETA. Lint disable explícito con razón documentada
+  // es la solución correcta a este falso positivo.
   useEffect(() => {
-    if (project?.progress?.percent > 0 && project?.progress?.percent < 100 && !startTime) {
-      setStartTime(Date.now());
-    }
-    if (project?.progress?.percent >= 100 || project?.status === "error") {
-      setStartTime(null);
-    }
-  }, [project?.progress?.percent]);
+    const percent = project?.progress?.percent || 0;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setStartTime((prev) => {
+      if (percent > 0 && percent < 100) return prev ?? Date.now();
+      if (percent >= 100 || project?.status === "error") return prev === null ? prev : null;
+      return prev;
+    });
+  }, [project?.progress?.percent, project?.status]);
 
-  // Smooth interpolation: gradually creep toward realPercent, NEVER exceeding it
+  // Mantiene 'now' actualizado cada segundo mientras hay producción activa
+  useEffect(() => {
+    if (!startTime) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [startTime]);
+
+  // Smooth interpolation: TODO el setState ocurre dentro del callback del
+  // setInterval (asíncrono), no síncronamente en el body del effect. Eso
+  // satisface la regla de React 19 contra cascading renders.
   useEffect(() => {
     const realPercent = project?.progress?.percent || 0;
-
-    if (realPercent >= 100 || realPercent === 0) {
-      setDisplayPercent(realPercent);
-      return;
-    }
-
-    // Jump forward if backend jumped ahead
-    if (realPercent > displayPercent + 5) {
-      setDisplayPercent(realPercent - 2);
-    }
-
-    // Creep slowly toward realPercent (never exceed it)
     const interval = setInterval(() => {
       setDisplayPercent((prev) => {
-        if (prev >= realPercent - 0.5) return prev; // Don't exceed real %
-        return prev + 0.3; // Slow, smooth increment
+        // Snap directo en estados límite
+        if (realPercent >= 100 || realPercent === 0) return realPercent;
+        // Backend saltó adelante: catch up rápido pero sin sobrepasar
+        if (realPercent > prev + 5) return realPercent - 2;
+        // Ya alcanzamos el target, no incrementar
+        if (prev >= realPercent - 0.5) return prev;
+        // Creep lento (~+0.5 por segundo)
+        return prev + 0.3;
       });
     }, 600);
-
     return () => clearInterval(interval);
-  }, [project?.progress?.percent, displayPercent]);
+  }, [project?.progress?.percent]);
 
-  // Calculate ETA
-  const getETA = () => {
+  // Calcula ETA derivada de 'now' (state) y 'startTime' (state).
+  // useMemo evita recálculos innecesarios cuando ningún input cambió.
+  const eta = useMemo(() => {
     if (!startTime || displayPercent >= 100 || displayPercent === 0) return null;
-    const elapsed = (Date.now() - startTime) / 1000;
+    const elapsed = (now - startTime) / 1000;
     const rate = displayPercent / elapsed; // percent per second
     if (rate <= 0) return null;
     const remaining = (100 - displayPercent) / rate;
@@ -140,18 +154,22 @@ export default function ProjectDetailsPage({ params }) {
     const secs = Math.floor(remaining % 60);
     if (mins > 15) return null; // Don't show unreasonable estimates
     return mins > 0 ? `~${mins}m ${secs}s restantes` : `~${secs}s restantes`;
-  };
+  }, [now, displayPercent, startTime]);
 
   useEffect(() => {
     if (!user || !id) return;
 
-    // Escuchar cambios en tiempo real desde Firebase
+    // Escuchar cambios en tiempo real desde Firebase.
+    // Funcional setter en setEditedScript: solo guarda el script de Firebase
+    // si el editor local todavía está vacío. Si el usuario ya empezó a editar,
+    // NO sobrescribimos sus cambios. Esto evita meter editedScript en deps
+    // (que causaría re-suscribir a Firebase en cada keystroke).
     const unsub = onSnapshot(doc(db, "projects", id), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setProject(data);
-        if (!editedScript && data.script?.plain) {
-          setEditedScript(data.script.plain);
+        if (data.script?.plain) {
+          setEditedScript((prev) => prev || data.script.plain);
         }
       }
       setLoading(false);
@@ -230,7 +248,7 @@ export default function ProjectDetailsPage({ params }) {
 
   const agent = SYSTEM_AGENTS.find(a => a.agentId === project.agentId);
   const isProcessing = project.progress?.percent > 0 && project.progress?.percent < 100 && project.status !== "error";
-  const eta = getETA();
+  // 'eta' viene del useMemo arriba (no requiere call adicional)
 
   const handleSaveScript = async () => {
     autoApproveTriggered.current = true;
@@ -312,21 +330,6 @@ export default function ProjectDetailsPage({ params }) {
                   📥 Descargar Video
                 </button>
               )}
-            {(() => {
-                const folder = project.videoFolder || project.title?.replace(/ /g, '_').replace(/[^a-zA-Z0-9_\-]/g, '_');
-                const vpsBase = process.env.NEXT_PUBLIC_VPS_API_URL || "http://100.99.207.113:8085";
-                return (
-                  <a
-                    href={`${vpsBase}/download/images/${encodeURIComponent(folder)}`}
-                    className="btn-secondary"
-                    style={{ padding: "10px 20px", fontSize: "13px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "8px" }}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    🖼️ Descargar Imágenes (ZIP)
-                  </a>
-                );
-              })()}
           </div>
         )}
 
@@ -576,11 +579,14 @@ export default function ProjectDetailsPage({ params }) {
                   <div key={idx} className="glass-card" style={{ overflow: "hidden", transition: "all 0.3s" }}>
                     <div style={{ aspectRatio: "16/9", background: "var(--bg-dark)", display: "flex", justifyContent: "center", alignItems: "center", position: "relative", overflow: "hidden" }}>
                       {scene.imageUrl ? (
-                        <img 
-                          src={scene.imageUrl} 
-                          alt={`Scene ${idx+1}`} 
-                          style={{ width: "100%", height: "100%", objectFit: "cover", animation: "fadeIn 0.8s ease" }} 
+                        <Image
+                          src={scene.imageUrl}
+                          alt={`Scene ${idx + 1}`}
+                          fill
+                          sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw"
+                          style={{ objectFit: "cover", animation: "fadeIn 0.8s ease" }}
                           loading="lazy"
+                          unoptimized={!/^https:\/\//.test(scene.imageUrl)}
                         />
                       ) : project.status === "producing" ? (
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", position: "relative", width: "100%", height: "100%", justifyContent: "center" }}>
