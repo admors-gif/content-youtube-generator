@@ -261,6 +261,142 @@ def check_content_moderation(text: str) -> dict:
         return result
 
 
+# ── Fact-checking del guion ─────────────────────────────────────────────────
+def fact_check_script(text: str, topic_hint: str = "") -> dict:
+    """
+    Verifica claims factuales del guion en 3 pasadas:
+      1. Claude extrae los 10 claims mas verificables (numeros, fechas, nombres)
+      2. Tavily busca evidencia para cada uno
+      3. Claude evalua cada claim contra evidencia → confidence alta/media/baja
+
+    Retorna:
+      {
+        "ran_at": iso8601,
+        "claims": [
+          {"claim": str, "confidence": "alta"|"media"|"baja",
+           "evidence": str, "source_url": str, "verdict": str}
+        ],
+        "summary": {"total": int, "high": int, "medium": int, "low": int},
+        "error": str | None,
+      }
+    """
+    out = {
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+        "claims": [],
+        "summary": {"total": 0, "high": 0, "medium": 0, "low": 0},
+        "error": None,
+    }
+    try:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        snippet = (text or "")[:30000]
+        if not snippet.strip():
+            out["error"] = "empty text"
+            return out
+
+        # Pasada 1: extraccion de claims
+        extract_prompt = (
+            "Eres un fact-checker riguroso. Lee el siguiente guion documental y "
+            "extrae HASTA 10 claims factuales especificos y verificables (cifras, "
+            "fechas, cantidades, nombres asociados a eventos especificos).\n\n"
+            "Ignora opiniones, descripciones generales, o frases narrativas vagas.\n"
+            "Prefiere claims donde una fuente publica podria confirmar o refutar.\n\n"
+            f"Tema del video: {topic_hint or '(no especificado)'}\n\n"
+            f"GUION:\n{snippet}\n\n"
+            "Responde EXCLUSIVAMENTE con JSON array (sin markdown, sin texto extra):\n"
+            "[\"claim 1 corto y especifico\", \"claim 2\", ...]\n"
+            "Cada claim maximo 25 palabras."
+        )
+        r = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            messages=[{"role": "user", "content": extract_prompt}],
+        )
+        raw = r.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        claims_list = json.loads(raw)
+        if not isinstance(claims_list, list):
+            raise ValueError("claims response not a list")
+        claims_list = [c for c in claims_list if isinstance(c, str) and c.strip()][:10]
+
+        # Pasada 2: Tavily search por cada claim
+        try:
+            from tavily import TavilyClient
+            tavily = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
+        except Exception as tav_init_err:
+            out["error"] = f"Tavily init failed: {tav_init_err}"
+            out["claims"] = [{"claim": c, "confidence": "media", "evidence": "(no se pudo verificar)", "source_url": "", "verdict": "sin verificar"} for c in claims_list]
+            return out
+
+        evidence_pack = []
+        for claim in claims_list:
+            try:
+                tav_res = tavily.search(query=claim, search_depth="basic", max_results=2, include_answer=True)
+                ans = (tav_res.get("answer") or "")[:400]
+                top = tav_res.get("results", [{}])[0] if tav_res.get("results") else {}
+                evidence_pack.append({
+                    "claim": claim,
+                    "answer": ans,
+                    "top_url": top.get("url", ""),
+                    "top_snippet": (top.get("content") or "")[:300],
+                })
+            except Exception as tav_err:
+                evidence_pack.append({"claim": claim, "answer": "", "top_url": "", "top_snippet": f"(error: {tav_err})"})
+
+        # Pasada 3: evaluacion de claims con la evidencia
+        eval_prompt = (
+            "Eres un fact-checker. Para cada claim, decide su confidence basado en "
+            "la evidencia provista (Tavily search). Responde EXCLUSIVAMENTE con un "
+            "JSON array con esta estructura exacta:\n"
+            "[{\"claim\": \"...\", \"confidence\": \"alta|media|baja\", \"verdict\": \"frase corta explicando\", \"source_url\": \"...\"}]\n\n"
+            "Reglas:\n"
+            "- 'alta': evidencia clara y especifica respalda el claim\n"
+            "- 'media': evidencia parcial o aproximada\n"
+            "- 'baja': sin evidencia, contradicho, o numero/fecha imposible de verificar\n"
+            "- verdict: maximo 20 palabras\n"
+            "- source_url: la URL de top_url de la evidencia (cadena vacia si no hay)\n\n"
+            f"EVIDENCIA:\n{json.dumps(evidence_pack, ensure_ascii=False)}\n"
+        )
+        r2 = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": eval_prompt}],
+        )
+        raw2 = r2.content[0].text.strip()
+        if raw2.startswith("```"):
+            raw2 = raw2.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        evaluated = json.loads(raw2)
+        if not isinstance(evaluated, list):
+            raise ValueError("eval response not a list")
+
+        # Enriquecer con evidence summary
+        evidence_by_claim = {e["claim"]: e for e in evidence_pack}
+        for item in evaluated:
+            ev = evidence_by_claim.get(item.get("claim", ""), {})
+            item["evidence"] = (ev.get("answer") or ev.get("top_snippet") or "")[:300]
+
+        out["claims"] = evaluated
+        for item in evaluated:
+            conf = (item.get("confidence") or "").lower()
+            if conf == "alta":
+                out["summary"]["high"] += 1
+            elif conf == "media":
+                out["summary"]["medium"] += 1
+            else:
+                out["summary"]["low"] += 1
+        out["summary"]["total"] = len(evaluated)
+        return out
+    except Exception as e:
+        out["error"] = str(e)[:200]
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(e)
+        except Exception:
+            pass
+        return out
+
+
 def _build_master_audio(video_dir: Path) -> Path | None:
     """
     Concatena narration_*.mp3 en master_audio.mp3 con validación robusta.
@@ -383,6 +519,33 @@ _AGENT_CATALOG = """
 [agent_viajes] Viajes y Exploraciones — Shackleton, Everest, lugares peligrosos del mundo
 [agent_noticias_virales] Noticias Virales — eventos actuales que están en tendencia esta semana
 """.strip()
+
+
+@app.post("/factcheck/run/{project_id}")
+def factcheck_run(project_id: str):
+    """
+    Corre fact-checking del guion del proyecto on-demand.
+    Util para backfill o re-check tras editar el guion.
+    """
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        doc = db.collection("projects").document(project_id).get()
+        if not doc.exists:
+            return JSONResponse(status_code=404, content={"error": "project not found"})
+        data = doc.to_dict()
+        script_text = (data.get("script") or {}).get("plain") or ""
+        if not script_text:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "project has no script.plain to fact-check"},
+            )
+        result = fact_check_script(script_text, topic_hint=data.get("title", ""))
+        db.collection("projects").document(project_id).update({"factCheck": result})
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
 
 
 @app.post("/moderation/check/{project_id}")
@@ -1011,8 +1174,19 @@ def run_script(topic, agent_file, project_id):
                             "moderation": mod,
                         })
                         print(f"   🛡️ Moderation: {mod['verdict']} | crit={len(mod['critical_blocks'])} | warn={len(mod['warnings'])}", flush=True)
+
+                        # Fact-checking en paralelo conceptual (despues de moderation)
+                        try:
+                            fc = fact_check_script(script_text, topic_hint=topic)
+                            db.collection("projects").document(project_id).update({
+                                "factCheck": fc,
+                            })
+                            s = fc["summary"]
+                            print(f"   📚 FactCheck: {s['total']} claims | alta={s['high']} media={s['medium']} baja={s['low']}", flush=True)
+                        except Exception as fc_err:
+                            print(f"   ⚠️ Fact-check failed (no bloqueante): {fc_err}", flush=True)
             except Exception as mod_err:
-                print(f"   ⚠️ Moderation check failed (no bloqueante): {mod_err}", flush=True)
+                print(f"   ⚠️ Moderation/FactCheck failed (no bloqueante): {mod_err}", flush=True)
         else:
             print(f"⚠️ [API] Pipeline returned None for '{topic}' — check Firebase for error status", flush=True)
     except Exception as e:
