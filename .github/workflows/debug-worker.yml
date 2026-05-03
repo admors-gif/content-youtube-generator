@@ -1,0 +1,109 @@
+name: Debug — capturar logs y estado del VPS
+
+# Solo manual: no se dispara en push.
+# Recoge logs del API + workers + dmesg + memoria, y los sube como artifact
+# para diagnóstico sin necesidad de SSH.
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: 'project_id a buscar en logs (opcional, deja vacío para volcar todo)'
+        required: false
+        default: ''
+      log_lines:
+        description: 'líneas de logs a capturar por container'
+        required: false
+        default: '2000'
+
+concurrency:
+  group: debug-worker
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    name: Collect logs and system state
+    runs-on: [self-hosted, linux, vps, docker]
+    timeout-minutes: 5
+
+    steps:
+      - name: Prepare output directory
+        run: |
+          rm -rf debug_output
+          mkdir -p debug_output
+
+      - name: Container list
+        run: |
+          docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.RunningFor}}' \
+            > debug_output/00_containers.txt 2>&1 || true
+          docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}' \
+            >> debug_output/00_containers.txt 2>&1 || true
+
+      - name: API container logs
+        run: |
+          docker logs content-factory --tail ${{ github.event.inputs.log_lines }} \
+            > debug_output/01_api_logs.txt 2>&1 || echo "no content-factory container" > debug_output/01_api_logs.txt
+
+      - name: Worker container logs (all replicas)
+        run: |
+          for c in $(docker ps -a --format '{{.Names}}' | grep -E 'content-worker|content_worker' || true); do
+            echo "==== $c ====" >> debug_output/02_worker_logs.txt
+            docker logs "$c" --tail ${{ github.event.inputs.log_lines }} >> debug_output/02_worker_logs.txt 2>&1 || true
+            echo "" >> debug_output/02_worker_logs.txt
+          done
+          [ -s debug_output/02_worker_logs.txt ] || echo "no worker containers found" > debug_output/02_worker_logs.txt
+
+      - name: Redis container logs (Celery broker)
+        run: |
+          for c in $(docker ps -a --format '{{.Names}}' | grep -E 'content-redis|redis' | head -3 || true); do
+            echo "==== $c ====" >> debug_output/03_redis_logs.txt
+            docker logs "$c" --tail 500 >> debug_output/03_redis_logs.txt 2>&1 || true
+            echo "" >> debug_output/03_redis_logs.txt
+          done
+          [ -s debug_output/03_redis_logs.txt ] || echo "no redis containers found" > debug_output/03_redis_logs.txt
+
+      - name: Filter logs for project_id (if provided)
+        if: ${{ github.event.inputs.project_id != '' }}
+        run: |
+          PID="${{ github.event.inputs.project_id }}"
+          echo "=== Lines mentioning project_id=$PID ===" > debug_output/04_project_filtered.txt
+          grep -F "$PID" debug_output/01_api_logs.txt debug_output/02_worker_logs.txt \
+            >> debug_output/04_project_filtered.txt 2>/dev/null || echo "no matches" >> debug_output/04_project_filtered.txt
+
+      - name: Kernel ring buffer (OOM, restarts)
+        run: |
+          dmesg --time-format iso 2>/dev/null | tail -300 \
+            > debug_output/05_dmesg.txt 2>&1 || echo "dmesg unavailable (need root?)" > debug_output/05_dmesg.txt
+          # OOM kills específicos
+          dmesg 2>/dev/null | grep -iE 'killed process|out of memory|oom' | tail -50 \
+            > debug_output/05_dmesg_oom.txt 2>&1 || true
+
+      - name: Docker events últimos 30 min
+        run: |
+          docker events --since 30m --until 0s --format '{{.Time}} {{.Action}} {{.Type}} {{.Actor.Attributes.name}}' \
+            > debug_output/06_docker_events.txt 2>&1 &
+          EV_PID=$!
+          sleep 3
+          kill $EV_PID 2>/dev/null || true
+          wait $EV_PID 2>/dev/null || true
+
+      - name: Memory and disk
+        run: |
+          free -h > debug_output/07_memory.txt 2>&1 || true
+          df -h /docker /var/lib/docker 2>&1 >> debug_output/07_memory.txt || true
+
+      - name: Container restart counts
+        run: |
+          for c in $(docker ps -a --format '{{.Names}}' | grep -E 'content-' || true); do
+            COUNT=$(docker inspect --format '{{.RestartCount}}' "$c" 2>/dev/null || echo "?")
+            STATE=$(docker inspect --format '{{.State.Status}}' "$c" 2>/dev/null || echo "?")
+            EXIT=$(docker inspect --format '{{.State.ExitCode}}' "$c" 2>/dev/null || echo "?")
+            FINISHED=$(docker inspect --format '{{.State.FinishedAt}}' "$c" 2>/dev/null || echo "?")
+            echo "$c | restarts=$COUNT | state=$STATE | exit=$EXIT | finishedAt=$FINISHED" >> debug_output/08_restarts.txt
+          done
+
+      - name: Upload debug bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: vps-debug-${{ github.run_id }}
+          path: debug_output/
+          retention-days: 7
