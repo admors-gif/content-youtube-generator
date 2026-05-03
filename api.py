@@ -1609,6 +1609,92 @@ async def reset_project_status(request: Request):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
+@app.post("/recover-from-disk/{project_id}")
+async def recover_from_disk(project_id: str):
+    """
+    Recupera un proyecto cuyo video FINAL_SUB_*.mp4 quedó en disco del VPS
+    pero NO subió a Storage ni se completó en Firestore. Esto pasa cuando el
+    padre Python (run_production) muere por SoftTimeLimit o subprocess timeout
+    pero el subprocess de factory.py sigue corriendo y termina el video.
+
+    Acción:
+      1. Lee el proyecto, calcula safe_title del title.
+      2. Busca FINAL_SUB_*.mp4 (preferido) o FINAL_*.mp4 en disco.
+      3. Sube a Firebase Storage (videos/{project_id}/{filename}).
+      4. Actualiza Firestore con status=completed + videoUrl + videoFolder + etc.
+
+    Retorna {ok, video_url, message}. NO hay costo en APIs externas.
+    """
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        import re
+
+        db = firestore.client()
+        doc_ref = db.collection("projects").document(project_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return JSONResponse(status_code=404, content={"error": "project not found"})
+
+        data = doc.to_dict() or {}
+        title = data.get("title") or ""
+        if not title:
+            return JSONResponse(status_code=400, content={"error": "project has no title"})
+
+        safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', title.replace(" ", "_"))
+        video_dir = Path(f"/app/output/videos/{safe_title}")
+        if not video_dir.is_dir():
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"folder {safe_title} not on disk"},
+            )
+
+        # Preferir versión con subtítulos
+        candidates = sorted(video_dir.glob("FINAL_SUB_*.mp4"))
+        if not candidates:
+            candidates = sorted(video_dir.glob("FINAL_*.mp4"))
+        if not candidates:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "no FINAL_*.mp4 found in disk folder"},
+            )
+
+        # Tomar el más reciente (por mtime) por si hay múltiples versiones
+        final_path = max(candidates, key=lambda p: p.stat().st_mtime)
+        has_subs = "FINAL_SUB_" in final_path.name
+
+        print(f"🔧 [RECOVER] Subiendo {final_path.name} ({final_path.stat().st_size // (1024*1024)} MB) para {project_id}")
+        storage_info = _upload_video_to_storage(final_path, project_id)
+        if not storage_info:
+            return JSONResponse(status_code=500, content={"error": "Storage upload failed"})
+
+        update_payload = {
+            "status": "completed",
+            "progress.percent": 100,
+            "progress.stepName": "🏆 Recuperado desde disco",
+            "videoPath": str(final_path),
+            "videoFolder": safe_title,
+            "hasSubtitles": has_subs,
+            "videoStoragePath": storage_info["gs_path"],
+            "videoUrl": storage_info["signed_url"],
+            "videoUrlExpiresAt": firestore.SERVER_TIMESTAMP,
+            "recoveredFromDisk": True,
+        }
+        doc_ref.update(update_payload)
+
+        return {
+            "ok": True,
+            "video_url": storage_info["signed_url"],
+            "video_folder": safe_title,
+            "size_mb": round(final_path.stat().st_size / (1024 * 1024), 1),
+            "has_subtitles": has_subs,
+            "message": f"Project {project_id} recovered from disk (no API costs)",
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:300]})
+
+
 def run_script(topic, agent_file, project_id):
     print(f"🚀 [API] Starting background job for '{topic}' with '{agent_file}' (Project: {project_id})...", flush=True)
     try:
