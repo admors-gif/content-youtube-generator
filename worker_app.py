@@ -53,18 +53,21 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,      # no pre-fetch (jobs de 45+ min)
     worker_max_tasks_per_child=10,     # restart worker tras 10 tasks (evita memory leaks)
 
-    # Time limits — un video cinemático con 99 escenas + Luma + Ken Burns puede
-    # tomar 1h25m+. Antes teníamos soft=5100 (85min) que disparaba justo al
-    # final del Ken Burns y causaba re-encolamiento + thread monitor zombie
-    # sobreescribiendo status=completed con producing. Subimos a 130min/140min.
-    task_time_limit=8400,              # 140 min hard kill
-    task_soft_time_limit=7800,         # 130 min soft (raise SoftTimeLimitExceeded)
+    # Time limits — un video cinemático con 99 escenas tarda ~1h25m.
+    # PERO un PODCAST cinemático con words_per_scene=35 puede generar 162
+    # escenas + 121 dialogue blocks (1 mp3 ElevenLabs cada uno con 0.4s
+    # rate limit) → 2h+. Por eso subimos timeouts a 180min/190min para
+    # acomodar el caso más pesado sin riesgo de timeout espurio.
+    # Reportado en sesión 2026-05-03 (podcast "5 señales de manipulación"
+    # pegó SoftTimeLimit a los 130min exactos en concat master_visual).
+    task_time_limit=11400,             # 190 min hard kill
+    task_soft_time_limit=10800,        # 180 min soft (raise SoftTimeLimitExceeded)
 
     # Redis broker: visibility_timeout default es 1h. Si un task tarda más, Redis
     # asume que el worker murió y RE-DELIVERA el mismo task a otro worker → job
-    # duplicado. Subimos a 3h para cubrir runs largos sin redelivery espurios.
-    # (Aplica solo a Redis broker; con RabbitMQ no es necesario.)
+    # duplicado. Subimos a 4h para acomodar el nuevo soft_time_limit de 180min
+    # con margen, evitando redelivery espurios.
     broker_transport_options={
-        "visibility_timeout": 10800,   # 3 horas
+        "visibility_timeout": 14400,   # 4 horas
     },
 )

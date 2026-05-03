@@ -2175,7 +2175,7 @@ def run_production(project_id):
              "--mode", "cinematico", "--luma-scenes", "8", "--skip-images"],
             monitor_thread=factory_monitor,
             stop_event=stop_monitoring,
-            timeout=7200,
+            timeout=10500,  # 175min — debajo del soft_time_limit Celery (180min)
             log_label="factory-full",
         )
 
