@@ -121,9 +121,12 @@ def _ensure_firebase_initialized():
         firebase_admin.initialize_app(cred, {"storageBucket": FIREBASE_STORAGE_BUCKET})
 
 
-def _upload_video_to_storage(local_path: Path, project_id: str) -> dict | None:
+def _upload_video_to_storage(local_path: Path, project_id: str, content_type: str = None) -> dict | None:
     """
-    Sube un .mp4 a Firebase Storage en 'videos/{project_id}/{filename}'.
+    Sube un archivo a Firebase Storage en 'videos/{project_id}/{filename}'.
+
+    content_type se infiere de la extensión si no se pasa explícito:
+      .mp4 → video/mp4, .jpg/.jpeg → image/jpeg, .png → image/png
 
     Retorna {"gs_path": "gs://bucket/videos/...", "signed_url": "https://..."}
     o None si falla. La signed URL dura 7 días (máximo permitido por v4 signing).
@@ -137,8 +140,15 @@ def _upload_video_to_storage(local_path: Path, project_id: str) -> dict | None:
         blob_name = f"videos/{project_id}/{local_path.name}"
         blob = bucket.blob(blob_name)
         size_mb = local_path.stat().st_size / (1024 * 1024)
-        print(f"   ☁️ Subiendo a Storage: {blob_name} ({size_mb:.1f} MB)")
-        blob.upload_from_filename(str(local_path), content_type="video/mp4")
+        if content_type is None:
+            ext = local_path.suffix.lower()
+            content_type = {
+                ".mp4": "video/mp4", ".webm": "video/webm",
+                ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".png": "image/png", ".webp": "image/webp",
+            }.get(ext, "application/octet-stream")
+        print(f"   ☁️ Subiendo a Storage: {blob_name} ({size_mb:.1f} MB, {content_type})")
+        blob.upload_from_filename(str(local_path), content_type=content_type)
         signed_url = blob.generate_signed_url(
             version="v4",
             expiration=timedelta(days=7),
@@ -520,6 +530,203 @@ def build_shorts_for_project(video_dir: Path, project_id: str) -> list:
     return results
 
 
+# ── Thumbnails (3 variantes por video, reuso de imagenes existentes) ──────
+# Paleta + tipografia por defecto para canales tipo "Cronicas Oscuras".
+# Mas adelante (Phase 3.2 multi-channel) se podra parametrizar por canal.
+THUMBNAIL_DEFAULT_THEME = {
+    "font_path_primary": "/usr/share/fonts/truetype/montserrat/Montserrat-Black.ttf",
+    "font_path_fallback": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "text_color": (255, 255, 255),       # blanco
+    "stroke_color": (0, 0, 0),            # negro
+    "accent_color": (220, 38, 38),        # rojo intenso (DC2626)
+    "stroke_width": 8,
+    "gradient_alpha_top": 0,              # transparente arriba
+    "gradient_alpha_bottom": 200,         # casi opaco abajo (texto legible)
+}
+
+
+def _pick_thumbnail_keywords(title: str, max_words: int = 4) -> str:
+    """
+    Extrae las palabras clave del título para overlay del thumbnail.
+    Quita stopwords cortas y prioriza sustantivos/nombres con mayúsculas.
+    Ej: "El caso del Zodiac Killer" → "Zodiac Killer"
+        "Las torturas de la Santa Inquisición" → "Torturas Inquisición"
+    """
+    if not title:
+        return ""
+    stopwords = {"el", "la", "los", "las", "un", "una", "de", "del", "y", "o",
+                 "que", "en", "con", "por", "para", "sin", "se", "al", "su",
+                 "es", "lo", "le", "the", "and", "of", "in", "on"}
+    words = [w for w in title.split() if w.lower() not in stopwords and len(w) >= 3]
+    return " ".join(words[:max_words]).upper() if words else title.upper()[:50]
+
+
+def _render_thumbnail(source_image: Path, title_text: str, output_path: Path,
+                      variant: str = "center", theme: dict = None) -> bool:
+    """
+    Compone un thumbnail 1280x720 a partir de una imagen base (de las escenas
+    ya generadas para el video) + texto grande superpuesto.
+
+    variants:
+      - 'center': texto grande al centro con bg gradiente
+      - 'bottom': texto en el tercio inferior
+      - 'corner': texto en una esquina con caja roja de acento
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFilter, ImageFont
+    except ImportError:
+        print("   ❌ Pillow no disponible para thumbnails")
+        return False
+
+    th = {**THUMBNAIL_DEFAULT_THEME, **(theme or {})}
+    try:
+        img = Image.open(source_image).convert("RGB")
+        # Resize a 1280x720 (cover) preservando aspecto, luego center crop
+        target_w, target_h = 1280, 720
+        src_w, src_h = img.size
+        src_ratio = src_w / src_h
+        target_ratio = target_w / target_h
+        if src_ratio > target_ratio:
+            # mas ancho de lo necesario: ajustar por altura
+            new_h = target_h
+            new_w = int(new_h * src_ratio)
+        else:
+            new_w = target_w
+            new_h = int(new_w / src_ratio)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+        left = (new_w - target_w) // 2
+        top = (new_h - target_h) // 2
+        img = img.crop((left, top, left + target_w, top + target_h))
+
+        # Saturar y oscurecer ligeramente para resaltar el texto
+        from PIL import ImageEnhance
+        img = ImageEnhance.Color(img).enhance(1.15)
+        img = ImageEnhance.Contrast(img).enhance(1.10)
+        img = ImageEnhance.Brightness(img).enhance(0.85)
+
+        # Cargar fuente (intenta Montserrat Black, fallback a DejaVu Bold)
+        font_size = 120 if len(title_text) <= 14 else 90 if len(title_text) <= 22 else 72
+        font = None
+        for fp in [th["font_path_primary"], th["font_path_fallback"]]:
+            try:
+                if os.path.exists(fp):
+                    font = ImageFont.truetype(fp, font_size)
+                    break
+            except Exception:
+                continue
+        if font is None:
+            font = ImageFont.load_default()
+
+        draw = ImageDraw.Draw(img, "RGBA")
+
+        # Calcular tamaño del texto para posicionarlo
+        # Wrap manual: hasta 2 líneas
+        text = title_text.strip()
+        words = text.split()
+        if len(words) > 2 and font_size >= 90:
+            mid = len(words) // 2
+            text = " ".join(words[:mid]) + "\n" + " ".join(words[mid:])
+
+        # Bbox para centrado
+        bbox = draw.multiline_textbbox((0, 0), text, font=font, stroke_width=th["stroke_width"], align="center", spacing=4)
+        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+        # Posición según variant
+        if variant == "bottom":
+            x = (target_w - text_w) // 2
+            y = target_h - text_h - 60
+            # Gradiente más fuerte abajo
+            grad = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
+            gd = ImageDraw.Draw(grad)
+            for i in range(target_h // 2, target_h):
+                alpha = int(((i - target_h // 2) / (target_h // 2)) * 230)
+                gd.line([(0, i), (target_w, i)], fill=(0, 0, 0, alpha))
+            img.paste(Image.alpha_composite(img.convert("RGBA"), grad).convert("RGB"))
+        elif variant == "corner":
+            x = 60
+            y = 60
+            # Caja roja accent debajo del texto
+        else:  # center
+            x = (target_w - text_w) // 2
+            y = (target_h - text_h) // 2
+            # Gradiente radial tenue para resaltar
+            grad = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
+            gd = ImageDraw.Draw(grad)
+            cx, cy = target_w // 2, target_h // 2
+            for r in range(0, max(target_w, target_h), 4):
+                alpha = max(0, 80 - r * 80 // (target_w // 2))
+                gd.ellipse([cx - r, cy - r, cx + r, cy + r], outline=None, fill=(0, 0, 0, alpha))
+            img.paste(Image.alpha_composite(img.convert("RGBA"), grad).convert("RGB"))
+
+        # Dibujar texto con stroke
+        draw = ImageDraw.Draw(img, "RGBA")
+        draw.multiline_text(
+            (x, y), text, font=font, fill=th["text_color"],
+            stroke_width=th["stroke_width"], stroke_fill=th["stroke_color"],
+            align="center", spacing=4,
+        )
+
+        # Variant 'corner': agregar barra roja vertical de acento a la izquierda
+        if variant == "corner":
+            draw.rectangle([(0, 0), (12, target_h)], fill=th["accent_color"])
+
+        img.save(str(output_path), "JPEG", quality=92, optimize=True)
+        return output_path.exists() and output_path.stat().st_size > 0
+    except Exception as e:
+        print(f"   ❌ Thumbnail render failed: {e}")
+        return False
+
+
+def build_thumbnails_for_project(video_dir: Path, project_id: str, title: str) -> list:
+    """
+    Genera 3 thumbnails 1280x720 a partir de imágenes del video y los sube
+    a Firebase Storage.
+
+    Estrategia: pick 3 escenas distintas (early, mid, late) y aplica un
+    variant de composición distinto a cada una para diversidad visual.
+    """
+    images_dir = video_dir / "images"
+    if not images_dir.is_dir():
+        print(f"   ⚠️ No hay carpeta de imágenes en {video_dir}, no genero thumbnails")
+        return []
+
+    scenes = sorted(images_dir.glob("scene_*.png")) or sorted(images_dir.glob("scene_*.jpg"))
+    if len(scenes) < 3:
+        print(f"   ⚠️ Solo {len(scenes)} imágenes disponibles, mínimo 3 para thumbnails")
+        return []
+
+    keywords = _pick_thumbnail_keywords(title)
+
+    # Pick 3 escenas distintas: 20%, 50%, 80% del video
+    picks = [
+        ("early", scenes[len(scenes) // 5], "center"),
+        ("mid", scenes[len(scenes) // 2], "bottom"),
+        ("late", scenes[(len(scenes) * 4) // 5], "corner"),
+    ]
+
+    thumbs_dir = video_dir / "thumbnails"
+    thumbs_dir.mkdir(parents=True, exist_ok=True)
+
+    results = []
+    for i, (label, src, variant) in enumerate(picks, 1):
+        out = thumbs_dir / f"THUMB_{i:02d}_{label}_{variant}.jpg"
+        print(f"   🖼️ Renderizando thumbnail {i}/3 ({label}, variant={variant})")
+        if not _render_thumbnail(src, keywords, out, variant=variant):
+            continue
+        upload = _upload_video_to_storage(out, f"{project_id}/thumbnails")
+        if upload:
+            results.append({
+                "index": i,
+                "label": label,
+                "variant": variant,
+                "size_kb": round(out.stat().st_size / 1024, 1),
+                "gs_path": upload["gs_path"],
+                "signed_url": upload["signed_url"],
+            })
+            print(f"   ✅ Thumbnail {i} subido ({results[-1]['size_kb']} KB)")
+    return results
+
+
 def _build_master_audio(video_dir: Path) -> Path | None:
     """
     Concatena narration_*.mp3 en master_audio.mp3 con validación robusta.
@@ -642,6 +849,33 @@ _AGENT_CATALOG = """
 [agent_viajes] Viajes y Exploraciones — Shackleton, Everest, lugares peligrosos del mundo
 [agent_noticias_virales] Noticias Virales — eventos actuales que están en tendencia esta semana
 """.strip()
+
+
+@app.post("/thumbnails/build/{project_id}")
+def thumbnails_build(project_id: str):
+    """Genera thumbnails on-demand para un proyecto completado (backfill)."""
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        doc = db.collection("projects").document(project_id).get()
+        if not doc.exists:
+            return JSONResponse(status_code=404, content={"error": "project not found"})
+        data = doc.to_dict()
+        folder = data.get("videoFolder") or ""
+        title = data.get("title") or ""
+        if not folder:
+            return JSONResponse(status_code=400, content={"error": "project has no videoFolder"})
+        video_dir = Path(f"/app/output/videos/{folder}")
+        if not video_dir.is_dir():
+            return JSONResponse(status_code=404, content={"error": "video folder not on disk"})
+
+        results = build_thumbnails_for_project(video_dir, project_id, title)
+        if results:
+            db.collection("projects").document(project_id).update({"thumbnails": results})
+        return {"thumbnails": results, "count": len(results)}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
 
 
 @app.post("/shorts/build/{project_id}")
@@ -1617,7 +1851,7 @@ def run_production(project_id):
         shorts_results = []
         if final_path and storage_info:
             try:
-                update_progress(98, "✂️ Generando shorts...")
+                update_progress(97, "✂️ Generando shorts...")
                 shorts_results = build_shorts_for_project(video_dir, project_id)
                 print(f"   📱 Shorts generados: {len(shorts_results)}/3", flush=True)
             except Exception as shorts_err:
@@ -1625,6 +1859,22 @@ def run_production(project_id):
                 try:
                     import sentry_sdk
                     sentry_sdk.capture_exception(shorts_err)
+                except Exception:
+                    pass
+
+        # Generar thumbnails (3 variantes a partir de imágenes existentes)
+        thumbnails_results = []
+        if storage_info:
+            try:
+                update_progress(99, "🖼️ Generando thumbnails...")
+                project_title = project.get("title", "")
+                thumbnails_results = build_thumbnails_for_project(video_dir, project_id, project_title)
+                print(f"   🖼️ Thumbnails generados: {len(thumbnails_results)}/3", flush=True)
+            except Exception as thumb_err:
+                print(f"   ⚠️ Thumbnails generation failed (no bloqueante): {thumb_err}", flush=True)
+                try:
+                    import sentry_sdk
+                    sentry_sdk.capture_exception(thumb_err)
                 except Exception:
                     pass
 
@@ -1644,10 +1894,12 @@ def run_production(project_id):
             update_payload["videoUrlExpiresAt"] = firestore.SERVER_TIMESTAMP
         if shorts_results:
             update_payload["shorts"] = shorts_results
+        if thumbnails_results:
+            update_payload["thumbnails"] = thumbnails_results
 
         doc_ref.update(update_payload)
 
-        print(f"🏆 [PRODUCE] Cinematic production complete! Subs: {has_subs} | Storage: {bool(storage_info)} | Shorts: {len(shorts_results)} | {final_path}")
+        print(f"🏆 [PRODUCE] Cinematic production complete! Subs: {has_subs} | Storage: {bool(storage_info)} | Shorts: {len(shorts_results)} | Thumbs: {len(thumbnails_results)} | {final_path}")
         
     except Exception as e:
         update_progress(0, f"Error: {str(e)[:100]}", "error")

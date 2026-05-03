@@ -472,6 +472,46 @@ export default function ProjectDetailsPage({ params }) {
         </div>
       )}
 
+      {/* Thumbnails generadas (3 variantes 1280x720) */}
+      {project.status === "completed" && Array.isArray(project.thumbnails) && project.thumbnails.length > 0 && (
+        <div className="glass-card animate-fade-in" style={{ marginBottom: "32px", padding: "20px" }}>
+          <h3 style={{ margin: "0 0 14px 0", fontSize: "16px", fontWeight: "bold", display: "flex", alignItems: "center", gap: "8px" }}>
+            🖼️ Thumbnails sugeridos
+            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "normal" }}>{project.thumbnails.length} variantes 1280×720</span>
+          </h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" }}>
+            {project.thumbnails.map((t) => (
+              <div key={t.index} style={{ background: "var(--bg-dark)", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border)" }}>
+                <Image
+                  src={t.signed_url}
+                  alt={`Thumbnail ${t.label}`}
+                  width={1280}
+                  height={720}
+                  style={{ width: "100%", height: "auto", aspectRatio: "16/9", objectFit: "cover", display: "block" }}
+                  unoptimized
+                />
+                <div style={{ padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px" }}>
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    {t.label === "early" ? "🎬 Inicio" : t.label === "mid" ? "🔥 Punto fuerte" : "🏆 Cierre"}
+                    {" · "}
+                    {t.variant}
+                  </span>
+                  <span style={{ color: "var(--text-muted)", fontFamily: "monospace" }}>{t.size_kb}KB</span>
+                </div>
+                <a
+                  href={t.signed_url}
+                  download
+                  className="btn-secondary"
+                  style={{ margin: "0 12px 12px", padding: "6px 10px", fontSize: "12px", textAlign: "center", textDecoration: "none", display: "block" }}
+                >
+                  ⬇ Descargar
+                </a>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Tabs Menu */}
       <div style={{ display: "flex", gap: "16px", marginBottom: "24px", borderBottom: "1px solid var(--border)", paddingBottom: "8px" }}>
         <button 
