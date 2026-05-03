@@ -848,6 +848,7 @@ _AGENT_CATALOG = """
 [agent_biblico] Historias Bíblicas — Éxodo, Apocalipsis, arqueología bíblica, relatos sagrados
 [agent_viajes] Viajes y Exploraciones — Shackleton, Everest, lugares peligrosos del mundo
 [agent_noticias_virales] Noticias Virales — eventos actuales que están en tendencia esta semana
+[agent_podcast_general] Este no es otro podcast más — conversación entre dos hosts (Mateo y Lucía) sobre cualquier tema, formato podcast multitema con dos voces alternando
 """.strip()
 
 
@@ -1646,21 +1647,42 @@ def run_production(project_id):
         import re
         safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', title.replace(" ", "_"))
         
+        # Detectar formato podcast: si el proyecto fue generado con un agente
+        # de podcast, factory.py necesita format + podcast config + dialogue_blocks
+        # por escena para que generate_dual_narration alterne las voces.
+        is_podcast_project = (
+            project.get("format") == "podcast"
+            or (agent_id or "").startswith("agent_podcast_")
+        )
+
         # Mapear scenes de Firestore al formato factory.py
         factory_scenes = []
         for s in scenes:
-            factory_scenes.append({
+            scene_dict = {
                 "scene_number": s.get("scene_number", s.get("sceneNumber", 0)),
                 "prompt": s.get("prompt", ""),
                 "narration": s.get("narration_text", s.get("narration", "")),
-            })
-        
+            }
+            # Para podcast, propagar dialogue_blocks (los necesita la dual TTS)
+            if is_podcast_project and s.get("dialogue_blocks"):
+                scene_dict["dialogue_blocks"] = s["dialogue_blocks"]
+                scene_dict["narration_text"] = s.get("narration_text", "")
+            factory_scenes.append(scene_dict)
+
         temp_json = {
             "topic": title,
             "agent": agent_id,
             "video_scenes": factory_scenes,
-            "seo_metadata": project.get("seo_metadata", {"title": title})
+            "seo_metadata": project.get("seo_metadata", {"title": title}),
         }
+        if is_podcast_project:
+            temp_json["format"] = "podcast"
+            # Reusa la podcast config persistida en Firestore (host_a/host_b voices, etc.)
+            temp_json["podcast"] = project.get("podcast", {
+                "show_name": "Este no es otro podcast más",
+                "host_a": {"name": "Mateo", "voice": "Salvatore"},
+                "host_b": {"name": "Lucía", "voice": "Serafina"},
+            })
         temp_path = f"/app/output/scripts/PRODUCE_{safe_title}.json"
         os.makedirs(os.path.dirname(temp_path), exist_ok=True)
         with open(temp_path, "w", encoding="utf-8") as f:

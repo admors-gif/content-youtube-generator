@@ -408,4 +408,21 @@ export const SYSTEM_AGENTS = [
     ],
     color: "#FF6347",
   },
+  {
+    agentId: "agent_podcast_general",
+    name: "Este no es otro podcast más",
+    emoji: "🎙️",
+    description: "Conversación entre Mateo y Lucía sobre cualquier tema. Diálogos humanos con sarcasmo medido y química real — no narración, charla.",
+    category: "podcast",
+    promptFile: "agent_podcast_general.md",
+    tier: "creator",
+    format: "podcast",
+    defaultVoices: { host_a: "Salvatore", host_b: "Serafina" },
+    exampleTopics: [
+      "Por qué seguimos creyendo en horóscopos en 2026",
+      "La economía oculta de los memes",
+      "Qué pasó realmente con la generación Z y el trabajo"
+    ],
+    color: "#14b8a6",
+  },
 ];
