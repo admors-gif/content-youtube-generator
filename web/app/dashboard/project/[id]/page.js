@@ -189,8 +189,10 @@ export default function ProjectDetailsPage({ params }) {
     }
   }, [project?.script?.plain, project?.status, project?.script?.approved]);
 
-  // Core approval logic (used by both manual and auto-approve)
-  const executeApproval = useCallback(async () => {
+  // Core approval logic (used by both manual and auto-approve).
+  // Acepta override opcional para forzar continuación cuando hay flags
+  // críticos en moderación (el usuario aceptó conscientemente).
+  const executeApproval = useCallback(async ({ overrideModeration = false } = {}) => {
     try {
       setTimerActive(false);
       await updateDoc(doc(db, "projects", id), {
@@ -200,15 +202,45 @@ export default function ProjectDetailsPage({ params }) {
         "progress.percent": 2,
         "progress.stepName": "Iniciando producción...",
       });
-      const vpsUrl = process.env.NEXT_PUBLIC_VPS_API_URL;
-      if (vpsUrl) {
-        fetch(`${vpsUrl}/produce`, {
+      const vpsUrl = process.env.NEXT_PUBLIC_VPS_API_URL || "https://api.valtyk.com";
+      try {
+        const res = await fetch(`${vpsUrl}/produce`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId: id })
-        }).catch(err => console.error("Error contactando VPS:", err));
+          body: JSON.stringify({ projectId: id, overrideModeration }),
+        });
+        if (res.status === 403) {
+          // Gate de moderación bloqueó. Pedimos confirmación del usuario.
+          const data = await res.json().catch(() => ({}));
+          const items = (data.critical_blocks || [])
+            .map((b) => `  • ${b.category}: ${(b.score * 100).toFixed(0)}%`)
+            .join("\n");
+          const confirmed = window.confirm(
+            "⚠️ El análisis de contenido detectó material que puede afectar la monetización o violar políticas:\n\n" +
+            items +
+            "\n\n¿Quieres continuar de todos modos? (Asumes la responsabilidad de revisar el resultado antes de publicar)"
+          );
+          if (confirmed) {
+            // Reintenta con override
+            await fetch(`${vpsUrl}/produce`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ projectId: id, overrideModeration: true }),
+            });
+          } else {
+            // Revertir el estado: el usuario decidió no continuar
+            await updateDoc(doc(db, "projects", id), {
+              "script.approved": false,
+              "status": "script_ready",
+              "progress.percent": 0,
+              "progress.stepName": "Revisión pendiente — edita el guión y vuelve a aprobar",
+            });
+          }
+        }
+      } catch (fetchErr) {
+        console.error("Error contactando servidor:", fetchErr);
       }
-    } catch(e) {
+    } catch (e) {
       alert("Error: " + e.message);
     }
   }, [id, editedScript]);
@@ -422,6 +454,46 @@ export default function ProjectDetailsPage({ params }) {
       {activeTab === "script" && (
         <div className="animate-fade-in" style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: "24px" }}>
           <div>
+            {/* Panel de revisión de contenido sensible (cuando hay análisis) */}
+            {project.moderation && project.script?.plain && (() => {
+              const m = project.moderation;
+              const verdict = m.verdict || "ok";
+              const palette = verdict === "block"
+                ? { bg: "rgba(220, 38, 38, 0.08)", border: "rgba(220, 38, 38, 0.4)", color: "#fca5a5", icon: "🚫", label: "Requiere tu revisión antes de continuar" }
+                : verdict === "warn"
+                ? { bg: "rgba(234, 179, 8, 0.08)", border: "rgba(234, 179, 8, 0.4)", color: "#fde68a", icon: "⚠️", label: "Contenido sensible detectado (esperado para este nicho)" }
+                : { bg: "rgba(34, 197, 94, 0.08)", border: "rgba(34, 197, 94, 0.4)", color: "#86efac", icon: "✅", label: "Contenido apto" };
+
+              const items = verdict === "block"
+                ? (m.critical_blocks || [])
+                : verdict === "warn"
+                ? (m.warnings || [])
+                : [];
+
+              return (
+                <div style={{ marginBottom: "16px", padding: "16px", borderRadius: "10px", background: palette.bg, border: `1px solid ${palette.border}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: items.length ? "10px" : 0 }}>
+                    <span style={{ fontSize: "20px" }}>{palette.icon}</span>
+                    <span style={{ color: palette.color, fontWeight: "bold", fontSize: "14px" }}>{palette.label}</span>
+                  </div>
+                  {items.length > 0 && (
+                    <ul style={{ margin: 0, padding: "0 0 0 28px", color: palette.color, fontSize: "13px", lineHeight: 1.7 }}>
+                      {items.map((it) => (
+                        <li key={it.category}>
+                          <strong>{it.category}</strong>: intensidad {(it.score * 100).toFixed(0)}% (umbral: {(it.threshold * 100).toFixed(0)}%)
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {verdict === "block" && (
+                    <div style={{ marginTop: "10px", fontSize: "12px", color: "var(--text-muted)" }}>
+                      Si decides aprobar de todos modos, se te pedirá confirmación. Considera editar el guión para reducir el contenido marcado.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             <div className="glass-card" style={{ padding: "24px", position: "relative" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                 <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>Edición de Guión</h3>

@@ -154,6 +154,113 @@ def _upload_video_to_storage(local_path: Path, project_id: str) -> dict | None:
         return None
 
 
+# ── Moderación de contenido ───────────────────────────────────────────────
+# Umbrales tuneados para canales tipo true-crime / horror / documental:
+# violence/graphic alto (>0.85) es esperado en estos contenidos, no se bloquea
+# salvo extremo. Sexual/minors, self-harm/instructions y hate/threatening son
+# CRITICOS — cero tolerancia, demonetizacion + posible ban en YouTube.
+MODERATION_THRESHOLDS_CRITICAL = {
+    "sexual/minors": 0.05,
+    "self-harm/instructions": 0.10,
+    "hate/threatening": 0.30,
+}
+MODERATION_THRESHOLDS_WARN = {
+    "violence": 0.92,
+    "violence/graphic": 0.85,
+    "harassment": 0.70,
+    "sexual": 0.50,
+    "self-harm": 0.60,
+    "hate": 0.50,
+    "harassment/threatening": 0.50,
+    "self-harm/intent": 0.50,
+}
+
+
+def check_content_moderation(text: str) -> dict:
+    """
+    Pasa el texto por OpenAI Moderation API (gratis, sin consumo de creditos
+    de generacion) y categoriza en 3 niveles:
+
+      - critical_blocks: violaciones graves que requieren override explicito
+      - warnings: contenido sensible esperado para el nicho, mostrar advertencia
+      - safe: todo dentro de umbrales
+
+    Retorna dict con shape:
+      {
+        "ran_at": iso8601,
+        "model": "...",
+        "flagged_by_openai": bool,
+        "scores": {category: score},
+        "critical_blocks": [{"category": str, "score": float, "threshold": float}],
+        "warnings": [{"category": str, "score": float, "threshold": float}],
+        "verdict": "block" | "warn" | "ok",
+        "error": str | None,
+      }
+    """
+    result = {
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+        "model": None,
+        "flagged_by_openai": False,
+        "scores": {},
+        "critical_blocks": [],
+        "warnings": [],
+        "verdict": "ok",
+        "error": None,
+    }
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        # Cap input a 32k chars (Moderation API max ~32k tokens, sobra)
+        snippet = (text or "")[:32000]
+        if not snippet.strip():
+            result["error"] = "empty text"
+            return result
+
+        resp = client.moderations.create(model="omni-moderation-latest", input=snippet)
+        result["model"] = resp.model
+        if not resp.results:
+            result["error"] = "no results"
+            return result
+
+        r0 = resp.results[0]
+        result["flagged_by_openai"] = bool(r0.flagged)
+        # category_scores es un BaseModel pydantic; .model_dump() lo da como dict
+        try:
+            result["scores"] = r0.category_scores.model_dump()
+        except Exception:
+            result["scores"] = dict(r0.category_scores) if hasattr(r0.category_scores, "__iter__") else {}
+
+        for cat, threshold in MODERATION_THRESHOLDS_CRITICAL.items():
+            score = result["scores"].get(cat, 0.0) or 0.0
+            if score >= threshold:
+                result["critical_blocks"].append({
+                    "category": cat, "score": round(score, 4), "threshold": threshold,
+                })
+        for cat, threshold in MODERATION_THRESHOLDS_WARN.items():
+            score = result["scores"].get(cat, 0.0) or 0.0
+            if score >= threshold:
+                result["warnings"].append({
+                    "category": cat, "score": round(score, 4), "threshold": threshold,
+                })
+
+        if result["critical_blocks"]:
+            result["verdict"] = "block"
+        elif result["warnings"]:
+            result["verdict"] = "warn"
+        else:
+            result["verdict"] = "ok"
+
+        return result
+    except Exception as e:
+        result["error"] = str(e)[:200]
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(e)
+        except Exception:
+            pass
+        return result
+
+
 def _build_master_audio(video_dir: Path) -> Path | None:
     """
     Concatena narration_*.mp3 en master_audio.mp3 con validación robusta.
@@ -276,6 +383,34 @@ _AGENT_CATALOG = """
 [agent_viajes] Viajes y Exploraciones — Shackleton, Everest, lugares peligrosos del mundo
 [agent_noticias_virales] Noticias Virales — eventos actuales que están en tendencia esta semana
 """.strip()
+
+
+@app.post("/moderation/check/{project_id}")
+def moderation_check(project_id: str):
+    """
+    Corre moderacion del guion del proyecto y guarda el resultado en Firestore.
+    Util para:
+      - Backfill de proyectos viejos sin moderacion
+      - Re-check despues de que el usuario edita el guion manualmente
+    """
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        doc = db.collection("projects").document(project_id).get()
+        if not doc.exists:
+            return JSONResponse(status_code=404, content={"error": "project not found"})
+        script_text = (doc.to_dict().get("script") or {}).get("plain") or ""
+        if not script_text:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "project has no script.plain to moderate"},
+            )
+        result = check_content_moderation(script_text)
+        db.collection("projects").document(project_id).update({"moderation": result})
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
 
 
 @app.post("/recommend-agent")
@@ -696,12 +831,44 @@ async def trigger_production(request: Request, background_tasks: BackgroundTasks
     Encola la producción del video en la cola Celery.
     Devuelve inmediato con un task_id (no bloquea esperando que termine).
     Workers paralelos pickan el job y lo ejecutan; si uno muere, otro retoma.
+
+    Antes de encolar verifica el gate de moderacion: si el guion tiene
+    flags CRITICOS y el usuario no envio overrideModeration:true, bloquea.
     """
     data = await request.json()
     project_id = data.get("projectId")
+    override_moderation = bool(data.get("overrideModeration", False))
 
     if not project_id:
         return {"status": "error", "message": "Missing 'projectId'"}
+
+    # Moderation gate — solo bloquea si hay critical_blocks Y no hay override
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        doc = db.collection("projects").document(project_id).get()
+        if doc.exists:
+            mod = (doc.to_dict() or {}).get("moderation") or {}
+            critical = mod.get("critical_blocks") or []
+            if critical and not override_moderation:
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "status": "blocked",
+                        "reason": "content_moderation",
+                        "critical_blocks": critical,
+                        "message": "El contenido tiene flags críticos. Revisa y reenvía con overrideModeration:true para forzar.",
+                    },
+                )
+    except Exception as gate_err:
+        # Si el gate falla, no bloquees produccion. Solo loggea + Sentry.
+        print(f"[API] moderation gate check failed (non-blocking): {gate_err}", flush=True)
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(gate_err)
+        except Exception:
+            pass
 
     try:
         from worker_tasks import produce_video
@@ -710,6 +877,7 @@ async def trigger_production(request: Request, background_tasks: BackgroundTasks
             "status": "queued",
             "task_id": task.id,
             "project_id": project_id,
+            "moderation_overridden": override_moderation,
             "message": f"Production enqueued for project {project_id}",
         }
     except Exception as queue_err:
@@ -828,6 +996,23 @@ def run_script(topic, agent_file, project_id):
         result = run_full_pipeline(topic, agent_file, project_id)
         if result:
             print(f"✅ [API] Pipeline completed successfully for '{topic}'", flush=True)
+            # Moderation gate — corre justo despues de generar el guion para
+            # que el usuario vea el verdict antes de aprobar a produccion.
+            try:
+                _ensure_firebase_initialized()
+                from firebase_admin import firestore
+                db = firestore.client()
+                doc = db.collection("projects").document(project_id).get()
+                if doc.exists:
+                    script_text = (doc.to_dict().get("script") or {}).get("plain") or ""
+                    if script_text:
+                        mod = check_content_moderation(script_text)
+                        db.collection("projects").document(project_id).update({
+                            "moderation": mod,
+                        })
+                        print(f"   🛡️ Moderation: {mod['verdict']} | crit={len(mod['critical_blocks'])} | warn={len(mod['warnings'])}", flush=True)
+            except Exception as mod_err:
+                print(f"   ⚠️ Moderation check failed (no bloqueante): {mod_err}", flush=True)
         else:
             print(f"⚠️ [API] Pipeline returned None for '{topic}' — check Firebase for error status", flush=True)
     except Exception as e:
