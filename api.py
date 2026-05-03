@@ -237,6 +237,101 @@ def _run_factory_subprocess(args, monitor_thread, stop_event, timeout=7200, log_
                     pass
 
 
+# ── Idempotency lock para /produce y /retry ──────────────────────────────
+# Compare-and-swap atómico via Firestore transaction. Bloquea encolado
+# duplicado de jobs costosos para el mismo project_id (doble click rápido,
+# race UI, retry browser). El lock expira tras LOCK_MAX_AGE_SEC para no
+# bloquear retries legítimos cuando un job realmente murió sin limpiar.
+PRODUCTION_LOCK_MAX_AGE_SEC = 300  # 5 minutos
+
+
+def _try_acquire_production_lock(project_id: str) -> dict:
+    """
+    Intenta adquirir lock de producción para el project_id usando Firestore
+    transaction (atómico, sin race entre múltiples workers/requests).
+
+    Returns:
+      - {"acquired": True, "lock_id": "<uuid>"} si el lock se adquirió.
+      - {"acquired": False, "existing_lock_id": "<uuid>", "age_sec": N}
+        si ya hay un lock vigente (otro job ya está corriendo).
+      - {"acquired": False, "error": str} si Firestore falló.
+    """
+    import uuid
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        doc_ref = db.collection("projects").document(project_id)
+
+        new_lock_id = str(uuid.uuid4())
+
+        @firestore.transactional
+        def _txn(transaction):
+            snap = doc_ref.get(transaction=transaction)
+            data = snap.to_dict() or {}
+
+            existing_lock = data.get("productionLockId")
+            locked_at = data.get("productionLockedAt")
+
+            # Si hay lock vigente, NO reencolar
+            if existing_lock and locked_at and hasattr(locked_at, "timestamp"):
+                age = datetime.now(timezone.utc).timestamp() - locked_at.timestamp()
+                if age < PRODUCTION_LOCK_MAX_AGE_SEC:
+                    return {
+                        "acquired": False,
+                        "existing_lock_id": existing_lock,
+                        "age_sec": int(age),
+                    }
+                # Lock expirado: alguien lo dejó colgando, lo robamos
+                print(f"[LOCK] Stale lock {existing_lock[:8]}... ({int(age)}s), reclaiming for {project_id}")
+
+            transaction.update(doc_ref, {
+                "productionLockId": new_lock_id,
+                "productionLockedAt": firestore.SERVER_TIMESTAMP,
+            })
+            return {"acquired": True, "lock_id": new_lock_id}
+
+        return _txn(db.transaction())
+    except Exception as e:
+        print(f"[LOCK] Acquire failed for {project_id}: {e}")
+        return {"acquired": False, "error": str(e)[:200]}
+
+
+def _release_production_lock(project_id: str, lock_id: str | None = None):
+    """
+    Libera el lock al terminar producción (éxito, error, timeout). Si
+    lock_id se provee, solo borra si coincide (evita borrar el lock de
+    OTRO job que ya tomó el slot). Si no, borra incondicional.
+    """
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        doc_ref = db.collection("projects").document(project_id)
+
+        if lock_id is None:
+            doc_ref.update({
+                "productionLockId": firestore.DELETE_FIELD,
+                "productionLockedAt": firestore.DELETE_FIELD,
+            })
+            return
+
+        @firestore.transactional
+        def _txn(transaction):
+            snap = doc_ref.get(transaction=transaction)
+            data = snap.to_dict() or {}
+            current = data.get("productionLockId")
+            if current == lock_id:
+                transaction.update(doc_ref, {
+                    "productionLockId": firestore.DELETE_FIELD,
+                    "productionLockedAt": firestore.DELETE_FIELD,
+                })
+
+        _txn(db.transaction())
+    except Exception as e:
+        print(f"[LOCK] Release failed for {project_id}: {e}")  # no fatal
+
+
 # ── Moderación de contenido ───────────────────────────────────────────────
 # Umbrales tuneados para canales tipo true-crime / horror / documental:
 # violence/graphic alto (>0.85) es esperado en estos contenidos, no se bloquea
@@ -926,16 +1021,32 @@ _AGENT_CATALOG = """
 
 
 @app.post("/thumbnails/build/{project_id}")
-def thumbnails_build(project_id: str):
-    """Genera thumbnails on-demand para un proyecto completado (backfill)."""
+def thumbnails_build(project_id: str, force: bool = False):
+    """
+    Genera thumbnails on-demand para un proyecto completado (backfill).
+    Idempotency: si ya hay thumbnails y no se pasa ?force=true, devuelve los
+    existentes sin regenerar (evita ~$0.90 USD de FLUX por doble click).
+    """
     try:
         _ensure_firebase_initialized()
         from firebase_admin import firestore
         db = firestore.client()
-        doc = db.collection("projects").document(project_id).get()
+        doc_ref = db.collection("projects").document(project_id)
+        doc = doc_ref.get()
         if not doc.exists:
             return JSONResponse(status_code=404, content={"error": "project not found"})
         data = doc.to_dict()
+
+        # Idempotency: skip si ya hay thumbnails. ?force=true para regenerar.
+        existing = data.get("thumbnails") or []
+        if existing and not force and len(existing) >= 3:
+            return {
+                "thumbnails": existing,
+                "count": len(existing),
+                "cached": True,
+                "message": "Thumbnails ya existen; usar ?force=true para regenerar.",
+            }
+
         folder = data.get("videoFolder") or ""
         title = data.get("title") or ""
         if not folder:
@@ -946,8 +1057,8 @@ def thumbnails_build(project_id: str):
 
         results = build_thumbnails_for_project(video_dir, project_id, title)
         if results:
-            db.collection("projects").document(project_id).update({"thumbnails": results})
-        return {"thumbnails": results, "count": len(results)}
+            doc_ref.update({"thumbnails": results})
+        return {"thumbnails": results, "count": len(results), "cached": False}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)[:200]})
 
@@ -982,16 +1093,20 @@ def shorts_build(project_id: str):
 
 
 @app.post("/factcheck/run/{project_id}")
-def factcheck_run(project_id: str):
+def factcheck_run(project_id: str, force: bool = False):
     """
     Corre fact-checking del guion del proyecto on-demand.
     Util para backfill o re-check tras editar el guion.
+
+    Idempotency: si ya hay factCheck reciente (<1h) y el script no cambió,
+    devuelve el cached. Pasar ?force=true para forzar re-check.
     """
     try:
         _ensure_firebase_initialized()
         from firebase_admin import firestore
         db = firestore.client()
-        doc = db.collection("projects").document(project_id).get()
+        doc_ref = db.collection("projects").document(project_id)
+        doc = doc_ref.get()
         if not doc.exists:
             return JSONResponse(status_code=404, content={"error": "project not found"})
         data = doc.to_dict()
@@ -1001,9 +1116,30 @@ def factcheck_run(project_id: str):
                 status_code=400,
                 content={"error": "project has no script.plain to fact-check"},
             )
+
+        # Idempotency: skip si hay factCheck reciente sobre el mismo script.
+        # Comparamos hash del script para detectar si fue editado.
+        import hashlib
+        script_hash = hashlib.sha256(script_text.encode("utf-8")).hexdigest()[:16]
+        existing = data.get("factCheck") or {}
+        existing_hash = existing.get("scriptHash")
+        existing_at = existing.get("checkedAt")
+        if (
+            not force
+            and existing_hash == script_hash
+            and existing_at and hasattr(existing_at, "timestamp")
+        ):
+            age = datetime.now(timezone.utc).timestamp() - existing_at.timestamp()
+            if age < 3600:  # < 1 hora
+                return {**existing, "cached": True, "age_sec": int(age)}
+
         result = fact_check_script(script_text, topic_hint=data.get("title", ""))
-        db.collection("projects").document(project_id).update({"factCheck": result})
-        return result
+        result["scriptHash"] = script_hash
+        result["checkedAt"] = firestore.SERVER_TIMESTAMP
+        doc_ref.update({"factCheck": result})
+        # firestore.SERVER_TIMESTAMP no es serializable directo en JSON respuesta
+        result.pop("checkedAt", None)
+        return {**result, "cached": False}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)[:200]})
 
@@ -1493,6 +1629,24 @@ async def trigger_production(request: Request, background_tasks: BackgroundTasks
         except Exception:
             pass
 
+    # Idempotency lock: previene encolado duplicado por doble click o race UI.
+    # Si ya hay un job vigente (<5min) para este project_id, devuelve el
+    # task original sin encolar otro. Un job que realmente murió libera el
+    # lock al finalizar (o expira a los 5min para no bloquear retries reales).
+    lock_result = _try_acquire_production_lock(project_id)
+    if not lock_result.get("acquired"):
+        existing = lock_result.get("existing_lock_id", "unknown")
+        age = lock_result.get("age_sec", 0)
+        print(f"[API] /produce duplicate detected for {project_id}; existing lock {existing[:8]}... age={age}s")
+        return {
+            "status": "queued",
+            "task_id": existing,
+            "project_id": project_id,
+            "moderation_overridden": override_moderation,
+            "duplicate_blocked": True,
+            "message": f"Production already in progress (started {age}s ago)",
+        }
+
     try:
         from worker_tasks import produce_video
         task = produce_video.delay(project_id)
@@ -1508,6 +1662,9 @@ async def trigger_production(request: Request, background_tasks: BackgroundTasks
         # caído, network down), corremos inline como antes para no romper UX.
         # Sentry captura el problema; el operador debe revisar.
         print(f"[API] queue unavailable, falling back to inline: {queue_err}", flush=True)
+        # Liberar lock antes de fallback inline (run_production lo re-toma o lo
+        # dejará al final de su propio flujo)
+        _release_production_lock(project_id, lock_result.get("lock_id"))
         try:
             import sentry_sdk
             sentry_sdk.capture_exception(queue_err)
@@ -1548,6 +1705,20 @@ async def retry_production(request: Request, background_tasks: BackgroundTasks):
         if not doc.exists:
             return {"status": "error", "message": "Project not found"}
         
+        # Idempotency lock antes de resetear status (evita doble retry).
+        lock_result = _try_acquire_production_lock(project_id)
+        if not lock_result.get("acquired"):
+            existing = lock_result.get("existing_lock_id", "unknown")
+            age = lock_result.get("age_sec", 0)
+            print(f"[API] /retry duplicate detected for {project_id}; existing lock {existing[:8]}... age={age}s")
+            return {
+                "status": "queued",
+                "task_id": existing,
+                "project_id": project_id,
+                "duplicate_blocked": True,
+                "message": f"Retry already in progress (started {age}s ago)",
+            }
+
         # Resetear a estado "produced" para re-lanzar
         doc_ref.update({
             "status": "producing",
@@ -1567,6 +1738,7 @@ async def retry_production(request: Request, background_tasks: BackgroundTasks):
             }
         except Exception as queue_err:
             print(f"[API] queue unavailable on retry, falling back to inline: {queue_err}", flush=True)
+            _release_production_lock(project_id, lock_result.get("lock_id"))
             background_tasks.add_task(run_production, project_id)
             return {
                 "status": "accepted",
@@ -1680,6 +1852,9 @@ async def recover_from_disk(project_id: str):
             "videoUrl": storage_info["signed_url"],
             "videoUrlExpiresAt": firestore.SERVER_TIMESTAMP,
             "recoveredFromDisk": True,
+            # Limpiar lock viejo (si quedó de un job que murió sin liberar)
+            "productionLockId": firestore.DELETE_FIELD,
+            "productionLockedAt": firestore.DELETE_FIELD,
         }
         doc_ref.update(update_payload)
 
@@ -2145,5 +2320,14 @@ def run_production(project_id):
     except Exception as e:
         update_progress(0, f"Error: {str(e)[:100]}", "error")
         print(f"❌ [PRODUCE] Error: {e}")
+    finally:
+        # SIEMPRE liberar el lock de producción al terminar (éxito, error,
+        # SoftTimeLimit). Sin esto, un retry legítimo posterior se bloquearía
+        # como "duplicado" hasta que el lock expire (5min). El lock se
+        # autolibera por TTL pero limpiar explícitamente es mejor UX.
+        try:
+            _release_production_lock(project_id)
+        except Exception:
+            pass
 
 
