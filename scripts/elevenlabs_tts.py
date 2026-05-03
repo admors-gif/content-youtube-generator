@@ -328,6 +328,246 @@ def generate_full_narration(
 
 
 # ============================================================
+# PODCAST: Dual narration (2 voces alternando por bloque de diálogo)
+# ============================================================
+import subprocess as _subprocess
+
+
+def _generate_silence_mp3(duration_ms: int, output_path: Path) -> bool:
+    """Genera un MP3 de silencio de duración exacta usando FFmpeg.
+    Útil como pausa entre turnos de speaker en un podcast (la respiración
+    real entre quien habla es lo que más distingue diálogo humano de TTS)."""
+    duration_s = duration_ms / 1000.0
+    try:
+        result = _subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "lavfi",
+                "-i", f"anullsrc=r=44100:cl=mono",
+                "-t", f"{duration_s:.3f}",
+                "-c:a", "libmp3lame", "-b:a", "192k",
+                str(output_path),
+            ],
+            capture_output=True, text=True, timeout=15,
+        )
+        return result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0
+    except Exception as e:
+        print(f"   [!] silencio FFmpeg falló: {e}")
+        return False
+
+
+def _concat_mp3s(input_paths: list, output_path: Path) -> bool:
+    """Concatena varios MP3 en uno solo con FFmpeg concat demuxer.
+    Re-encodea para evitar artifacts de concat directo si los formatos
+    difieren ligeramente."""
+    if not input_paths:
+        return False
+    list_path = output_path.parent / f"_concat_{output_path.stem}.txt"
+    try:
+        with open(list_path, "w", encoding="utf-8") as f:
+            for p in input_paths:
+                f.write(f"file '{p.as_posix()}'\n")
+        result = _subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", str(list_path),
+                "-c:a", "libmp3lame", "-b:a", "192k",
+                str(output_path),
+            ],
+            capture_output=True, text=True, timeout=180,
+        )
+        if result.returncode != 0:
+            print(f"   [!] concat falló: {result.stderr[-200:]}")
+            return False
+        return output_path.exists() and output_path.stat().st_size > 0
+    except Exception as e:
+        print(f"   [!] concat exception: {e}")
+        return False
+    finally:
+        if list_path.exists():
+            try:
+                list_path.unlink()
+            except Exception:
+                pass
+
+
+def generate_dual_narration(
+    scenes: list,
+    output_dir: Path,
+    voice_a: str = "Salvatore",
+    voice_b: str = "Serafina",
+    pause_between_blocks_ms: int = 280,
+    skip_existing: bool = True,
+    model: str = "eleven_multilingual_v2",
+) -> dict:
+    """
+    Genera narración dual para podcast: 2 voces alternando por bloque de diálogo.
+
+    Para cada escena con `dialogue_blocks`:
+      1. Genera 1 MP3 por bloque: narration_{scene:04d}_{block:03d}_{speaker}.mp3
+      2. Genera silencios de pause_between_blocks_ms entre bloques
+      3. Concatena en narration_{scene:04d}.mp3 (reusable por factory.py
+         exactamente igual que generate_scene_narrations)
+
+    Reintento 3x con backoff lineal por bloque. Si un bloque falla 3 veces,
+    se inserta silencio sintético para no abortar el episodio entero.
+
+    Si voice_a == voice_b → fallback a generate_scene_narrations (warning).
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    blocks_dir = output_dir / "blocks"
+    blocks_dir.mkdir(parents=True, exist_ok=True)
+
+    if voice_a == voice_b:
+        print(f"⚠️  voice_a == voice_b ({voice_a}) — degradando a single-voice narration")
+        return generate_scene_narrations(scenes, output_dir, voice=voice_a, skip_existing=skip_existing)
+
+    print("=" * 60)
+    print(f"   ElevenLabs DUAL TTS — Podcast 2 voces")
+    print("=" * 60)
+    print(f"   Host A: {voice_a}")
+    print(f"   Host B: {voice_b}")
+    print(f"   Escenas: {len(scenes)}")
+    print(f"   Pausa entre bloques: {pause_between_blocks_ms}ms")
+    print("=" * 60)
+
+    settings_a = get_voice_settings(voice_a)
+    settings_b = get_voice_settings(voice_b)
+
+    # Silencio pre-generado (lo reusamos en todas las escenas)
+    silence_path = blocks_dir / f"_silence_{pause_between_blocks_ms}ms.mp3"
+    if not silence_path.exists():
+        if not _generate_silence_mp3(pause_between_blocks_ms, silence_path):
+            print(f"⚠️  No pude generar silencio. Las pausas serán omitidas.")
+            silence_path = None
+
+    stats = {
+        "generated_blocks": 0,
+        "skipped_blocks": 0,
+        "failed_blocks": 0,
+        "scenes_assembled": 0,
+        "scenes_failed": 0,
+        "chars_total": 0,
+    }
+
+    for i, scene in enumerate(scenes):
+        scene_num = scene.get("scene_number", i + 1)
+        scene_audio_path = output_dir / f"narration_{scene_num:04d}.mp3"
+
+        if skip_existing and scene_audio_path.exists() and scene_audio_path.stat().st_size > 0:
+            print(f"   [{i+1}/{len(scenes)}] Escena {scene_num}: ya existe, saltando")
+            stats["scenes_assembled"] += 1
+            continue
+
+        dialogue_blocks = scene.get("dialogue_blocks", [])
+        if not dialogue_blocks:
+            # Fallback: si no hay dialogue_blocks pero sí narration plain,
+            # tratamos como single-voice (Host A por default)
+            narration = scene.get("narration", "")
+            if narration:
+                print(f"   [{i+1}/{len(scenes)}] Escena {scene_num}: sin dialogue_blocks, single-voice fallback")
+                opts = {"stability": settings_a.get("stability", 0.55),
+                        "similarity_boost": settings_a.get("similarity_boost", 0.85),
+                        "speed": settings_a.get("speed", 0.92),
+                        "style": settings_a.get("style", 0.10)}
+                if generate_narration(narration, scene_audio_path, voice=voice_a, model=model, **opts):
+                    stats["scenes_assembled"] += 1
+                    stats["chars_total"] += len(narration)
+                else:
+                    stats["scenes_failed"] += 1
+            continue
+
+        block_paths = []
+        any_block_failed = False
+
+        for j, block in enumerate(dialogue_blocks):
+            speaker_code = (block.get("speaker") or "?").upper()
+            text = (block.get("text") or "").strip()
+            if not text:
+                continue
+
+            voice_to_use = voice_a if speaker_code == "A" else voice_b
+            speaker_settings = settings_a if speaker_code == "A" else settings_b
+            speaker_label = "A" if speaker_code == "A" else "B"
+
+            block_path = blocks_dir / f"narration_{scene_num:04d}_{j+1:03d}_{speaker_label}.mp3"
+
+            if skip_existing and block_path.exists() and block_path.stat().st_size > 0:
+                stats["skipped_blocks"] += 1
+                block_paths.append(block_path)
+                # Insertar silencio entre bloques (excepto antes del primero)
+                if j < len(dialogue_blocks) - 1 and silence_path and silence_path.exists():
+                    block_paths.append(silence_path)
+                continue
+
+            # Reintento 3x con backoff lineal
+            success = False
+            for attempt in range(3):
+                ok = generate_narration(
+                    text, block_path,
+                    voice=voice_to_use, model=model,
+                    stability=speaker_settings.get("stability", 0.55),
+                    similarity_boost=speaker_settings.get("similarity_boost", 0.85),
+                    speed=speaker_settings.get("speed", 0.92),
+                    style=speaker_settings.get("style", 0.10),
+                )
+                if ok:
+                    success = True
+                    break
+                wait_s = 0.1 + attempt * 0.5
+                print(f"   ⚠️  bloque {j+1} escena {scene_num} falló (intento {attempt+1}), reintentando en {wait_s}s")
+                time.sleep(wait_s)
+
+            if success:
+                stats["generated_blocks"] += 1
+                stats["chars_total"] += len(text)
+                block_paths.append(block_path)
+            else:
+                stats["failed_blocks"] += 1
+                any_block_failed = True
+                # Silencio sintético del largo aproximado (chars/15 segundos)
+                synth_ms = max(500, int(len(text) / 15 * 1000))
+                synth_path = blocks_dir / f"narration_{scene_num:04d}_{j+1:03d}_FAIL_silence.mp3"
+                if _generate_silence_mp3(synth_ms, synth_path):
+                    block_paths.append(synth_path)
+                print(f"   ❌ Bloque {j+1}/{len(dialogue_blocks)} de escena {scene_num} falló — silencio sintético {synth_ms}ms")
+
+            # Insertar silencio entre bloques (excepto antes del primero)
+            if j < len(dialogue_blocks) - 1 and silence_path and silence_path.exists():
+                block_paths.append(silence_path)
+
+            time.sleep(0.4)  # rate limit ElevenLabs
+
+        # Concatenar bloques en el archivo de escena
+        if block_paths:
+            if _concat_mp3s(block_paths, scene_audio_path):
+                stats["scenes_assembled"] += 1
+                marker = "⚠️" if any_block_failed else "✅"
+                print(f"   {marker} [{i+1}/{len(scenes)}] Escena {scene_num} ensamblada ({len(block_paths)} segmentos)")
+            else:
+                stats["scenes_failed"] += 1
+                print(f"   ❌ [{i+1}/{len(scenes)}] Escena {scene_num} concat falló")
+        else:
+            stats["scenes_failed"] += 1
+            print(f"   ❌ [{i+1}/{len(scenes)}] Escena {scene_num} sin audio")
+
+    print("=" * 60)
+    print(f"   PODCAST DUAL NARRATION — Estadísticas")
+    print(f"   Bloques generados: {stats['generated_blocks']}")
+    print(f"   Bloques saltados (existentes): {stats['skipped_blocks']}")
+    print(f"   Bloques fallidos: {stats['failed_blocks']}")
+    print(f"   Escenas ensambladas: {stats['scenes_assembled']}/{len(scenes)}")
+    print(f"   Caracteres totales: {stats['chars_total']:,}")
+    cost_low = (stats["chars_total"] / 1000) * 0.06
+    cost_high = (stats["chars_total"] / 1000) * 0.12
+    print(f"   Costo estimado ElevenLabs: ${cost_low:.2f} - ${cost_high:.2f}")
+    print("=" * 60)
+
+    return stats
+
+
+# ============================================================
 # EJECUCIÓN STANDALONE
 # ============================================================
 if __name__ == "__main__":

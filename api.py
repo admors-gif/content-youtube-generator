@@ -121,9 +121,12 @@ def _ensure_firebase_initialized():
         firebase_admin.initialize_app(cred, {"storageBucket": FIREBASE_STORAGE_BUCKET})
 
 
-def _upload_video_to_storage(local_path: Path, project_id: str) -> dict | None:
+def _upload_video_to_storage(local_path: Path, project_id: str, content_type: str = None) -> dict | None:
     """
-    Sube un .mp4 a Firebase Storage en 'videos/{project_id}/{filename}'.
+    Sube un archivo a Firebase Storage en 'videos/{project_id}/{filename}'.
+
+    content_type se infiere de la extensión si no se pasa explícito:
+      .mp4 → video/mp4, .jpg/.jpeg → image/jpeg, .png → image/png
 
     Retorna {"gs_path": "gs://bucket/videos/...", "signed_url": "https://..."}
     o None si falla. La signed URL dura 7 días (máximo permitido por v4 signing).
@@ -137,8 +140,15 @@ def _upload_video_to_storage(local_path: Path, project_id: str) -> dict | None:
         blob_name = f"videos/{project_id}/{local_path.name}"
         blob = bucket.blob(blob_name)
         size_mb = local_path.stat().st_size / (1024 * 1024)
-        print(f"   ☁️ Subiendo a Storage: {blob_name} ({size_mb:.1f} MB)")
-        blob.upload_from_filename(str(local_path), content_type="video/mp4")
+        if content_type is None:
+            ext = local_path.suffix.lower()
+            content_type = {
+                ".mp4": "video/mp4", ".webm": "video/webm",
+                ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".png": "image/png", ".webp": "image/webp",
+            }.get(ext, "application/octet-stream")
+        print(f"   ☁️ Subiendo a Storage: {blob_name} ({size_mb:.1f} MB, {content_type})")
+        blob.upload_from_filename(str(local_path), content_type=content_type)
         signed_url = blob.generate_signed_url(
             version="v4",
             expiration=timedelta(days=7),
@@ -152,6 +162,642 @@ def _upload_video_to_storage(local_path: Path, project_id: str) -> dict | None:
     except Exception as e:
         print(f"   ❌ Storage upload failed: {e}")
         return None
+
+
+def _run_factory_subprocess(args, monitor_thread, stop_event, timeout=7200, log_label="factory"):
+    """
+    Ejecuta factory.py como subprocess en su propio process group, garantizando:
+
+    1. Si el padre (worker) muere o es interrumpido (SoftTimeLimit, SIGTERM), el
+       SUBPROCESS y todos sus hijos (ffmpeg, python helpers) se matan en cascada
+       via os.killpg sobre el process group. Sin esto, ffmpeg quedaría huérfano
+       generando Ken Burns durante 30+ min después del timeout.
+
+    2. El thread monitor (que escribe `update_progress` a Firestore en bucle)
+       SIEMPRE se detiene al final, incluso ante excepción. Antes vivía en una
+       sucesión `subprocess.run() ; stop_event.set()` donde la excepción
+       impedía llegar al stop, dejando un thread zombie escribiendo a Firestore
+       indefinidamente y rompiendo la UX (proyecto regresaba de "completed" a
+       "producing 85%").
+
+    Retorna (returncode, stderr_tail). Loguea timeout y kills explícitamente.
+    """
+    import subprocess
+    import signal
+    proc = None
+    try:
+        # start_new_session=True crea un nuevo process group con PID == proc.pid.
+        # Hace que `os.killpg(proc.pid, SIGTERM)` mate al subprocess Y a todos
+        # sus descendientes (ffmpeg, python -c, etc.) — no solo al subprocess.
+        proc = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+            return (proc.returncode, (stderr or "")[-500:])
+        except subprocess.TimeoutExpired:
+            print(f"   ⏱️ [{log_label}] Subprocess excedió timeout={timeout}s. Matando process group {proc.pid}...")
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+                stdout, stderr = proc.communicate(timeout=10)
+            except Exception:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except Exception:
+                    pass
+                stdout, stderr = ("", "killed by timeout")
+            return (-1, f"TIMEOUT_{timeout}s: {(stderr or '')[-400:]}")
+    finally:
+        # Detener thread monitor SIEMPRE — pase lo que pase con el subprocess.
+        # Si la excepción es SoftTimeLimitExceeded de Celery, también pasamos
+        # por aquí porque Python ejecuta finally antes de re-raise.
+        try:
+            if stop_event is not None:
+                stop_event.set()
+            if monitor_thread is not None and monitor_thread.is_alive():
+                monitor_thread.join(timeout=10)
+        except Exception:
+            pass
+        # Y matar el process group por seguridad si el subprocess sigue vivo
+        # (ej. si llegamos al finally por una excepción del padre, no por
+        # timeout del subprocess).
+        if proc is not None and proc.poll() is None:
+            try:
+                print(f"   🔪 [{log_label}] Padre interrumpido, matando subprocess huérfano (pid={proc.pid})")
+                os.killpg(proc.pid, signal.SIGTERM)
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except Exception:
+                    pass
+
+
+# ── Moderación de contenido ───────────────────────────────────────────────
+# Umbrales tuneados para canales tipo true-crime / horror / documental:
+# violence/graphic alto (>0.85) es esperado en estos contenidos, no se bloquea
+# salvo extremo. Sexual/minors, self-harm/instructions y hate/threatening son
+# CRITICOS — cero tolerancia, demonetizacion + posible ban en YouTube.
+MODERATION_THRESHOLDS_CRITICAL = {
+    "sexual/minors": 0.05,
+    "self-harm/instructions": 0.10,
+    "hate/threatening": 0.30,
+}
+MODERATION_THRESHOLDS_WARN = {
+    "violence": 0.92,
+    "violence/graphic": 0.85,
+    "harassment": 0.70,
+    "sexual": 0.50,
+    "self-harm": 0.60,
+    "hate": 0.50,
+    "harassment/threatening": 0.50,
+    "self-harm/intent": 0.50,
+}
+
+
+def check_content_moderation(text: str) -> dict:
+    """
+    Pasa el texto por OpenAI Moderation API (gratis, sin consumo de creditos
+    de generacion) y categoriza en 3 niveles:
+
+      - critical_blocks: violaciones graves que requieren override explicito
+      - warnings: contenido sensible esperado para el nicho, mostrar advertencia
+      - safe: todo dentro de umbrales
+
+    Retorna dict con shape:
+      {
+        "ran_at": iso8601,
+        "model": "...",
+        "flagged_by_openai": bool,
+        "scores": {category: score},
+        "critical_blocks": [{"category": str, "score": float, "threshold": float}],
+        "warnings": [{"category": str, "score": float, "threshold": float}],
+        "verdict": "block" | "warn" | "ok",
+        "error": str | None,
+      }
+    """
+    result = {
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+        "model": None,
+        "flagged_by_openai": False,
+        "scores": {},
+        "critical_blocks": [],
+        "warnings": [],
+        "verdict": "ok",
+        "error": None,
+    }
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        # Cap input a 32k chars (Moderation API max ~32k tokens, sobra)
+        snippet = (text or "")[:32000]
+        if not snippet.strip():
+            result["error"] = "empty text"
+            return result
+
+        resp = client.moderations.create(model="omni-moderation-latest", input=snippet)
+        result["model"] = resp.model
+        if not resp.results:
+            result["error"] = "no results"
+            return result
+
+        r0 = resp.results[0]
+        result["flagged_by_openai"] = bool(r0.flagged)
+        # category_scores es un BaseModel pydantic; .model_dump() lo da como dict
+        try:
+            result["scores"] = r0.category_scores.model_dump()
+        except Exception:
+            result["scores"] = dict(r0.category_scores) if hasattr(r0.category_scores, "__iter__") else {}
+
+        for cat, threshold in MODERATION_THRESHOLDS_CRITICAL.items():
+            score = result["scores"].get(cat, 0.0) or 0.0
+            if score >= threshold:
+                result["critical_blocks"].append({
+                    "category": cat, "score": round(score, 4), "threshold": threshold,
+                })
+        for cat, threshold in MODERATION_THRESHOLDS_WARN.items():
+            score = result["scores"].get(cat, 0.0) or 0.0
+            if score >= threshold:
+                result["warnings"].append({
+                    "category": cat, "score": round(score, 4), "threshold": threshold,
+                })
+
+        if result["critical_blocks"]:
+            result["verdict"] = "block"
+        elif result["warnings"]:
+            result["verdict"] = "warn"
+        else:
+            result["verdict"] = "ok"
+
+        return result
+    except Exception as e:
+        result["error"] = str(e)[:200]
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(e)
+        except Exception:
+            pass
+        return result
+
+
+# ── Fact-checking del guion ─────────────────────────────────────────────────
+def fact_check_script(text: str, topic_hint: str = "") -> dict:
+    """
+    Verifica claims factuales del guion en 3 pasadas:
+      1. Claude extrae los 10 claims mas verificables (numeros, fechas, nombres)
+      2. Tavily busca evidencia para cada uno
+      3. Claude evalua cada claim contra evidencia → confidence alta/media/baja
+
+    Retorna:
+      {
+        "ran_at": iso8601,
+        "claims": [
+          {"claim": str, "confidence": "alta"|"media"|"baja",
+           "evidence": str, "source_url": str, "verdict": str}
+        ],
+        "summary": {"total": int, "high": int, "medium": int, "low": int},
+        "error": str | None,
+      }
+    """
+    out = {
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+        "claims": [],
+        "summary": {"total": 0, "high": 0, "medium": 0, "low": 0},
+        "error": None,
+    }
+    try:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        snippet = (text or "")[:30000]
+        if not snippet.strip():
+            out["error"] = "empty text"
+            return out
+
+        # Pasada 1: extraccion de claims
+        extract_prompt = (
+            "Eres un fact-checker riguroso. Lee el siguiente guion documental y "
+            "extrae HASTA 10 claims factuales especificos y verificables (cifras, "
+            "fechas, cantidades, nombres asociados a eventos especificos).\n\n"
+            "Ignora opiniones, descripciones generales, o frases narrativas vagas.\n"
+            "Prefiere claims donde una fuente publica podria confirmar o refutar.\n\n"
+            f"Tema del video: {topic_hint or '(no especificado)'}\n\n"
+            f"GUION:\n{snippet}\n\n"
+            "Responde EXCLUSIVAMENTE con JSON array (sin markdown, sin texto extra):\n"
+            "[\"claim 1 corto y especifico\", \"claim 2\", ...]\n"
+            "Cada claim maximo 25 palabras."
+        )
+        r = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            messages=[{"role": "user", "content": extract_prompt}],
+        )
+        raw = r.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        claims_list = json.loads(raw)
+        if not isinstance(claims_list, list):
+            raise ValueError("claims response not a list")
+        claims_list = [c for c in claims_list if isinstance(c, str) and c.strip()][:10]
+
+        # Pasada 2: Tavily search por cada claim
+        try:
+            from tavily import TavilyClient
+            tavily = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
+        except Exception as tav_init_err:
+            out["error"] = f"Tavily init failed: {tav_init_err}"
+            out["claims"] = [{"claim": c, "confidence": "media", "evidence": "(no se pudo verificar)", "source_url": "", "verdict": "sin verificar"} for c in claims_list]
+            return out
+
+        evidence_pack = []
+        for claim in claims_list:
+            try:
+                tav_res = tavily.search(query=claim, search_depth="basic", max_results=2, include_answer=True)
+                ans = (tav_res.get("answer") or "")[:400]
+                top = tav_res.get("results", [{}])[0] if tav_res.get("results") else {}
+                evidence_pack.append({
+                    "claim": claim,
+                    "answer": ans,
+                    "top_url": top.get("url", ""),
+                    "top_snippet": (top.get("content") or "")[:300],
+                })
+            except Exception as tav_err:
+                evidence_pack.append({"claim": claim, "answer": "", "top_url": "", "top_snippet": f"(error: {tav_err})"})
+
+        # Pasada 3: evaluacion de claims con la evidencia
+        eval_prompt = (
+            "Eres un fact-checker. Para cada claim, decide su confidence basado en "
+            "la evidencia provista (Tavily search). Responde EXCLUSIVAMENTE con un "
+            "JSON array con esta estructura exacta:\n"
+            "[{\"claim\": \"...\", \"confidence\": \"alta|media|baja\", \"verdict\": \"frase corta explicando\", \"source_url\": \"...\"}]\n\n"
+            "Reglas:\n"
+            "- 'alta': evidencia clara y especifica respalda el claim\n"
+            "- 'media': evidencia parcial o aproximada\n"
+            "- 'baja': sin evidencia, contradicho, o numero/fecha imposible de verificar\n"
+            "- verdict: maximo 20 palabras\n"
+            "- source_url: la URL de top_url de la evidencia (cadena vacia si no hay)\n\n"
+            f"EVIDENCIA:\n{json.dumps(evidence_pack, ensure_ascii=False)}\n"
+        )
+        r2 = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": eval_prompt}],
+        )
+        raw2 = r2.content[0].text.strip()
+        if raw2.startswith("```"):
+            raw2 = raw2.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        evaluated = json.loads(raw2)
+        if not isinstance(evaluated, list):
+            raise ValueError("eval response not a list")
+
+        # Enriquecer con evidence summary
+        evidence_by_claim = {e["claim"]: e for e in evidence_pack}
+        for item in evaluated:
+            ev = evidence_by_claim.get(item.get("claim", ""), {})
+            item["evidence"] = (ev.get("answer") or ev.get("top_snippet") or "")[:300]
+
+        out["claims"] = evaluated
+        for item in evaluated:
+            conf = (item.get("confidence") or "").lower()
+            if conf == "alta":
+                out["summary"]["high"] += 1
+            elif conf == "media":
+                out["summary"]["medium"] += 1
+            else:
+                out["summary"]["low"] += 1
+        out["summary"]["total"] = len(evaluated)
+        return out
+    except Exception as e:
+        out["error"] = str(e)[:200]
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(e)
+        except Exception:
+            pass
+        return out
+
+
+# ── Shorts pipeline (vertical 9:16 derivados del long-form) ────────────────
+def _video_duration_seconds(video_path: Path) -> float:
+    """Devuelve duración del video con ffprobe. 0 si falla."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)],
+            capture_output=True, text=True, timeout=20,
+        )
+        return float(out.stdout.strip() or 0)
+    except Exception:
+        return 0.0
+
+
+def _render_short_vertical(input_video: Path, start_sec: float, end_sec: float, output_path: Path) -> bool:
+    """
+    Re-renderiza un segmento del video horizontal 16:9 a vertical 9:16
+    con fondo blureado del mismo frame (estilo Shorts/TikTok).
+
+    Filter graph:
+      - bg: scale a 1080x1920 force-fit + crop + blur (queda como fondo)
+      - fg: scale a 1080xN manteniendo aspect (queda centrado encima)
+      - overlay: composita fg sobre bg
+    """
+    duration = max(1, end_sec - start_sec)
+    filter_complex = (
+        "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
+        "crop=1080:1920,boxblur=30:3[bg];"
+        "[0:v]scale=1080:-1[fg];"
+        "[bg][fg]overlay=(W-w)/2:(H-h)/2[out]"
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", str(start_sec),
+        "-t", str(duration),
+        "-i", str(input_video),
+        "-filter_complex", filter_complex,
+        "-map", "[out]", "-map", "0:a?",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "22",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        str(output_path),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
+            return True
+        print(f"   ❌ ffmpeg short render failed (rc={result.returncode}): {result.stderr[-300:]}")
+        return False
+    except subprocess.TimeoutExpired:
+        print(f"   ❌ ffmpeg short render timeout after 5 min")
+        return False
+    except Exception as e:
+        print(f"   ❌ ffmpeg short render exception: {e}")
+        return False
+
+
+def build_shorts_for_project(video_dir: Path, project_id: str) -> list:
+    """
+    Genera hasta 3 shorts vertical 9:16 a timestamps estratégicos del video final.
+    Sube cada uno a Firebase Storage en videos/{project_id}/shorts/.
+
+    Estrategia v1 (MVP): timestamps fijos según duración del video:
+      1. HOOK: primeros 60s (capturas la apertura más impactante del guion)
+      2. MID:  60s alrededor del 50% (sección densa)
+      3. END:  60s antes del cierre (clímax narrativo)
+
+    Mejora futura (Sprint 2.1.5): NLP scoring de intensidad emocional
+    sobre el transcript para elegir momentos más virales.
+
+    Retorna lista de dicts: [{"index": 1, "start": 0, "end": 60,
+                              "gs_path": "...", "signed_url": "..."}]
+    """
+    # Encontrar el video final preferido (con subs si existe)
+    final_videos = list(video_dir.glob("FINAL_SUB_*.mp4"))
+    if not final_videos:
+        final_videos = [v for v in video_dir.glob("FINAL_*.mp4") if "FINAL_SUB_" not in v.name]
+    if not final_videos:
+        print(f"   ⚠️ No se encontró FINAL video en {video_dir} para generar shorts")
+        return []
+
+    src = final_videos[0]
+    duration = _video_duration_seconds(src)
+    if duration < 90:
+        print(f"   ⚠️ Video {duration:.0f}s muy corto para 3 shorts; salteando")
+        return []
+
+    # Timestamps de los 3 shorts. Cada uno entre 45-60s.
+    short_len = 55
+    plans = [
+        ("hook", 0, min(short_len, 60)),
+        ("mid", max(0, duration * 0.5 - short_len / 2), min(duration, duration * 0.5 + short_len / 2)),
+        ("end", max(0, duration - short_len - 10), max(short_len, duration - 10)),
+    ]
+
+    shorts_dir = video_dir / "shorts"
+    shorts_dir.mkdir(parents=True, exist_ok=True)
+
+    results = []
+    for i, (label, start, end) in enumerate(plans, 1):
+        if end - start < 30:
+            continue
+        out_path = shorts_dir / f"SHORT_{i:02d}_{label}.mp4"
+        print(f"   ✂️ Renderizando short {i}/3 ({label}, {start:.0f}-{end:.0f}s)")
+        if not _render_short_vertical(src, start, end, out_path):
+            continue
+        # Upload a Storage
+        upload = _upload_video_to_storage(out_path, f"{project_id}/shorts")
+        if upload:
+            results.append({
+                "index": i,
+                "label": label,
+                "start": round(start, 1),
+                "end": round(end, 1),
+                "duration": round(end - start, 1),
+                "size_mb": round(out_path.stat().st_size / 1024 / 1024, 1),
+                "gs_path": upload["gs_path"],
+                "signed_url": upload["signed_url"],
+            })
+            print(f"   ✅ Short {i} subido ({results[-1]['size_mb']} MB)")
+    return results
+
+
+# ── Thumbnails (3 variantes por video, reuso de imagenes existentes) ──────
+# Paleta + tipografia por defecto para canales tipo "Cronicas Oscuras".
+# Mas adelante (Phase 3.2 multi-channel) se podra parametrizar por canal.
+THUMBNAIL_DEFAULT_THEME = {
+    "font_path_primary": "/usr/share/fonts/truetype/montserrat/Montserrat-Black.ttf",
+    "font_path_fallback": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "text_color": (255, 255, 255),       # blanco
+    "stroke_color": (0, 0, 0),            # negro
+    "accent_color": (220, 38, 38),        # rojo intenso (DC2626)
+    "stroke_width": 8,
+    "gradient_alpha_top": 0,              # transparente arriba
+    "gradient_alpha_bottom": 200,         # casi opaco abajo (texto legible)
+}
+
+
+def _pick_thumbnail_keywords(title: str, max_words: int = 4) -> str:
+    """
+    Extrae las palabras clave del título para overlay del thumbnail.
+    Quita stopwords cortas y prioriza sustantivos/nombres con mayúsculas.
+    Ej: "El caso del Zodiac Killer" → "Zodiac Killer"
+        "Las torturas de la Santa Inquisición" → "Torturas Inquisición"
+    """
+    if not title:
+        return ""
+    stopwords = {"el", "la", "los", "las", "un", "una", "de", "del", "y", "o",
+                 "que", "en", "con", "por", "para", "sin", "se", "al", "su",
+                 "es", "lo", "le", "the", "and", "of", "in", "on"}
+    words = [w for w in title.split() if w.lower() not in stopwords and len(w) >= 3]
+    return " ".join(words[:max_words]).upper() if words else title.upper()[:50]
+
+
+def _render_thumbnail(source_image: Path, title_text: str, output_path: Path,
+                      variant: str = "center", theme: dict = None) -> bool:
+    """
+    Compone un thumbnail 1280x720 a partir de una imagen base (de las escenas
+    ya generadas para el video) + texto grande superpuesto.
+
+    variants:
+      - 'center': texto grande al centro con bg gradiente
+      - 'bottom': texto en el tercio inferior
+      - 'corner': texto en una esquina con caja roja de acento
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFilter, ImageFont
+    except ImportError:
+        print("   ❌ Pillow no disponible para thumbnails")
+        return False
+
+    th = {**THUMBNAIL_DEFAULT_THEME, **(theme or {})}
+    try:
+        img = Image.open(source_image).convert("RGB")
+        # Resize a 1280x720 (cover) preservando aspecto, luego center crop
+        target_w, target_h = 1280, 720
+        src_w, src_h = img.size
+        src_ratio = src_w / src_h
+        target_ratio = target_w / target_h
+        if src_ratio > target_ratio:
+            # mas ancho de lo necesario: ajustar por altura
+            new_h = target_h
+            new_w = int(new_h * src_ratio)
+        else:
+            new_w = target_w
+            new_h = int(new_w / src_ratio)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+        left = (new_w - target_w) // 2
+        top = (new_h - target_h) // 2
+        img = img.crop((left, top, left + target_w, top + target_h))
+
+        # Saturar y oscurecer ligeramente para resaltar el texto
+        from PIL import ImageEnhance
+        img = ImageEnhance.Color(img).enhance(1.15)
+        img = ImageEnhance.Contrast(img).enhance(1.10)
+        img = ImageEnhance.Brightness(img).enhance(0.85)
+
+        # Cargar fuente (intenta Montserrat Black, fallback a DejaVu Bold)
+        font_size = 120 if len(title_text) <= 14 else 90 if len(title_text) <= 22 else 72
+        font = None
+        for fp in [th["font_path_primary"], th["font_path_fallback"]]:
+            try:
+                if os.path.exists(fp):
+                    font = ImageFont.truetype(fp, font_size)
+                    break
+            except Exception:
+                continue
+        if font is None:
+            font = ImageFont.load_default()
+
+        draw = ImageDraw.Draw(img, "RGBA")
+
+        # Calcular tamaño del texto para posicionarlo
+        # Wrap manual: hasta 2 líneas
+        text = title_text.strip()
+        words = text.split()
+        if len(words) > 2 and font_size >= 90:
+            mid = len(words) // 2
+            text = " ".join(words[:mid]) + "\n" + " ".join(words[mid:])
+
+        # Bbox para centrado
+        bbox = draw.multiline_textbbox((0, 0), text, font=font, stroke_width=th["stroke_width"], align="center", spacing=4)
+        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+        # Posición según variant
+        if variant == "bottom":
+            x = (target_w - text_w) // 2
+            y = target_h - text_h - 60
+            # Gradiente más fuerte abajo
+            grad = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
+            gd = ImageDraw.Draw(grad)
+            for i in range(target_h // 2, target_h):
+                alpha = int(((i - target_h // 2) / (target_h // 2)) * 230)
+                gd.line([(0, i), (target_w, i)], fill=(0, 0, 0, alpha))
+            img.paste(Image.alpha_composite(img.convert("RGBA"), grad).convert("RGB"))
+        elif variant == "corner":
+            x = 60
+            y = 60
+            # Caja roja accent debajo del texto
+        else:  # center
+            x = (target_w - text_w) // 2
+            y = (target_h - text_h) // 2
+            # Gradiente radial tenue para resaltar
+            grad = Image.new("RGBA", (target_w, target_h), (0, 0, 0, 0))
+            gd = ImageDraw.Draw(grad)
+            cx, cy = target_w // 2, target_h // 2
+            for r in range(0, max(target_w, target_h), 4):
+                alpha = max(0, 80 - r * 80 // (target_w // 2))
+                gd.ellipse([cx - r, cy - r, cx + r, cy + r], outline=None, fill=(0, 0, 0, alpha))
+            img.paste(Image.alpha_composite(img.convert("RGBA"), grad).convert("RGB"))
+
+        # Dibujar texto con stroke
+        draw = ImageDraw.Draw(img, "RGBA")
+        draw.multiline_text(
+            (x, y), text, font=font, fill=th["text_color"],
+            stroke_width=th["stroke_width"], stroke_fill=th["stroke_color"],
+            align="center", spacing=4,
+        )
+
+        # Variant 'corner': agregar barra roja vertical de acento a la izquierda
+        if variant == "corner":
+            draw.rectangle([(0, 0), (12, target_h)], fill=th["accent_color"])
+
+        img.save(str(output_path), "JPEG", quality=92, optimize=True)
+        return output_path.exists() and output_path.stat().st_size > 0
+    except Exception as e:
+        print(f"   ❌ Thumbnail render failed: {e}")
+        return False
+
+
+def build_thumbnails_for_project(video_dir: Path, project_id: str, title: str) -> list:
+    """
+    Genera 3 thumbnails 1280x720 a partir de imágenes del video y los sube
+    a Firebase Storage.
+
+    Estrategia: pick 3 escenas distintas (early, mid, late) y aplica un
+    variant de composición distinto a cada una para diversidad visual.
+    """
+    images_dir = video_dir / "images"
+    if not images_dir.is_dir():
+        print(f"   ⚠️ No hay carpeta de imágenes en {video_dir}, no genero thumbnails")
+        return []
+
+    scenes = sorted(images_dir.glob("scene_*.png")) or sorted(images_dir.glob("scene_*.jpg"))
+    if len(scenes) < 3:
+        print(f"   ⚠️ Solo {len(scenes)} imágenes disponibles, mínimo 3 para thumbnails")
+        return []
+
+    keywords = _pick_thumbnail_keywords(title)
+
+    # Pick 3 escenas distintas: 20%, 50%, 80% del video
+    picks = [
+        ("early", scenes[len(scenes) // 5], "center"),
+        ("mid", scenes[len(scenes) // 2], "bottom"),
+        ("late", scenes[(len(scenes) * 4) // 5], "corner"),
+    ]
+
+    thumbs_dir = video_dir / "thumbnails"
+    thumbs_dir.mkdir(parents=True, exist_ok=True)
+
+    results = []
+    for i, (label, src, variant) in enumerate(picks, 1):
+        out = thumbs_dir / f"THUMB_{i:02d}_{label}_{variant}.jpg"
+        print(f"   🖼️ Renderizando thumbnail {i}/3 ({label}, variant={variant})")
+        if not _render_thumbnail(src, keywords, out, variant=variant):
+            continue
+        upload = _upload_video_to_storage(out, f"{project_id}/thumbnails")
+        if upload:
+            results.append({
+                "index": i,
+                "label": label,
+                "variant": variant,
+                "size_kb": round(out.stat().st_size / 1024, 1),
+                "gs_path": upload["gs_path"],
+                "signed_url": upload["signed_url"],
+            })
+            print(f"   ✅ Thumbnail {i} subido ({results[-1]['size_kb']} KB)")
+    return results
 
 
 def _build_master_audio(video_dir: Path) -> Path | None:
@@ -275,7 +921,119 @@ _AGENT_CATALOG = """
 [agent_biblico] Historias Bíblicas — Éxodo, Apocalipsis, arqueología bíblica, relatos sagrados
 [agent_viajes] Viajes y Exploraciones — Shackleton, Everest, lugares peligrosos del mundo
 [agent_noticias_virales] Noticias Virales — eventos actuales que están en tendencia esta semana
+[agent_podcast_general] Este no es otro podcast más — conversación entre dos hosts (Mateo y Lucía) sobre cualquier tema, formato podcast multitema con dos voces alternando
 """.strip()
+
+
+@app.post("/thumbnails/build/{project_id}")
+def thumbnails_build(project_id: str):
+    """Genera thumbnails on-demand para un proyecto completado (backfill)."""
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        doc = db.collection("projects").document(project_id).get()
+        if not doc.exists:
+            return JSONResponse(status_code=404, content={"error": "project not found"})
+        data = doc.to_dict()
+        folder = data.get("videoFolder") or ""
+        title = data.get("title") or ""
+        if not folder:
+            return JSONResponse(status_code=400, content={"error": "project has no videoFolder"})
+        video_dir = Path(f"/app/output/videos/{folder}")
+        if not video_dir.is_dir():
+            return JSONResponse(status_code=404, content={"error": "video folder not on disk"})
+
+        results = build_thumbnails_for_project(video_dir, project_id, title)
+        if results:
+            db.collection("projects").document(project_id).update({"thumbnails": results})
+        return {"thumbnails": results, "count": len(results)}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+@app.post("/shorts/build/{project_id}")
+def shorts_build(project_id: str):
+    """
+    Genera shorts on-demand para un proyecto ya completado.
+    Útil para backfill de proyectos producidos antes de Sprint 2.1.
+    """
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        doc = db.collection("projects").document(project_id).get()
+        if not doc.exists:
+            return JSONResponse(status_code=404, content={"error": "project not found"})
+        data = doc.to_dict()
+        folder = data.get("videoFolder") or ""
+        if not folder:
+            return JSONResponse(status_code=400, content={"error": "project has no videoFolder"})
+        video_dir = Path(f"/app/output/videos/{folder}")
+        if not video_dir.is_dir():
+            return JSONResponse(status_code=404, content={"error": "video folder not on disk"})
+
+        results = build_shorts_for_project(video_dir, project_id)
+        if results:
+            db.collection("projects").document(project_id).update({"shorts": results})
+        return {"shorts": results, "count": len(results)}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+@app.post("/factcheck/run/{project_id}")
+def factcheck_run(project_id: str):
+    """
+    Corre fact-checking del guion del proyecto on-demand.
+    Util para backfill o re-check tras editar el guion.
+    """
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        doc = db.collection("projects").document(project_id).get()
+        if not doc.exists:
+            return JSONResponse(status_code=404, content={"error": "project not found"})
+        data = doc.to_dict()
+        script_text = (data.get("script") or {}).get("plain") or ""
+        if not script_text:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "project has no script.plain to fact-check"},
+            )
+        result = fact_check_script(script_text, topic_hint=data.get("title", ""))
+        db.collection("projects").document(project_id).update({"factCheck": result})
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+@app.post("/moderation/check/{project_id}")
+def moderation_check(project_id: str):
+    """
+    Corre moderacion del guion del proyecto y guarda el resultado en Firestore.
+    Util para:
+      - Backfill de proyectos viejos sin moderacion
+      - Re-check despues de que el usuario edita el guion manualmente
+    """
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        doc = db.collection("projects").document(project_id).get()
+        if not doc.exists:
+            return JSONResponse(status_code=404, content={"error": "project not found"})
+        script_text = (doc.to_dict().get("script") or {}).get("plain") or ""
+        if not script_text:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "project has no script.plain to moderate"},
+            )
+        result = check_content_moderation(script_text)
+        db.collection("projects").document(project_id).update({"moderation": result})
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
 
 
 @app.post("/recommend-agent")
@@ -696,12 +1454,44 @@ async def trigger_production(request: Request, background_tasks: BackgroundTasks
     Encola la producción del video en la cola Celery.
     Devuelve inmediato con un task_id (no bloquea esperando que termine).
     Workers paralelos pickan el job y lo ejecutan; si uno muere, otro retoma.
+
+    Antes de encolar verifica el gate de moderacion: si el guion tiene
+    flags CRITICOS y el usuario no envio overrideModeration:true, bloquea.
     """
     data = await request.json()
     project_id = data.get("projectId")
+    override_moderation = bool(data.get("overrideModeration", False))
 
     if not project_id:
         return {"status": "error", "message": "Missing 'projectId'"}
+
+    # Moderation gate — solo bloquea si hay critical_blocks Y no hay override
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        doc = db.collection("projects").document(project_id).get()
+        if doc.exists:
+            mod = (doc.to_dict() or {}).get("moderation") or {}
+            critical = mod.get("critical_blocks") or []
+            if critical and not override_moderation:
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "status": "blocked",
+                        "reason": "content_moderation",
+                        "critical_blocks": critical,
+                        "message": "El contenido tiene flags críticos. Revisa y reenvía con overrideModeration:true para forzar.",
+                    },
+                )
+    except Exception as gate_err:
+        # Si el gate falla, no bloquees produccion. Solo loggea + Sentry.
+        print(f"[API] moderation gate check failed (non-blocking): {gate_err}", flush=True)
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(gate_err)
+        except Exception:
+            pass
 
     try:
         from worker_tasks import produce_video
@@ -710,6 +1500,7 @@ async def trigger_production(request: Request, background_tasks: BackgroundTasks
             "status": "queued",
             "task_id": task.id,
             "project_id": project_id,
+            "moderation_overridden": override_moderation,
             "message": f"Production enqueued for project {project_id}",
         }
     except Exception as queue_err:
@@ -828,6 +1619,34 @@ def run_script(topic, agent_file, project_id):
         result = run_full_pipeline(topic, agent_file, project_id)
         if result:
             print(f"✅ [API] Pipeline completed successfully for '{topic}'", flush=True)
+            # Moderation gate — corre justo despues de generar el guion para
+            # que el usuario vea el verdict antes de aprobar a produccion.
+            try:
+                _ensure_firebase_initialized()
+                from firebase_admin import firestore
+                db = firestore.client()
+                doc = db.collection("projects").document(project_id).get()
+                if doc.exists:
+                    script_text = (doc.to_dict().get("script") or {}).get("plain") or ""
+                    if script_text:
+                        mod = check_content_moderation(script_text)
+                        db.collection("projects").document(project_id).update({
+                            "moderation": mod,
+                        })
+                        print(f"   🛡️ Moderation: {mod['verdict']} | crit={len(mod['critical_blocks'])} | warn={len(mod['warnings'])}", flush=True)
+
+                        # Fact-checking en paralelo conceptual (despues de moderation)
+                        try:
+                            fc = fact_check_script(script_text, topic_hint=topic)
+                            db.collection("projects").document(project_id).update({
+                                "factCheck": fc,
+                            })
+                            s = fc["summary"]
+                            print(f"   📚 FactCheck: {s['total']} claims | alta={s['high']} media={s['medium']} baja={s['low']}", flush=True)
+                        except Exception as fc_err:
+                            print(f"   ⚠️ Fact-check failed (no bloqueante): {fc_err}", flush=True)
+            except Exception as mod_err:
+                print(f"   ⚠️ Moderation/FactCheck failed (no bloqueante): {mod_err}", flush=True)
         else:
             print(f"⚠️ [API] Pipeline returned None for '{topic}' — check Firebase for error status", flush=True)
     except Exception as e:
@@ -861,7 +1680,13 @@ def run_production(project_id):
     from pathlib import Path
     import threading
     import time
-    
+    # Importar lazy: si celery no está instalado (script standalone), no romper.
+    try:
+        from celery.exceptions import SoftTimeLimitExceeded
+    except ImportError:
+        class SoftTimeLimitExceeded(Exception):
+            pass
+
     print(f"🏭 [PRODUCE] Starting CINEMATIC production for project {project_id}...")
     
     # Inicializar Firebase con storageBucket (necesario para upload del video final)
@@ -875,6 +1700,20 @@ def run_production(project_id):
     doc_ref = db.collection("projects").document(project_id)
     
     def update_progress(percent, step_name, status="producing"):
+        # Compare-and-swap: NUNCA sobreescribir un proyecto ya completado con
+        # un status intermedio. Threads monitor zombies (que sobreviven a
+        # excepciones del proceso padre) escriben en bucle y rompen la UX al
+        # regresar un proyecto "completed" a "producing 85%". Solo permitimos
+        # transiciones desde estados intermedios o desde error.
+        try:
+            current = doc_ref.get().to_dict() or {}
+            current_status = current.get("status")
+            if current_status == "completed" and status != "completed":
+                # Drop silencioso: no spammear logs por cada tick del monitor zombie
+                return
+        except Exception:
+            pass  # Si la lectura falla, dejar pasar la escritura (defensivo)
+
         doc_ref.update({
             "status": status,
             "progress.percent": percent,
@@ -888,11 +1727,27 @@ def run_production(project_id):
         if not project:
             print("❌ [PRODUCE] Project not found in Firebase")
             return
-        
+
+        # Idempotencia: si Celery re-encola un job ya completado (ej. worker
+        # muere después de escribir status=completed pero antes del ACK por
+        # acks_late + reject_on_worker_lost), no re-correr el pipeline. Para
+        # forzar regeneración real, usar /retry — que sí resetea status.
+        if project.get("status") == "completed" and project.get("videoUrl"):
+            print(f"⏭️  [PRODUCE] Project {project_id} ya está completed (videoUrl presente). Skipping retry idempotente.")
+            try:
+                import sentry_sdk
+                sentry_sdk.capture_message(
+                    f"Idempotency guard hit: re-run skipped for {project_id}",
+                    level="warning",
+                )
+            except Exception:
+                pass
+            return
+
         title = project.get("title", "video_sin_titulo")
         scenes = project.get("scenes", [])
         agent_id = project.get("agentId", "")
-        
+
         if not scenes:
             update_progress(0, "Error: No hay escenas visuales", "error")
             return
@@ -901,21 +1756,42 @@ def run_production(project_id):
         import re
         safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', title.replace(" ", "_"))
         
+        # Detectar formato podcast: si el proyecto fue generado con un agente
+        # de podcast, factory.py necesita format + podcast config + dialogue_blocks
+        # por escena para que generate_dual_narration alterne las voces.
+        is_podcast_project = (
+            project.get("format") == "podcast"
+            or (agent_id or "").startswith("agent_podcast_")
+        )
+
         # Mapear scenes de Firestore al formato factory.py
         factory_scenes = []
         for s in scenes:
-            factory_scenes.append({
+            scene_dict = {
                 "scene_number": s.get("scene_number", s.get("sceneNumber", 0)),
                 "prompt": s.get("prompt", ""),
                 "narration": s.get("narration_text", s.get("narration", "")),
-            })
-        
+            }
+            # Para podcast, propagar dialogue_blocks (los necesita la dual TTS)
+            if is_podcast_project and s.get("dialogue_blocks"):
+                scene_dict["dialogue_blocks"] = s["dialogue_blocks"]
+                scene_dict["narration_text"] = s.get("narration_text", "")
+            factory_scenes.append(scene_dict)
+
         temp_json = {
             "topic": title,
             "agent": agent_id,
             "video_scenes": factory_scenes,
-            "seo_metadata": project.get("seo_metadata", {"title": title})
+            "seo_metadata": project.get("seo_metadata", {"title": title}),
         }
+        if is_podcast_project:
+            temp_json["format"] = "podcast"
+            # Reusa la podcast config persistida en Firestore (host_a/host_b voices, etc.)
+            temp_json["podcast"] = project.get("podcast", {
+                "show_name": "Este no es otro podcast más",
+                "host_a": {"name": "Mateo", "voice": "Salvatore"},
+                "host_b": {"name": "Lucía", "voice": "Serafina"},
+            })
         temp_path = f"/app/output/scripts/PRODUCE_{safe_title}.json"
         os.makedirs(os.path.dirname(temp_path), exist_ok=True)
         with open(temp_path, "w", encoding="utf-8") as f:
@@ -970,21 +1846,23 @@ def run_production(project_id):
             
             monitor_thread = threading.Thread(target=monitor_images, daemon=True)
             monitor_thread.start()
-            
-            # factory.py con --images-only
-            result = subprocess.run(
+
+            # factory.py con --images-only en process group propio +
+            # finally que mata subprocess + monitor thread aunque haya
+            # excepción (SoftTimeLimitExceeded, KeyboardInterrupt, etc.).
+            returncode, stderr_tail = _run_factory_subprocess(
                 ["python", "scripts/factory.py", temp_path, "--mode", "cinematico", "--images-only"],
-                capture_output=True, text=True, timeout=3600
+                monitor_thread=monitor_thread,
+                stop_event=stop_monitoring,
+                timeout=7200,
+                log_label="factory-images",
             )
-            
-            stop_monitoring.set()
-            monitor_thread.join(timeout=5)
-            
-            if result.returncode != 0:
+
+            if returncode != 0:
                 update_progress(0, f"Error generando imágenes", "error")
-                print(f"STDERR: {result.stderr[-500:]}")
+                print(f"STDERR: {stderr_tail}")
                 return
-            
+
             update_progress(40, "✅ Imágenes FLUX listas")
         
         # ═══════════════════════════════════════════
@@ -1025,19 +1903,24 @@ def run_production(project_id):
         stop_monitoring = threading.Event()
         factory_monitor = threading.Thread(target=monitor_factory, daemon=True)
         factory_monitor.start()
-        
-        result = subprocess.run(
-            ["python", "scripts/factory.py", temp_path, 
+
+        # factory.py completo en process group propio. El helper garantiza
+        # que monitor_factory thread se DETIENE en el finally aunque haya
+        # SoftTimeLimitExceeded, evitando el "thread monitor zombie" que
+        # sobreescribía status=completed con producing 85%. Timeout subido
+        # de 3600 → 7200 (cinematico con 99 escenas tarda hasta 1h25m).
+        returncode, stderr_tail = _run_factory_subprocess(
+            ["python", "scripts/factory.py", temp_path,
              "--mode", "cinematico", "--luma-scenes", "8", "--skip-images"],
-            capture_output=True, text=True, timeout=3600
+            monitor_thread=factory_monitor,
+            stop_event=stop_monitoring,
+            timeout=7200,
+            log_label="factory-full",
         )
-        
-        stop_monitoring.set()
-        factory_monitor.join(timeout=5)
-        
-        if result.returncode != 0:
+
+        if returncode != 0:
             update_progress(40, f"Error en pipeline cinemático", "error")
-            print(f"STDERR: {result.stderr[-500:]}")
+            print(f"STDERR: {stderr_tail}")
             return
         
         # ═══════════════════════════════════════════
@@ -1101,6 +1984,38 @@ def run_production(project_id):
             update_progress(96, "☁️ Subiendo a Storage...")
             storage_info = _upload_video_to_storage(Path(final_path), project_id)
 
+        # Generar shorts vertical 9:16 (3 momentos del video final)
+        # No bloqueante: si falla, el video largo ya está completado.
+        shorts_results = []
+        if final_path and storage_info:
+            try:
+                update_progress(97, "✂️ Generando shorts...")
+                shorts_results = build_shorts_for_project(video_dir, project_id)
+                print(f"   📱 Shorts generados: {len(shorts_results)}/3", flush=True)
+            except Exception as shorts_err:
+                print(f"   ⚠️ Shorts generation failed (no bloqueante): {shorts_err}", flush=True)
+                try:
+                    import sentry_sdk
+                    sentry_sdk.capture_exception(shorts_err)
+                except Exception:
+                    pass
+
+        # Generar thumbnails (3 variantes a partir de imágenes existentes)
+        thumbnails_results = []
+        if storage_info:
+            try:
+                update_progress(99, "🖼️ Generando thumbnails...")
+                project_title = project.get("title", "")
+                thumbnails_results = build_thumbnails_for_project(video_dir, project_id, project_title)
+                print(f"   🖼️ Thumbnails generados: {len(thumbnails_results)}/3", flush=True)
+            except Exception as thumb_err:
+                print(f"   ⚠️ Thumbnails generation failed (no bloqueante): {thumb_err}", flush=True)
+                try:
+                    import sentry_sdk
+                    sentry_sdk.capture_exception(thumb_err)
+                except Exception:
+                    pass
+
         status_msg = "🏆 ¡Video cinemático finalizado!" if not has_subs else "🏆 ¡Video cinemático con subtítulos finalizado!"
 
         update_payload = {
@@ -1115,11 +2030,32 @@ def run_production(project_id):
             update_payload["videoStoragePath"] = storage_info["gs_path"]
             update_payload["videoUrl"] = storage_info["signed_url"]
             update_payload["videoUrlExpiresAt"] = firestore.SERVER_TIMESTAMP
+        if shorts_results:
+            update_payload["shorts"] = shorts_results
+        if thumbnails_results:
+            update_payload["thumbnails"] = thumbnails_results
 
         doc_ref.update(update_payload)
 
-        print(f"🏆 [PRODUCE] Cinematic production complete! Subs: {has_subs} | Storage: {bool(storage_info)} | {final_path}")
-        
+        print(f"🏆 [PRODUCE] Cinematic production complete! Subs: {has_subs} | Storage: {bool(storage_info)} | Shorts: {len(shorts_results)} | Thumbs: {len(thumbnails_results)} | {final_path}")
+
+    except SoftTimeLimitExceeded:
+        # Celery soft time limit. NO la atrapamos como error genérico — la
+        # re-raiseamos para que worker_tasks.produce_video la propague y
+        # Celery NO trate el task como completado exitosamente. De lo
+        # contrario el except Exception de abajo escribiría status=error
+        # pero retornaría sin re-raise → Celery hace ack normal pero
+        # acks_late + reject_on_worker_lost terminan re-encolando el job.
+        print(f"⏱️  [PRODUCE] SoftTimeLimitExceeded para {project_id}; propagando a Celery")
+        try:
+            doc_ref.update({
+                "status": "error",
+                "progress.percent": 0,
+                "progress.stepName": "Timeout: producción excedió límite suave",
+            })
+        except Exception:
+            pass
+        raise
     except Exception as e:
         update_progress(0, f"Error: {str(e)[:100]}", "error")
         print(f"❌ [PRODUCE] Error: {e}")

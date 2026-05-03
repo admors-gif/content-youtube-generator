@@ -189,8 +189,10 @@ export default function ProjectDetailsPage({ params }) {
     }
   }, [project?.script?.plain, project?.status, project?.script?.approved]);
 
-  // Core approval logic (used by both manual and auto-approve)
-  const executeApproval = useCallback(async () => {
+  // Core approval logic (used by both manual and auto-approve).
+  // Acepta override opcional para forzar continuación cuando hay flags
+  // críticos en moderación (el usuario aceptó conscientemente).
+  const executeApproval = useCallback(async ({ overrideModeration = false } = {}) => {
     try {
       setTimerActive(false);
       await updateDoc(doc(db, "projects", id), {
@@ -200,15 +202,45 @@ export default function ProjectDetailsPage({ params }) {
         "progress.percent": 2,
         "progress.stepName": "Iniciando producción...",
       });
-      const vpsUrl = process.env.NEXT_PUBLIC_VPS_API_URL;
-      if (vpsUrl) {
-        fetch(`${vpsUrl}/produce`, {
+      const vpsUrl = process.env.NEXT_PUBLIC_VPS_API_URL || "https://api.valtyk.com";
+      try {
+        const res = await fetch(`${vpsUrl}/produce`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId: id })
-        }).catch(err => console.error("Error contactando VPS:", err));
+          body: JSON.stringify({ projectId: id, overrideModeration }),
+        });
+        if (res.status === 403) {
+          // Gate de moderación bloqueó. Pedimos confirmación del usuario.
+          const data = await res.json().catch(() => ({}));
+          const items = (data.critical_blocks || [])
+            .map((b) => `  • ${b.category}: ${(b.score * 100).toFixed(0)}%`)
+            .join("\n");
+          const confirmed = window.confirm(
+            "⚠️ El análisis de contenido detectó material que puede afectar la monetización o violar políticas:\n\n" +
+            items +
+            "\n\n¿Quieres continuar de todos modos? (Asumes la responsabilidad de revisar el resultado antes de publicar)"
+          );
+          if (confirmed) {
+            // Reintenta con override
+            await fetch(`${vpsUrl}/produce`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ projectId: id, overrideModeration: true }),
+            });
+          } else {
+            // Revertir el estado: el usuario decidió no continuar
+            await updateDoc(doc(db, "projects", id), {
+              "script.approved": false,
+              "status": "script_ready",
+              "progress.percent": 0,
+              "progress.stepName": "Revisión pendiente — edita el guión y vuelve a aprobar",
+            });
+          }
+        }
+      } catch (fetchErr) {
+        console.error("Error contactando servidor:", fetchErr);
       }
-    } catch(e) {
+    } catch (e) {
       alert("Error: " + e.message);
     }
   }, [id, editedScript]);
@@ -402,6 +434,84 @@ export default function ProjectDetailsPage({ params }) {
         </div>
       )}
 
+      {/* Shorts vertical 9:16 generados (si existen) */}
+      {project.status === "completed" && Array.isArray(project.shorts) && project.shorts.length > 0 && (
+        <div className="glass-card animate-fade-in" style={{ marginBottom: "32px", padding: "20px" }}>
+          <h3 style={{ margin: "0 0 14px 0", fontSize: "16px", fontWeight: "bold", display: "flex", alignItems: "center", gap: "8px" }}>
+            📱 Versiones cortas (9:16)
+            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "normal" }}>{project.shorts.length} clips listos para publicar</span>
+          </h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px" }}>
+            {project.shorts.map((s) => (
+              <div key={s.index} style={{ background: "var(--bg-dark)", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border)" }}>
+                <video
+                  src={s.signed_url}
+                  controls
+                  preload="metadata"
+                  style={{ width: "100%", aspectRatio: "9/16", background: "#000", display: "block" }}
+                />
+                <div style={{ padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px" }}>
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    {s.label === "hook" ? "🎯 Hook" : s.label === "mid" ? "🔥 Punto fuerte" : "🏆 Cierre"}
+                    {" · "}
+                    {Math.round(s.duration)}s
+                  </span>
+                  <span style={{ color: "var(--text-muted)", fontFamily: "monospace" }}>{s.size_mb}MB</span>
+                </div>
+                <a
+                  href={s.signed_url}
+                  download
+                  className="btn-secondary"
+                  style={{ margin: "0 12px 12px", padding: "6px 10px", fontSize: "12px", textAlign: "center", textDecoration: "none", display: "block" }}
+                >
+                  ⬇ Descargar
+                </a>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Thumbnails generadas (3 variantes 1280x720) */}
+      {project.status === "completed" && Array.isArray(project.thumbnails) && project.thumbnails.length > 0 && (
+        <div className="glass-card animate-fade-in" style={{ marginBottom: "32px", padding: "20px" }}>
+          <h3 style={{ margin: "0 0 14px 0", fontSize: "16px", fontWeight: "bold", display: "flex", alignItems: "center", gap: "8px" }}>
+            🖼️ Thumbnails sugeridos
+            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "normal" }}>{project.thumbnails.length} variantes 1280×720</span>
+          </h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" }}>
+            {project.thumbnails.map((t) => (
+              <div key={t.index} style={{ background: "var(--bg-dark)", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border)" }}>
+                <Image
+                  src={t.signed_url}
+                  alt={`Thumbnail ${t.label}`}
+                  width={1280}
+                  height={720}
+                  style={{ width: "100%", height: "auto", aspectRatio: "16/9", objectFit: "cover", display: "block" }}
+                  unoptimized
+                />
+                <div style={{ padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px" }}>
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    {t.label === "early" ? "🎬 Inicio" : t.label === "mid" ? "🔥 Punto fuerte" : "🏆 Cierre"}
+                    {" · "}
+                    {t.variant}
+                  </span>
+                  <span style={{ color: "var(--text-muted)", fontFamily: "monospace" }}>{t.size_kb}KB</span>
+                </div>
+                <a
+                  href={t.signed_url}
+                  download
+                  className="btn-secondary"
+                  style={{ margin: "0 12px 12px", padding: "6px 10px", fontSize: "12px", textAlign: "center", textDecoration: "none", display: "block" }}
+                >
+                  ⬇ Descargar
+                </a>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Tabs Menu */}
       <div style={{ display: "flex", gap: "16px", marginBottom: "24px", borderBottom: "1px solid var(--border)", paddingBottom: "8px" }}>
         <button 
@@ -422,6 +532,91 @@ export default function ProjectDetailsPage({ params }) {
       {activeTab === "script" && (
         <div className="animate-fade-in" style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: "24px" }}>
           <div>
+            {/* Panel de revisión de contenido sensible (cuando hay análisis) */}
+            {project.moderation && project.script?.plain && (() => {
+              const m = project.moderation;
+              const verdict = m.verdict || "ok";
+              const palette = verdict === "block"
+                ? { bg: "rgba(220, 38, 38, 0.08)", border: "rgba(220, 38, 38, 0.4)", color: "#fca5a5", icon: "🚫", label: "Requiere tu revisión antes de continuar" }
+                : verdict === "warn"
+                ? { bg: "rgba(234, 179, 8, 0.08)", border: "rgba(234, 179, 8, 0.4)", color: "#fde68a", icon: "⚠️", label: "Contenido sensible detectado (esperado para este nicho)" }
+                : { bg: "rgba(34, 197, 94, 0.08)", border: "rgba(34, 197, 94, 0.4)", color: "#86efac", icon: "✅", label: "Contenido apto" };
+
+              const items = verdict === "block"
+                ? (m.critical_blocks || [])
+                : verdict === "warn"
+                ? (m.warnings || [])
+                : [];
+
+              return (
+                <div style={{ marginBottom: "16px", padding: "16px", borderRadius: "10px", background: palette.bg, border: `1px solid ${palette.border}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: items.length ? "10px" : 0 }}>
+                    <span style={{ fontSize: "20px" }}>{palette.icon}</span>
+                    <span style={{ color: palette.color, fontWeight: "bold", fontSize: "14px" }}>{palette.label}</span>
+                  </div>
+                  {items.length > 0 && (
+                    <ul style={{ margin: 0, padding: "0 0 0 28px", color: palette.color, fontSize: "13px", lineHeight: 1.7 }}>
+                      {items.map((it) => (
+                        <li key={it.category}>
+                          <strong>{it.category}</strong>: intensidad {(it.score * 100).toFixed(0)}% (umbral: {(it.threshold * 100).toFixed(0)}%)
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {verdict === "block" && (
+                    <div style={{ marginTop: "10px", fontSize: "12px", color: "var(--text-muted)" }}>
+                      Si decides aprobar de todos modos, se te pedirá confirmación. Considera editar el guión para reducir el contenido marcado.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Panel de fact-checking de claims del guión */}
+            {project.factCheck?.claims && project.factCheck.claims.length > 0 && (() => {
+              const fc = project.factCheck;
+              const s = fc.summary || { total: 0, high: 0, medium: 0, low: 0 };
+              const lowOrMedium = (fc.claims || []).filter((c) => (c.confidence || "").toLowerCase() !== "alta");
+              return (
+                <div style={{ marginBottom: "16px", padding: "16px", borderRadius: "10px", background: "rgba(99, 102, 241, 0.06)", border: "1px solid rgba(99, 102, 241, 0.3)" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ fontSize: "20px" }}>📚</span>
+                      <span style={{ color: "#a5b4fc", fontWeight: "bold", fontSize: "14px" }}>Verificación de datos del guión</span>
+                    </div>
+                    <div style={{ display: "flex", gap: "8px", fontSize: "12px" }}>
+                      <span style={{ color: "#86efac" }}>● {s.high} altas</span>
+                      <span style={{ color: "#fde68a" }}>● {s.medium} medias</span>
+                      <span style={{ color: "#fca5a5" }}>● {s.low} bajas</span>
+                    </div>
+                  </div>
+                  {lowOrMedium.length > 0 ? (
+                    <div>
+                      <div style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "8px" }}>
+                        Datos que deberías revisar antes de publicar:
+                      </div>
+                      <ul style={{ margin: 0, padding: "0 0 0 16px", fontSize: "13px", lineHeight: 1.6, color: "var(--text-secondary)" }}>
+                        {lowOrMedium.slice(0, 6).map((c, i) => (
+                          <li key={i} style={{ marginBottom: "6px" }}>
+                            <span style={{ color: (c.confidence || "").toLowerCase() === "media" ? "#fde68a" : "#fca5a5" }}>
+                              [{(c.confidence || "?").toUpperCase()}]
+                            </span>{" "}
+                            <span>{c.claim}</span>
+                            {c.verdict && <div style={{ fontSize: "11px", color: "var(--text-muted)", marginLeft: "8px" }}>{c.verdict}</div>}
+                            {c.source_url && <a href={c.source_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: "11px", color: "#a5b4fc", marginLeft: "8px" }}>fuente ↗</a>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: "13px", color: "#86efac" }}>
+                      Todos los datos verificables tienen evidencia sólida.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             <div className="glass-card" style={{ padding: "24px", position: "relative" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                 <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>Edición de Guión</h3>
@@ -464,12 +659,69 @@ export default function ProjectDetailsPage({ params }) {
               </div>
               
               {project.script?.plain ? (
-                 <textarea 
-                 value={editedScript}
-                 onChange={(e) => setEditedScript(e.target.value)}
-                 style={{ width: "100%", background: "rgba(0,0,0,0.2)", color: "white", padding: "16px", borderRadius: "8px", border: "1px solid var(--border)", outline: "none", fontFamily: "serif", fontSize: "18px", lineHeight: "1.6", resize: "vertical", minHeight: "500px" }}
-                 placeholder="El guión aparecerá aquí..."
-               />
+                <>
+                  {/* Vista de conversación (solo para podcast) — render arriba del textarea editable */}
+                  {project.format === "podcast" && (() => {
+                    // Parser inline tolerante: separa el guion en turnos por speaker
+                    const speakerColors = {
+                      "MATEO":   { bg: "rgba(59, 130, 246, 0.10)", border: "rgba(59, 130, 246, 0.4)",  accent: "#60a5fa", side: "left"  },
+                      "LUCÍA":   { bg: "rgba(244, 114, 182, 0.10)", border: "rgba(244, 114, 182, 0.4)", accent: "#f472b6", side: "right" },
+                      "LUCIA":   { bg: "rgba(244, 114, 182, 0.10)", border: "rgba(244, 114, 182, 0.4)", accent: "#f472b6", side: "right" },
+                      "HOST_A":  { bg: "rgba(59, 130, 246, 0.10)", border: "rgba(59, 130, 246, 0.4)",  accent: "#60a5fa", side: "left"  },
+                      "HOST_B":  { bg: "rgba(244, 114, 182, 0.10)", border: "rgba(244, 114, 182, 0.4)", accent: "#f472b6", side: "right" },
+                    };
+                    const lines = (editedScript || "").split("\n");
+                    const turns = [];
+                    let lastIdx = -1;
+                    for (const line of lines) {
+                      const m = line.match(/^\s*([A-ZÁÉÍÓÚÑ_]+)\s*:\s*(.+)$/);
+                      if (m) {
+                        const speaker = m[1].toUpperCase();
+                        const text = m[2].trim();
+                        turns.push({ speaker, text });
+                        lastIdx = turns.length - 1;
+                      } else if (line.trim() && lastIdx >= 0) {
+                        // Continuación del último speaker
+                        turns[lastIdx].text = turns[lastIdx].text + " " + line.trim();
+                      }
+                    }
+                    if (turns.length === 0) return null;
+                    return (
+                      <div style={{ marginBottom: "16px", padding: "16px", background: "rgba(20, 184, 166, 0.04)", borderRadius: "10px", border: "1px solid rgba(20, 184, 166, 0.25)" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: "bold", color: "#5eead4" }}>
+                            🎙️ Vista conversación ({turns.length} turnos)
+                          </div>
+                          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                            Editable abajo en texto crudo
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "500px", overflowY: "auto", paddingRight: "8px" }}>
+                          {turns.map((t, i) => {
+                            const palette = speakerColors[t.speaker] || { bg: "rgba(148, 163, 184, 0.08)", border: "rgba(148, 163, 184, 0.3)", accent: "#94a3b8", side: "left" };
+                            const isRight = palette.side === "right";
+                            return (
+                              <div key={i} style={{ display: "flex", justifyContent: isRight ? "flex-end" : "flex-start" }}>
+                                <div style={{ maxWidth: "80%", background: palette.bg, border: `1px solid ${palette.border}`, borderRadius: "12px", padding: "10px 14px" }}>
+                                  <div style={{ fontSize: "11px", fontWeight: "bold", color: palette.accent, marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                                    {t.speaker}
+                                  </div>
+                                  <div style={{ fontSize: "14px", color: "var(--text-primary)", lineHeight: 1.5 }}>{t.text}</div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <textarea
+                    value={editedScript}
+                    onChange={(e) => setEditedScript(e.target.value)}
+                    style={{ width: "100%", background: "rgba(0,0,0,0.2)", color: "white", padding: "16px", borderRadius: "8px", border: "1px solid var(--border)", outline: "none", fontFamily: "serif", fontSize: "18px", lineHeight: "1.6", resize: "vertical", minHeight: "500px" }}
+                    placeholder="El guión aparecerá aquí..."
+                  />
+                </>
               ) : (
                 <div style={{ height: "400px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", textAlign: "center", border: "2px dashed var(--border)", borderRadius: "12px" }}>
                   <div style={{ fontSize: "48px", marginBottom: "16px", animation: "bounce 2s infinite" }}>🤖</div>

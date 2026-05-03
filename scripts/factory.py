@@ -40,6 +40,7 @@ COMFYUI_HEADERS = {"X-API-Key": COMFYUI_API_KEY, "Content-Type": "application/js
 sys.path.insert(0, str(Path(__file__).parent))
 from elevenlabs_tts import (
     generate_scene_narrations,
+    generate_dual_narration,
     get_voice_for_agent, get_voice_settings, DEFAULT_VOICE, VOICE_MAP
 )
 from luma_video import (
@@ -516,11 +517,17 @@ if __name__ == "__main__":
     # Cargar guión
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    
+
     scenes = data.get("video_scenes", [])
     if not scenes:
         print("[!] No se encontraron escenas en el JSON")
         sys.exit(1)
+
+    # Si el formato es podcast, forzar modo narrativa: Luma no aplica para
+    # podcasts (sus visuales son atmosphere/divulgación, no clips realistas).
+    if data.get("format") == "podcast" and mode == "cinematico":
+        print("⚠️  Format=podcast detectado — overrideando mode 'cinematico' a 'narrativa' (Luma no aplica)")
+        mode = "narrativa"
     
     # Determinar título y agente
     # Usar topic para nombre de carpeta (consistente con VPS)
@@ -577,7 +584,24 @@ if __name__ == "__main__":
     # ════════════════════════════════════════════════════════
     # PASO 2: NARRACIÓN ELEVENLABS
     # ════════════════════════════════════════════════════════
-    tts_stats = generate_narration(scenes, audio_dir, agent_name)
+    # Bifurcación por formato: podcast usa dual narration (2 voces alternando
+    # por dialogue_block), narrativa/cinematico usa single voice.
+    is_podcast_format = data.get("format") == "podcast"
+    if is_podcast_format:
+        podcast_cfg = data.get("podcast") or {}
+        voice_a = (podcast_cfg.get("host_a") or {}).get("voice") or "Salvatore"
+        voice_b = (podcast_cfg.get("host_b") or {}).get("voice") or "Serafina"
+        print("\n" + "=" * 60)
+        print(f"   PASO 2: Narración PODCAST (dual voice)")
+        print(f"   Host A: {voice_a} | Host B: {voice_b}")
+        print("=" * 60)
+        tts_stats = generate_dual_narration(
+            scenes, audio_dir,
+            voice_a=voice_a, voice_b=voice_b,
+            skip_existing=True,
+        )
+    else:
+        tts_stats = generate_narration(scenes, audio_dir, agent_name)
     
     # ════════════════════════════════════════════════════════
     # PASO 3: VISUALES (Ken Burns + Luma según modo)

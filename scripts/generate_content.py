@@ -314,15 +314,18 @@ Requisitos:
 # ============================================================
 # MOTOR 1.5: ETIQUETAS DE EMOCIÓN (GPT-5.5)
 # ============================================================
-def add_emotion_tags(script_text: str) -> str:
+def add_emotion_tags(script_text: str, prompt_file: str = "emotion_tagger.md") -> str:
     """
     Máquina 1.5: Agrega etiquetas de emoción al guión para TTS.
     Divide por párrafos para manejar scripts largos.
     Incluye retry para respuestas vacías de GPT-5.5.
-    """
-    print("\n🎭 MOTOR 1.5: Agregando etiquetas de emoción...")
 
-    emotion_prompt = load_prompt("emotion_tagger.md")
+    `prompt_file` permite usar un tagger especializado (ej. emotion_tagger_podcast.md
+    para diálogos con dos hosts y reglas de densidad por speaker).
+    """
+    print(f"\n🎭 MOTOR 1.5: Agregando etiquetas de emoción ({prompt_file})...")
+
+    emotion_prompt = load_prompt(prompt_file)
 
     # Dividir por párrafos para no exceder límites
     paragraphs = [p.strip() for p in script_text.split("\n\n") if p.strip()]
@@ -393,12 +396,15 @@ def add_emotion_tags(script_text: str) -> str:
 # ============================================================
 # MOTOR 2: PROMPTS VISUALES (CLAUDE OPUS — con fallback GPT-5.5)
 # ============================================================
-def generate_video_prompts_claude(chunk: str, scene_counter: int) -> list:
+def generate_video_prompts_claude(chunk: str, scene_counter: int, prompt_file: str = "video_prompt_generator.md") -> list:
     """
     Genera prompts de video usando Claude Opus.
     Claude es superior en descripción visual y cinematográfica.
+
+    `prompt_file` permite usar un generador especializado (ej.
+    video_prompt_generator_podcast.md para estética de divulgación).
     """
-    video_prompt_template = load_prompt("video_prompt_generator.md")
+    video_prompt_template = load_prompt(prompt_file)
 
     start_seconds = scene_counter * 5
     start_mm = start_seconds // 60
@@ -464,11 +470,13 @@ def generate_video_prompts_claude(chunk: str, scene_counter: int) -> list:
     return None
 
 
-def generate_video_prompts_gpt(chunk: str, scene_counter: int) -> list:
+def generate_video_prompts_gpt(chunk: str, scene_counter: int, prompt_file: str = "video_prompt_generator.md") -> list:
     """
     Genera prompts de video usando GPT-5.5 (fallback).
+
+    `prompt_file` igual que en la versión Claude, permite estética alterna.
     """
-    video_prompt_template = load_prompt("video_prompt_generator.md")
+    video_prompt_template = load_prompt(prompt_file)
 
     start_seconds = scene_counter * 5
     start_mm = start_seconds // 60
@@ -540,16 +548,20 @@ def generate_video_prompts_gpt(chunk: str, scene_counter: int) -> list:
     return None
 
 
-def generate_video_prompts(script_text: str) -> list:
+def generate_video_prompts(script_text: str, prompt_file: str = "video_prompt_generator.md") -> list:
     """
     Motor 2: Genera prompts de video cinematográficos.
     Usa Claude Opus como motor principal, GPT-5.5 como fallback.
     Divide el guión en chunks por párrafos para evitar límites de tokens.
+
+    `prompt_file` permite cambiar la estética visual (ej.
+    video_prompt_generator_podcast.md para divulgación contemporánea
+    en lugar de cinematográfica dramática).
     """
     use_claude = claude_client is not None
     engine_name = f"Claude Opus ({CLAUDE_MODEL_PROMPTS})" if use_claude else f"GPT-5.5 ({GPT_MODEL})"
-    
-    print(f"\n🎬 MOTOR 2: Generando prompts de video...")
+
+    print(f"\n🎬 MOTOR 2: Generando prompts de video ({prompt_file})...")
     print(f"   Motor visual: {engine_name}")
 
     # Dividir el guión en chunks de ~3000 chars por párrafos
@@ -578,13 +590,13 @@ def generate_video_prompts(script_text: str) -> list:
         # Intentar con Claude primero, fallback a GPT
         chunk_scenes = None
         if use_claude:
-            chunk_scenes = generate_video_prompts_claude(chunk, scene_counter)
+            chunk_scenes = generate_video_prompts_claude(chunk, scene_counter, prompt_file=prompt_file)
             if chunk_scenes is None:
                 print(f"   ⚠️  Claude falló en chunk {i+1}, usando GPT-5.5 como fallback...")
                 if openai_client:
-                    chunk_scenes = generate_video_prompts_gpt(chunk, scene_counter)
+                    chunk_scenes = generate_video_prompts_gpt(chunk, scene_counter, prompt_file=prompt_file)
         else:
-            chunk_scenes = generate_video_prompts_gpt(chunk, scene_counter)
+            chunk_scenes = generate_video_prompts_gpt(chunk, scene_counter, prompt_file=prompt_file)
 
         # SEGUNDO INTENTO: Si falló, intentar dividir el chunk en sub-chunks más pequeños
         if chunk_scenes is None:
@@ -596,9 +608,9 @@ def generate_video_prompts(script_text: str) -> list:
                 print(f"      Sub-chunk {j+1}/{len(sub_paragraphs)}...")
                 sub_result = None
                 if use_claude:
-                    sub_result = generate_video_prompts_claude(sub_p, scene_counter + len(sub_scenes))
+                    sub_result = generate_video_prompts_claude(sub_p, scene_counter + len(sub_scenes), prompt_file=prompt_file)
                 if sub_result is None and openai_client:
-                    sub_result = generate_video_prompts_gpt(sub_p, scene_counter + len(sub_scenes))
+                    sub_result = generate_video_prompts_gpt(sub_p, scene_counter + len(sub_scenes), prompt_file=prompt_file)
                 if sub_result:
                     sub_scenes.extend(sub_result)
                 else:
@@ -672,6 +684,207 @@ def generate_seo_metadata(topic: str, script_summary: str) -> dict:
 
 
 # ============================================================
+# PODCAST: Generación de guion conversacional con 2 voces
+# ============================================================
+import re as _re
+
+# Mapeo de "nombre visible en guion" → speaker code (A o B)
+PODCAST_SPEAKER_NAMES = {
+    "MATEO": "A",
+    "LUCÍA": "B",
+    "LUCIA": "B",        # tolerar versión sin acento
+    "HOST_A": "A",
+    "HOST_B": "B",
+}
+
+
+def _parse_podcast_script(text: str) -> list:
+    """
+    Parsea un guión de podcast en formato:
+        MATEO: …línea…
+        LUCÍA: …línea…
+    y devuelve lista de bloques: [{"speaker": "A"|"B", "name": "MATEO", "text": "…"}].
+
+    Regex robusto que tolera:
+    - Variaciones de acento (LUCÍA / LUCIA)
+    - Espacios extra alrededor de los dos puntos
+    - Líneas vacías intercaladas
+    - Líneas continuación sin prefix de speaker (se asignan al último speaker)
+
+    Si una línea no matchea ningún patrón conocido y aún no hay speaker
+    inicial, se descarta. Si ya hay speaker activo, la línea se concatena
+    al último bloque (caso: línea cortada por wrap).
+    """
+    pattern = _re.compile(r"^\s*([A-ZÁÉÍÓÚÑ_]+)\s*:\s*(.+)$")
+    blocks = []
+    last_speaker_code = None
+    last_name = None
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        m = pattern.match(line)
+        if m:
+            name = m.group(1).upper()
+            content = m.group(2).strip()
+            speaker_code = PODCAST_SPEAKER_NAMES.get(name)
+            if speaker_code is None:
+                # Speaker desconocido: lo registramos como "?"
+                speaker_code = "?"
+            blocks.append({"speaker": speaker_code, "name": name, "text": content})
+            last_speaker_code = speaker_code
+            last_name = name
+        else:
+            # Línea sin prefix: continuación del último speaker
+            if blocks and last_speaker_code:
+                blocks[-1]["text"] = blocks[-1]["text"] + " " + line
+    return blocks
+
+
+def _group_blocks_into_scenes(blocks: list, words_per_scene: int = 35) -> list:
+    """
+    Agrupa los dialogue_blocks en 'escenas' visuales para que cada escena
+    cubra ~12-18 segundos de audio (≈ 35 palabras a ~3 wps).
+
+    Esto permite que el pipeline FLUX genere una imagen por escena
+    (consistente con narrativa/cinematico) y que Ken Burns sincronice
+    duración con el audio agregado de la escena.
+
+    Return: list de dicts compatible con el shape `video_scenes` esperado
+    por factory.py:
+      [
+        {
+          "scene_number": int,
+          "narration_text": "MATEO: …\nLUCÍA: …",
+          "narration": "…",   # texto plano sin prefijos para subtítulos
+          "dialogue_blocks": [{speaker, name, text}, ...],
+        }
+      ]
+    """
+    scenes = []
+    current_blocks = []
+    current_word_count = 0
+    scene_num = 0
+
+    for blk in blocks:
+        word_count = len(blk["text"].split())
+        # Si agregar este bloque excede el target Y ya tenemos bloques, cerramos escena
+        if current_blocks and current_word_count + word_count > words_per_scene:
+            scene_num += 1
+            scenes.append({
+                "scene_number": scene_num,
+                "narration_text": "\n".join(f"{b['name']}: {b['text']}" for b in current_blocks),
+                "narration": " ".join(b["text"] for b in current_blocks),
+                "dialogue_blocks": current_blocks,
+            })
+            current_blocks = []
+            current_word_count = 0
+        current_blocks.append(blk)
+        current_word_count += word_count
+
+    # Cerrar la última escena pendiente
+    if current_blocks:
+        scene_num += 1
+        scenes.append({
+            "scene_number": scene_num,
+            "narration_text": "\n".join(f"{b['name']}: {b['text']}" for b in current_blocks),
+            "narration": " ".join(b["text"] for b in current_blocks),
+            "dialogue_blocks": current_blocks,
+        })
+
+    return scenes
+
+
+def generate_podcast_script(topic: str, agent_file: str = "agent_podcast_general.md", project_id: str = None) -> dict:
+    """
+    Genera un guión de podcast conversacional (2 hosts) usando Claude Sonnet.
+    Análogo a generate_script() pero apuntando al prompt podcast y con
+    requisitos distintos (14-18K caracteres, formato MATEO:/LUCÍA:).
+    """
+    agent_name = agent_file.replace("agent_", "").replace(".md", "").replace("_", " ").title()
+    print(f"\n🎙️  MOTOR 1 (PODCAST): Generando guión conversacional para '{topic}'...")
+    print(f"   Modelo: {CLAUDE_MODEL_SCRIPT if claude_client else GPT_MODEL}")
+    print(f"   Agente: {agent_name} ({agent_file})")
+
+    # Investigación web previa (igual que documental)
+    research_context = research_topic(topic, project_id)
+    research_block = ""
+    if research_context:
+        research_block = f"""\n\n═══ INVESTIGACIÓN WEB ACTUAL ═══
+Usa los siguientes datos reales como base factual para la conversación.
+Incorpora cifras, fechas y ejemplos específicos en boca de MATEO (que es el host estructurado).
+NO copies directo — los hosts hablan de los datos, no los recitan.
+
+{research_context}
+═══ FIN DE INVESTIGACIÓN ═══\n"""
+
+    agent_prompt = load_prompt(agent_file)
+
+    user_message = f"""Genera el guión completo de un episodio de podcast sobre el siguiente tema.
+
+TEMA: {topic}
+{research_block}
+Requisitos estrictos:
+- 14,000 a 18,000 caracteres (estrictos)
+- Formato exacto: cada línea inicia con MATEO: o LUCÍA: en mayúsculas, seguido de dos puntos
+- 10 secciones según el ROLE definido en el system prompt
+- Cierra con LUCÍA hablando
+- Tags emocionales solo del set permitido y con la densidad indicada
+- Idioma: español neutro de Latinoamérica
+- Conversación humana, NO narración ni recitado
+
+Devuelve solo el guión, sin headers ni comentarios."""
+
+    if claude_client:
+        response = claude_client.messages.create(
+            model=CLAUDE_MODEL_SCRIPT,
+            max_tokens=16000,
+            system=agent_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        script_text = response.content[0].text
+        used_model = CLAUDE_MODEL_SCRIPT
+    else:
+        response = openai_client.chat.completions.create(
+            model=GPT_MODEL,
+            messages=[
+                {"role": "system", "content": agent_prompt},
+                {"role": "user", "content": user_message},
+            ],
+        )
+        script_text = response.choices[0].message.content
+        used_model = GPT_MODEL
+
+    char_count = len(script_text)
+    word_count = len(script_text.split())
+    estimated_minutes = word_count / 130  # podcast: ~130 palabras/min (más pausado que narración)
+
+    result = {
+        "topic": topic,
+        "agent": agent_file,
+        "script": script_text,
+        "metadata": {
+            "model": used_model,
+            "agent_personality": agent_file,
+            "characters": char_count,
+            "words": word_count,
+            "estimated_duration_minutes": round(estimated_minutes, 1),
+            "format": "podcast",
+            "generated_at": datetime.now().isoformat(),
+            "web_research": bool(research_context),
+            "research_sources": len(research_context.split("FUENTE")) - 1 if research_context else 0,
+        },
+    }
+
+    print(f"\n   ✅ Guión podcast generado!")
+    print(f"   📝 Caracteres: {char_count:,}")
+    print(f"   📊 Palabras: {word_count:,}")
+    print(f"   ⏱️  Duración estimada: {estimated_minutes:.1f} minutos")
+
+    return result
+
+
+# ============================================================
 # PIPELINE PRINCIPAL
 # ============================================================
 def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md", project_id: str = None):
@@ -695,35 +908,73 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
         update_progress(project_id, f"Error: {error_msg}", 0, {"status": "error"})
         return None
 
+    # Detectar formato podcast: agentes que arrancan con `agent_podcast_*`
+    # usan generación, parsing y prompts visuales especializados.
+    is_podcast = agent_file.startswith("agent_podcast_")
+    if is_podcast:
+        print("🎙️  Modo PODCAST detectado — pipeline conversacional con 2 voces")
+
     try:
         update_progress(project_id, "Iniciando generación de guión narrativo (Claude 3.5)...", 10)
-        
-        # PASO 1: Generar guión
-        result = generate_script(topic, agent_file)
+
+        # PASO 1: Generar guión (podcast usa generador especializado)
+        if is_podcast:
+            result = generate_podcast_script(topic, agent_file, project_id)
+        else:
+            result = generate_script(topic, agent_file)
         script = result["script"]
-        
+
         update_progress(project_id, "Agregando etiquetas de emoción y director...", 35)
-        
-        # PASO 2: Agregar etiquetas de emoción
-        tagged_script = add_emotion_tags(script)
-        
+
+        # PASO 2: Agregar etiquetas de emoción (tagger especializado para podcast
+        # respeta densidades por speaker)
+        emotion_prompt_file = "emotion_tagger_podcast.md" if is_podcast else "emotion_tagger.md"
+        tagged_script = add_emotion_tags(script, prompt_file=emotion_prompt_file)
+
+        # Para podcast, parseamos el guión en bloques de diálogo y agrupamos
+        # en escenas visuales antes del PASO 3.
+        podcast_blocks = []
+        podcast_scenes_grouped = None
+        if is_podcast:
+            podcast_blocks = _parse_podcast_script(tagged_script)
+            podcast_scenes_grouped = _group_blocks_into_scenes(podcast_blocks, words_per_scene=35)
+            print(f"   🎭 Podcast parseado: {len(podcast_blocks)} bloques de diálogo → "
+                  f"{len(podcast_scenes_grouped)} escenas visuales")
+
         update_progress(project_id, "Creando escenas y prompts visuales (Claude Opus)...", 60)
-        
-        # PASO 3: Generar prompts de video
-        video_scenes = generate_video_prompts(script)
-        
+
+        # PASO 3: Generar prompts de video (estética podcast vs documental)
+        video_prompt_file = "video_prompt_generator_podcast.md" if is_podcast else "video_prompt_generator.md"
+        video_scenes = generate_video_prompts(script, prompt_file=video_prompt_file)
+
+        # Para podcast: enriquecer las escenas generadas con los dialogue_blocks
+        # del parsing previo, alineando por scene_number cuando es posible.
+        if is_podcast and podcast_scenes_grouped:
+            for scene in video_scenes:
+                sn = scene.get("scene_number", 0)
+                # scene_number puede no coincidir 1:1 con las escenas agrupadas
+                # por palabras, así que las atamos por índice ordinal
+                idx = sn - 1
+                if 0 <= idx < len(podcast_scenes_grouped):
+                    grouped = podcast_scenes_grouped[idx]
+                    scene["dialogue_blocks"] = grouped["dialogue_blocks"]
+                    # Si el video_prompts perdió el narration_text, restaurar
+                    if not scene.get("narration_text"):
+                        scene["narration_text"] = grouped["narration_text"]
+
         update_progress(project_id, "Optimizando metadata SEO para YouTube...", 85)
-        
-        # PASO 4: Generar SEO metadata
+
+        # PASO 4: Generar SEO metadata (mismo para ambos formatos)
         seo = generate_seo_metadata(topic, script[:500])
-        
+
         # Guardar resultado completo
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = topic.lower().replace(" ", "_")[:50]
-        
+
         full_result = {
             "topic": topic,
             "agent": agent_file,
+            "format": "podcast" if is_podcast else "narrativa",
             "script_plain": script,
             "script_tagged": tagged_script,
             "video_scenes": video_scenes,
@@ -731,28 +982,41 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
             "pipeline_metadata": {
                 "generated_at": datetime.now().isoformat(),
                 "total_scenes": len(video_scenes),
-                "script_characters": len(script)
-            }
+                "script_characters": len(script),
+            },
         }
-        
+        if is_podcast:
+            full_result["podcast"] = {
+                "show_name": "Este no es otro podcast más",
+                "host_a": {"name": "Mateo", "voice": "Salvatore"},
+                "host_b": {"name": "Lucía", "voice": "Serafina"},
+                "total_blocks": len(podcast_blocks),
+            }
+
         output_path = OUTPUT_DIR / f"FULL_{safe_name}_{timestamp}.json"
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(full_result, f, ensure_ascii=False, indent=2)
-            
+
         # GUARDAR EN FIREBASE
         if project_id:
             try:
                 words = len(script.split())
-                update_progress(project_id, "¡Generación completada!", 100, {
+                # Podcast cuenta a 130 wpm (más lento), narrativa a 150 wpm
+                wpm = 130 if is_podcast else 150
+                firestore_payload = {
                     "status": "script_ready",
                     "script.plain": script,
                     "script.tagged": tagged_script,
                     "script.wordCount": words,
-                    "script.estimatedMinutes": round(words / 150, 1),
+                    "script.estimatedMinutes": round(words / wpm, 1),
                     "scenes": video_scenes,
                     "seo": seo,
-                    "completedAt": firestore.SERVER_TIMESTAMP
-                })
+                    "completedAt": firestore.SERVER_TIMESTAMP,
+                }
+                if is_podcast:
+                    firestore_payload["format"] = "podcast"
+                    firestore_payload["podcast"] = full_result["podcast"]
+                update_progress(project_id, "¡Generación completada!", 100, firestore_payload)
                 print(f"✅ Firebase actualizado para proyecto {project_id}")
             except Exception as e:
                 print(f"⚠️ Fallo al guardar en Firebase: {e}")
