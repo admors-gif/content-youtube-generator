@@ -37,13 +37,13 @@ Solamente estos siete:
 
 ## REGLAS DE DENSIDAD POR SPEAKER
 
-### MATEO (estructurado, voz grave Salvatore)
+### MATEO (estructurado, voz Will — eleven_v3)
 - Máximo **2 tags totales** en todo el episodio.
 - Solo `[exhales]` y, excepcionalmente, `[hesitates]`.
 - Su naturalidad viene del fraseo, NO de la emoción exhibida.
 - Línea pesada (dato perturbador, transición seria) → `[exhales]` antes de hablar.
 
-### LUCÍA (reactiva, voz cálida Serafina)
+### LUCÍA (reactiva, voz Lina — eleven_v3)
 - Máximo **8-10 tags totales** en todo el episodio.
 - Distribución sugerida:
   - 2-3 `[laughs softly]` (en momentos de complicidad/ironía)

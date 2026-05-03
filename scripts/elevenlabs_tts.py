@@ -46,7 +46,7 @@ ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
 
 # Voice IDs de ElevenLabs (Community Library)
 VOICE_MAP = {
-    # === 4 Voces principales ===
+    # === 4 Voces principales (DOCUMENTALES — usan eleven_multilingual_v2) ===
     "Salvatore": "t3eeeqhBjrUqcrPvDqUn",   # Épica, profunda, misteriosa
     "Lorenzo": "DTGwzA4YLrWB1FAT6Uas",      # Moderna, profesional, clara
     "Diego": "3Y2yr1PdwiaWZ5xxYRed",         # Explosiva, alta energía
@@ -54,6 +54,11 @@ VOICE_MAP = {
     # === Pre-built (backup) ===
     "Josh": "TxGEqnHWrfWFTfGW9XjX",
     "Rachel": "21m00Tcm4TlvDq8ikWAM",
+    # === PODCAST (usan eleven_v3 — soporta audio tags como [exhales] [laughs]) ===
+    # Validadas en sesión 2026-05-03: tags interpretados correctamente,
+    # ritmo conversacional natural más dinámico que Salvatore/Serafina.
+    "Will": "bIHbv24MWmeRgasZH58o",          # Relaxed Optimist — chill conversational
+    "Lina": "VmejBeYhbrcTPwDniox7",          # Carefree & Fresh — Colombian podcast voice
 }
 
 DEFAULT_VOICE = "Salvatore"
@@ -115,6 +120,22 @@ VOICE_SETTINGS = {
         "similarity_boost": 0.85,
         "style": 0.15,
         "speed": 0.85,
+    },
+    # === PODCAST V3 voices ===
+    # Para eleven_v3: el parámetro `speed` no aplica (v3 controla ritmo
+    # con tags y características de la voz). stability más bajo permite
+    # mayor expresividad emocional con tags como [exhales]/[laughs].
+    "Will": {
+        "stability": 0.45,
+        "similarity_boost": 0.75,
+        "style": 0.0,
+        "speed": 1.0,  # ignorado por v3 pero requerido por la firma
+    },
+    "Lina": {
+        "stability": 0.45,
+        "similarity_boost": 0.75,
+        "style": 0.0,
+        "speed": 1.0,  # ignorado por v3
     },
 }
 
@@ -395,11 +416,11 @@ def _concat_mp3s(input_paths: list, output_path: Path) -> bool:
 def generate_dual_narration(
     scenes: list,
     output_dir: Path,
-    voice_a: str = "Salvatore",
-    voice_b: str = "Serafina",
+    voice_a: str = "Will",
+    voice_b: str = "Lina",
     pause_between_blocks_ms: int = 280,
     skip_existing: bool = True,
-    model: str = "eleven_multilingual_v2",
+    model: str = "eleven_v3",
 ) -> dict:
     """
     Genera narración dual para podcast: 2 voces alternando por bloque de diálogo.

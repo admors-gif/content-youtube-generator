@@ -417,7 +417,7 @@ export const SYSTEM_AGENTS = [
     promptFile: "agent_podcast_general.md",
     tier: "creator",
     format: "podcast",
-    defaultVoices: { host_a: "Salvatore", host_b: "Serafina" },
+    defaultVoices: { host_a: "Will", host_b: "Lina" },
     exampleTopics: [
       "Por qué seguimos creyendo en horóscopos en 2026",
       "La economía oculta de los memes",

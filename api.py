@@ -2048,10 +2048,12 @@ def run_production(project_id):
         if is_podcast_project:
             temp_json["format"] = "podcast"
             # Reusa la podcast config persistida en Firestore (host_a/host_b voices, etc.)
+            # Defaults actualizados 2026-05-03: Will + Lina (eleven_v3 con audio
+            # tags). Salvatore + Serafina quedan para documentales (eleven v2).
             temp_json["podcast"] = project.get("podcast", {
                 "show_name": "Este no es otro podcast más",
-                "host_a": {"name": "Mateo", "voice": "Salvatore"},
-                "host_b": {"name": "Lucía", "voice": "Serafina"},
+                "host_a": {"name": "Mateo", "voice": "Will"},
+                "host_b": {"name": "Lucía", "voice": "Lina"},
             })
         temp_path = f"/app/output/scripts/PRODUCE_{safe_title}.json"
         os.makedirs(os.path.dirname(temp_path), exist_ok=True)
