@@ -97,20 +97,39 @@ jobs:
 
       - name: Project filesystem inventory (if safe_title provided)
         if: ${{ github.event.inputs.project_safetitle != '' }}
+        continue-on-error: true
         run: |
+          set +e  # No fallar si algún ls devuelve no-existe
           ST="${{ github.event.inputs.project_safetitle }}"
-          # Los archivos del proyecto viven en el container (volumen montado).
-          # Ejecutamos `ls` desde el container API que tiene el mismo mount.
-          echo "=== /app/output/videos/$ST ===" > debug_output/09_project_files.txt
-          docker exec content-factory ls -la "/app/output/videos/$ST/" 2>&1 >> debug_output/09_project_files.txt || echo "folder not found" >> debug_output/09_project_files.txt
-          echo "" >> debug_output/09_project_files.txt
-          for sub in images audio kenburns luma_clips composites; do
-            echo "=== /app/output/videos/$ST/$sub (count + size) ===" >> debug_output/09_project_files.txt
-            docker exec content-factory bash -lc "ls -la /app/output/videos/$ST/$sub/ 2>/dev/null | head -5; echo '...'; echo total_files=\$(ls /app/output/videos/$ST/$sub/ 2>/dev/null | wc -l); du -sh /app/output/videos/$ST/$sub/ 2>/dev/null" >> debug_output/09_project_files.txt
-            echo "" >> debug_output/09_project_files.txt
-          done
-          echo "=== Final MP4s ===" >> debug_output/09_project_files.txt
-          docker exec content-factory bash -lc "ls -la /app/output/videos/$ST/FINAL_*.mp4 2>/dev/null" >> debug_output/09_project_files.txt 2>&1 || echo "no FINAL_*.mp4" >> debug_output/09_project_files.txt
+          {
+            echo "=== Listado de TODAS las carpetas de proyecto ==="
+            docker exec content-factory ls -la /app/output/videos/ 2>&1 | head -50
+            echo ""
+            echo "=== /app/output/videos/$ST/ (top) ==="
+            docker exec content-factory ls -la "/app/output/videos/$ST/" 2>&1
+            echo ""
+            for sub in images audio kenburns luma_clips composites; do
+              echo "=== $sub ==="
+              docker exec content-factory bash -lc "test -d /app/output/videos/$ST/$sub && (ls /app/output/videos/$ST/$sub/ 2>/dev/null | wc -l | xargs echo total_files= ; du -sh /app/output/videos/$ST/$sub/ 2>/dev/null) || echo 'no existe'"
+              echo ""
+            done
+            echo "=== Final MP4s ==="
+            docker exec content-factory bash -lc "ls -la /app/output/videos/$ST/FINAL_*.mp4 2>/dev/null || echo no FINAL"
+          } > debug_output/09_project_files.txt 2>&1
+          set -e
+
+      - name: Worker process tree (busca ffmpeg/python activos)
+        continue-on-error: true
+        run: |
+          set +e
+          {
+            for c in $(docker ps --format '{{.Names}}' | grep -E 'content-worker' || true); do
+              echo "=== $c — procesos ==="
+              docker exec "$c" ps -ef --sort=-pcpu 2>/dev/null | head -15
+              echo ""
+            done
+          } > debug_output/10_worker_processes.txt 2>&1
+          set -e
 
       - name: Container restart counts
         run: |
