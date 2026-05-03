@@ -14,8 +14,15 @@ export default function DashboardLayout({ children }) {
 
   if (loading) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ fontSize: 14, color: "var(--text-muted)" }}>Cargando...</div>
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div className="cf-mono-sm">ENTRANDO AL ESTUDIO</div>
       </div>
     );
   }
@@ -23,9 +30,9 @@ export default function DashboardLayout({ children }) {
   if (!user) return null;
 
   return (
-    <div>
+    <div className="cf-shell">
       <Sidebar />
-      <main className="main-content">{children}</main>
+      <main className="cf-main">{children}</main>
     </div>
   );
 }
