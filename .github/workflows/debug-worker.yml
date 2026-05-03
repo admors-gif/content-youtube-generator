@@ -14,6 +14,10 @@ on:
         description: 'líneas de logs a capturar por container'
         required: false
         default: '2000'
+      project_safetitle:
+        description: 'safe_title del proyecto para listar archivos en disco (opcional)'
+        required: false
+        default: ''
 
 concurrency:
   group: debug-worker
@@ -90,6 +94,23 @@ jobs:
         run: |
           free -h > debug_output/07_memory.txt 2>&1 || true
           df -h /docker /var/lib/docker 2>&1 >> debug_output/07_memory.txt || true
+
+      - name: Project filesystem inventory (if safe_title provided)
+        if: ${{ github.event.inputs.project_safetitle != '' }}
+        run: |
+          ST="${{ github.event.inputs.project_safetitle }}"
+          # Los archivos del proyecto viven en el container (volumen montado).
+          # Ejecutamos `ls` desde el container API que tiene el mismo mount.
+          echo "=== /app/output/videos/$ST ===" > debug_output/09_project_files.txt
+          docker exec content-factory ls -la "/app/output/videos/$ST/" 2>&1 >> debug_output/09_project_files.txt || echo "folder not found" >> debug_output/09_project_files.txt
+          echo "" >> debug_output/09_project_files.txt
+          for sub in images audio kenburns luma_clips composites; do
+            echo "=== /app/output/videos/$ST/$sub (count + size) ===" >> debug_output/09_project_files.txt
+            docker exec content-factory bash -lc "ls -la /app/output/videos/$ST/$sub/ 2>/dev/null | head -5; echo '...'; echo total_files=\$(ls /app/output/videos/$ST/$sub/ 2>/dev/null | wc -l); du -sh /app/output/videos/$ST/$sub/ 2>/dev/null" >> debug_output/09_project_files.txt
+            echo "" >> debug_output/09_project_files.txt
+          done
+          echo "=== Final MP4s ===" >> debug_output/09_project_files.txt
+          docker exec content-factory bash -lc "ls -la /app/output/videos/$ST/FINAL_*.mp4 2>/dev/null" >> debug_output/09_project_files.txt 2>&1 || echo "no FINAL_*.mp4" >> debug_output/09_project_files.txt
 
       - name: Container restart counts
         run: |
