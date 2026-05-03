@@ -1634,11 +1634,27 @@ def run_production(project_id):
         if not project:
             print("❌ [PRODUCE] Project not found in Firebase")
             return
-        
+
+        # Idempotencia: si Celery re-encola un job ya completado (ej. worker
+        # muere después de escribir status=completed pero antes del ACK por
+        # acks_late + reject_on_worker_lost), no re-correr el pipeline. Para
+        # forzar regeneración real, usar /retry — que sí resetea status.
+        if project.get("status") == "completed" and project.get("videoUrl"):
+            print(f"⏭️  [PRODUCE] Project {project_id} ya está completed (videoUrl presente). Skipping retry idempotente.")
+            try:
+                import sentry_sdk
+                sentry_sdk.capture_message(
+                    f"Idempotency guard hit: re-run skipped for {project_id}",
+                    level="warning",
+                )
+            except Exception:
+                pass
+            return
+
         title = project.get("title", "video_sin_titulo")
         scenes = project.get("scenes", [])
         agent_id = project.get("agentId", "")
-        
+
         if not scenes:
             update_progress(0, "Error: No hay escenas visuales", "error")
             return
