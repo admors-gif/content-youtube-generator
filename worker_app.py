@@ -53,7 +53,18 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,      # no pre-fetch (jobs de 45+ min)
     worker_max_tasks_per_child=10,     # restart worker tras 10 tasks (evita memory leaks)
 
-    # Time limits — producir un video toma ~50 min, hard limit a 90 min por seguridad
-    task_time_limit=5400,              # 90 min hard kill
-    task_soft_time_limit=5100,         # 85 min soft (raise SoftTimeLimitExceeded)
+    # Time limits — un video cinemático con 99 escenas + Luma + Ken Burns puede
+    # tomar 1h25m+. Antes teníamos soft=5100 (85min) que disparaba justo al
+    # final del Ken Burns y causaba re-encolamiento + thread monitor zombie
+    # sobreescribiendo status=completed con producing. Subimos a 130min/140min.
+    task_time_limit=8400,              # 140 min hard kill
+    task_soft_time_limit=7800,         # 130 min soft (raise SoftTimeLimitExceeded)
+
+    # Redis broker: visibility_timeout default es 1h. Si un task tarda más, Redis
+    # asume que el worker murió y RE-DELIVERA el mismo task a otro worker → job
+    # duplicado. Subimos a 3h para cubrir runs largos sin redelivery espurios.
+    # (Aplica solo a Redis broker; con RabbitMQ no es necesario.)
+    broker_transport_options={
+        "visibility_timeout": 10800,   # 3 horas
+    },
 )

@@ -164,6 +164,79 @@ def _upload_video_to_storage(local_path: Path, project_id: str, content_type: st
         return None
 
 
+def _run_factory_subprocess(args, monitor_thread, stop_event, timeout=7200, log_label="factory"):
+    """
+    Ejecuta factory.py como subprocess en su propio process group, garantizando:
+
+    1. Si el padre (worker) muere o es interrumpido (SoftTimeLimit, SIGTERM), el
+       SUBPROCESS y todos sus hijos (ffmpeg, python helpers) se matan en cascada
+       via os.killpg sobre el process group. Sin esto, ffmpeg quedaría huérfano
+       generando Ken Burns durante 30+ min después del timeout.
+
+    2. El thread monitor (que escribe `update_progress` a Firestore en bucle)
+       SIEMPRE se detiene al final, incluso ante excepción. Antes vivía en una
+       sucesión `subprocess.run() ; stop_event.set()` donde la excepción
+       impedía llegar al stop, dejando un thread zombie escribiendo a Firestore
+       indefinidamente y rompiendo la UX (proyecto regresaba de "completed" a
+       "producing 85%").
+
+    Retorna (returncode, stderr_tail). Loguea timeout y kills explícitamente.
+    """
+    import subprocess
+    import signal
+    proc = None
+    try:
+        # start_new_session=True crea un nuevo process group con PID == proc.pid.
+        # Hace que `os.killpg(proc.pid, SIGTERM)` mate al subprocess Y a todos
+        # sus descendientes (ffmpeg, python -c, etc.) — no solo al subprocess.
+        proc = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+            return (proc.returncode, (stderr or "")[-500:])
+        except subprocess.TimeoutExpired:
+            print(f"   ⏱️ [{log_label}] Subprocess excedió timeout={timeout}s. Matando process group {proc.pid}...")
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+                stdout, stderr = proc.communicate(timeout=10)
+            except Exception:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except Exception:
+                    pass
+                stdout, stderr = ("", "killed by timeout")
+            return (-1, f"TIMEOUT_{timeout}s: {(stderr or '')[-400:]}")
+    finally:
+        # Detener thread monitor SIEMPRE — pase lo que pase con el subprocess.
+        # Si la excepción es SoftTimeLimitExceeded de Celery, también pasamos
+        # por aquí porque Python ejecuta finally antes de re-raise.
+        try:
+            if stop_event is not None:
+                stop_event.set()
+            if monitor_thread is not None and monitor_thread.is_alive():
+                monitor_thread.join(timeout=10)
+        except Exception:
+            pass
+        # Y matar el process group por seguridad si el subprocess sigue vivo
+        # (ej. si llegamos al finally por una excepción del padre, no por
+        # timeout del subprocess).
+        if proc is not None and proc.poll() is None:
+            try:
+                print(f"   🔪 [{log_label}] Padre interrumpido, matando subprocess huérfano (pid={proc.pid})")
+                os.killpg(proc.pid, signal.SIGTERM)
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except Exception:
+                    pass
+
+
 # ── Moderación de contenido ───────────────────────────────────────────────
 # Umbrales tuneados para canales tipo true-crime / horror / documental:
 # violence/graphic alto (>0.85) es esperado en estos contenidos, no se bloquea
@@ -1607,7 +1680,13 @@ def run_production(project_id):
     from pathlib import Path
     import threading
     import time
-    
+    # Importar lazy: si celery no está instalado (script standalone), no romper.
+    try:
+        from celery.exceptions import SoftTimeLimitExceeded
+    except ImportError:
+        class SoftTimeLimitExceeded(Exception):
+            pass
+
     print(f"🏭 [PRODUCE] Starting CINEMATIC production for project {project_id}...")
     
     # Inicializar Firebase con storageBucket (necesario para upload del video final)
@@ -1621,6 +1700,20 @@ def run_production(project_id):
     doc_ref = db.collection("projects").document(project_id)
     
     def update_progress(percent, step_name, status="producing"):
+        # Compare-and-swap: NUNCA sobreescribir un proyecto ya completado con
+        # un status intermedio. Threads monitor zombies (que sobreviven a
+        # excepciones del proceso padre) escriben en bucle y rompen la UX al
+        # regresar un proyecto "completed" a "producing 85%". Solo permitimos
+        # transiciones desde estados intermedios o desde error.
+        try:
+            current = doc_ref.get().to_dict() or {}
+            current_status = current.get("status")
+            if current_status == "completed" and status != "completed":
+                # Drop silencioso: no spammear logs por cada tick del monitor zombie
+                return
+        except Exception:
+            pass  # Si la lectura falla, dejar pasar la escritura (defensivo)
+
         doc_ref.update({
             "status": status,
             "progress.percent": percent,
@@ -1753,21 +1846,23 @@ def run_production(project_id):
             
             monitor_thread = threading.Thread(target=monitor_images, daemon=True)
             monitor_thread.start()
-            
-            # factory.py con --images-only
-            result = subprocess.run(
+
+            # factory.py con --images-only en process group propio +
+            # finally que mata subprocess + monitor thread aunque haya
+            # excepción (SoftTimeLimitExceeded, KeyboardInterrupt, etc.).
+            returncode, stderr_tail = _run_factory_subprocess(
                 ["python", "scripts/factory.py", temp_path, "--mode", "cinematico", "--images-only"],
-                capture_output=True, text=True, timeout=3600
+                monitor_thread=monitor_thread,
+                stop_event=stop_monitoring,
+                timeout=7200,
+                log_label="factory-images",
             )
-            
-            stop_monitoring.set()
-            monitor_thread.join(timeout=5)
-            
-            if result.returncode != 0:
+
+            if returncode != 0:
                 update_progress(0, f"Error generando imágenes", "error")
-                print(f"STDERR: {result.stderr[-500:]}")
+                print(f"STDERR: {stderr_tail}")
                 return
-            
+
             update_progress(40, "✅ Imágenes FLUX listas")
         
         # ═══════════════════════════════════════════
@@ -1808,19 +1903,24 @@ def run_production(project_id):
         stop_monitoring = threading.Event()
         factory_monitor = threading.Thread(target=monitor_factory, daemon=True)
         factory_monitor.start()
-        
-        result = subprocess.run(
-            ["python", "scripts/factory.py", temp_path, 
+
+        # factory.py completo en process group propio. El helper garantiza
+        # que monitor_factory thread se DETIENE en el finally aunque haya
+        # SoftTimeLimitExceeded, evitando el "thread monitor zombie" que
+        # sobreescribía status=completed con producing 85%. Timeout subido
+        # de 3600 → 7200 (cinematico con 99 escenas tarda hasta 1h25m).
+        returncode, stderr_tail = _run_factory_subprocess(
+            ["python", "scripts/factory.py", temp_path,
              "--mode", "cinematico", "--luma-scenes", "8", "--skip-images"],
-            capture_output=True, text=True, timeout=3600
+            monitor_thread=factory_monitor,
+            stop_event=stop_monitoring,
+            timeout=7200,
+            log_label="factory-full",
         )
-        
-        stop_monitoring.set()
-        factory_monitor.join(timeout=5)
-        
-        if result.returncode != 0:
+
+        if returncode != 0:
             update_progress(40, f"Error en pipeline cinemático", "error")
-            print(f"STDERR: {result.stderr[-500:]}")
+            print(f"STDERR: {stderr_tail}")
             return
         
         # ═══════════════════════════════════════════
@@ -1938,7 +2038,24 @@ def run_production(project_id):
         doc_ref.update(update_payload)
 
         print(f"🏆 [PRODUCE] Cinematic production complete! Subs: {has_subs} | Storage: {bool(storage_info)} | Shorts: {len(shorts_results)} | Thumbs: {len(thumbnails_results)} | {final_path}")
-        
+
+    except SoftTimeLimitExceeded:
+        # Celery soft time limit. NO la atrapamos como error genérico — la
+        # re-raiseamos para que worker_tasks.produce_video la propague y
+        # Celery NO trate el task como completado exitosamente. De lo
+        # contrario el except Exception de abajo escribiría status=error
+        # pero retornaría sin re-raise → Celery hace ack normal pero
+        # acks_late + reject_on_worker_lost terminan re-encolando el job.
+        print(f"⏱️  [PRODUCE] SoftTimeLimitExceeded para {project_id}; propagando a Celery")
+        try:
+            doc_ref.update({
+                "status": "error",
+                "progress.percent": 0,
+                "progress.stepName": "Timeout: producción excedió límite suave",
+            })
+        except Exception:
+            pass
+        raise
     except Exception as e:
         update_progress(0, f"Error: {str(e)[:100]}", "error")
         print(f"❌ [PRODUCE] Error: {e}")
