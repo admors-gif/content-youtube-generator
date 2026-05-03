@@ -397,6 +397,129 @@ def fact_check_script(text: str, topic_hint: str = "") -> dict:
         return out
 
 
+# ── Shorts pipeline (vertical 9:16 derivados del long-form) ────────────────
+def _video_duration_seconds(video_path: Path) -> float:
+    """Devuelve duración del video con ffprobe. 0 si falla."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)],
+            capture_output=True, text=True, timeout=20,
+        )
+        return float(out.stdout.strip() or 0)
+    except Exception:
+        return 0.0
+
+
+def _render_short_vertical(input_video: Path, start_sec: float, end_sec: float, output_path: Path) -> bool:
+    """
+    Re-renderiza un segmento del video horizontal 16:9 a vertical 9:16
+    con fondo blureado del mismo frame (estilo Shorts/TikTok).
+
+    Filter graph:
+      - bg: scale a 1080x1920 force-fit + crop + blur (queda como fondo)
+      - fg: scale a 1080xN manteniendo aspect (queda centrado encima)
+      - overlay: composita fg sobre bg
+    """
+    duration = max(1, end_sec - start_sec)
+    filter_complex = (
+        "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
+        "crop=1080:1920,boxblur=30:3[bg];"
+        "[0:v]scale=1080:-1[fg];"
+        "[bg][fg]overlay=(W-w)/2:(H-h)/2[out]"
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", str(start_sec),
+        "-t", str(duration),
+        "-i", str(input_video),
+        "-filter_complex", filter_complex,
+        "-map", "[out]", "-map", "0:a?",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "22",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        str(output_path),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
+            return True
+        print(f"   ❌ ffmpeg short render failed (rc={result.returncode}): {result.stderr[-300:]}")
+        return False
+    except subprocess.TimeoutExpired:
+        print(f"   ❌ ffmpeg short render timeout after 5 min")
+        return False
+    except Exception as e:
+        print(f"   ❌ ffmpeg short render exception: {e}")
+        return False
+
+
+def build_shorts_for_project(video_dir: Path, project_id: str) -> list:
+    """
+    Genera hasta 3 shorts vertical 9:16 a timestamps estratégicos del video final.
+    Sube cada uno a Firebase Storage en videos/{project_id}/shorts/.
+
+    Estrategia v1 (MVP): timestamps fijos según duración del video:
+      1. HOOK: primeros 60s (capturas la apertura más impactante del guion)
+      2. MID:  60s alrededor del 50% (sección densa)
+      3. END:  60s antes del cierre (clímax narrativo)
+
+    Mejora futura (Sprint 2.1.5): NLP scoring de intensidad emocional
+    sobre el transcript para elegir momentos más virales.
+
+    Retorna lista de dicts: [{"index": 1, "start": 0, "end": 60,
+                              "gs_path": "...", "signed_url": "..."}]
+    """
+    # Encontrar el video final preferido (con subs si existe)
+    final_videos = list(video_dir.glob("FINAL_SUB_*.mp4"))
+    if not final_videos:
+        final_videos = [v for v in video_dir.glob("FINAL_*.mp4") if "FINAL_SUB_" not in v.name]
+    if not final_videos:
+        print(f"   ⚠️ No se encontró FINAL video en {video_dir} para generar shorts")
+        return []
+
+    src = final_videos[0]
+    duration = _video_duration_seconds(src)
+    if duration < 90:
+        print(f"   ⚠️ Video {duration:.0f}s muy corto para 3 shorts; salteando")
+        return []
+
+    # Timestamps de los 3 shorts. Cada uno entre 45-60s.
+    short_len = 55
+    plans = [
+        ("hook", 0, min(short_len, 60)),
+        ("mid", max(0, duration * 0.5 - short_len / 2), min(duration, duration * 0.5 + short_len / 2)),
+        ("end", max(0, duration - short_len - 10), max(short_len, duration - 10)),
+    ]
+
+    shorts_dir = video_dir / "shorts"
+    shorts_dir.mkdir(parents=True, exist_ok=True)
+
+    results = []
+    for i, (label, start, end) in enumerate(plans, 1):
+        if end - start < 30:
+            continue
+        out_path = shorts_dir / f"SHORT_{i:02d}_{label}.mp4"
+        print(f"   ✂️ Renderizando short {i}/3 ({label}, {start:.0f}-{end:.0f}s)")
+        if not _render_short_vertical(src, start, end, out_path):
+            continue
+        # Upload a Storage
+        upload = _upload_video_to_storage(out_path, f"{project_id}/shorts")
+        if upload:
+            results.append({
+                "index": i,
+                "label": label,
+                "start": round(start, 1),
+                "end": round(end, 1),
+                "duration": round(end - start, 1),
+                "size_mb": round(out_path.stat().st_size / 1024 / 1024, 1),
+                "gs_path": upload["gs_path"],
+                "signed_url": upload["signed_url"],
+            })
+            print(f"   ✅ Short {i} subido ({results[-1]['size_mb']} MB)")
+    return results
+
+
 def _build_master_audio(video_dir: Path) -> Path | None:
     """
     Concatena narration_*.mp3 en master_audio.mp3 con validación robusta.
@@ -519,6 +642,35 @@ _AGENT_CATALOG = """
 [agent_viajes] Viajes y Exploraciones — Shackleton, Everest, lugares peligrosos del mundo
 [agent_noticias_virales] Noticias Virales — eventos actuales que están en tendencia esta semana
 """.strip()
+
+
+@app.post("/shorts/build/{project_id}")
+def shorts_build(project_id: str):
+    """
+    Genera shorts on-demand para un proyecto ya completado.
+    Útil para backfill de proyectos producidos antes de Sprint 2.1.
+    """
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        doc = db.collection("projects").document(project_id).get()
+        if not doc.exists:
+            return JSONResponse(status_code=404, content={"error": "project not found"})
+        data = doc.to_dict()
+        folder = data.get("videoFolder") or ""
+        if not folder:
+            return JSONResponse(status_code=400, content={"error": "project has no videoFolder"})
+        video_dir = Path(f"/app/output/videos/{folder}")
+        if not video_dir.is_dir():
+            return JSONResponse(status_code=404, content={"error": "video folder not on disk"})
+
+        results = build_shorts_for_project(video_dir, project_id)
+        if results:
+            db.collection("projects").document(project_id).update({"shorts": results})
+        return {"shorts": results, "count": len(results)}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
 
 
 @app.post("/factcheck/run/{project_id}")
@@ -1460,6 +1612,22 @@ def run_production(project_id):
             update_progress(96, "☁️ Subiendo a Storage...")
             storage_info = _upload_video_to_storage(Path(final_path), project_id)
 
+        # Generar shorts vertical 9:16 (3 momentos del video final)
+        # No bloqueante: si falla, el video largo ya está completado.
+        shorts_results = []
+        if final_path and storage_info:
+            try:
+                update_progress(98, "✂️ Generando shorts...")
+                shorts_results = build_shorts_for_project(video_dir, project_id)
+                print(f"   📱 Shorts generados: {len(shorts_results)}/3", flush=True)
+            except Exception as shorts_err:
+                print(f"   ⚠️ Shorts generation failed (no bloqueante): {shorts_err}", flush=True)
+                try:
+                    import sentry_sdk
+                    sentry_sdk.capture_exception(shorts_err)
+                except Exception:
+                    pass
+
         status_msg = "🏆 ¡Video cinemático finalizado!" if not has_subs else "🏆 ¡Video cinemático con subtítulos finalizado!"
 
         update_payload = {
@@ -1474,10 +1642,12 @@ def run_production(project_id):
             update_payload["videoStoragePath"] = storage_info["gs_path"]
             update_payload["videoUrl"] = storage_info["signed_url"]
             update_payload["videoUrlExpiresAt"] = firestore.SERVER_TIMESTAMP
+        if shorts_results:
+            update_payload["shorts"] = shorts_results
 
         doc_ref.update(update_payload)
 
-        print(f"🏆 [PRODUCE] Cinematic production complete! Subs: {has_subs} | Storage: {bool(storage_info)} | {final_path}")
+        print(f"🏆 [PRODUCE] Cinematic production complete! Subs: {has_subs} | Storage: {bool(storage_info)} | Shorts: {len(shorts_results)} | {final_path}")
         
     except Exception as e:
         update_progress(0, f"Error: {str(e)[:100]}", "error")

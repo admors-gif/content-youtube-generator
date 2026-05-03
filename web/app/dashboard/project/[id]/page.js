@@ -434,6 +434,44 @@ export default function ProjectDetailsPage({ params }) {
         </div>
       )}
 
+      {/* Shorts vertical 9:16 generados (si existen) */}
+      {project.status === "completed" && Array.isArray(project.shorts) && project.shorts.length > 0 && (
+        <div className="glass-card animate-fade-in" style={{ marginBottom: "32px", padding: "20px" }}>
+          <h3 style={{ margin: "0 0 14px 0", fontSize: "16px", fontWeight: "bold", display: "flex", alignItems: "center", gap: "8px" }}>
+            📱 Versiones cortas (9:16)
+            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "normal" }}>{project.shorts.length} clips listos para publicar</span>
+          </h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px" }}>
+            {project.shorts.map((s) => (
+              <div key={s.index} style={{ background: "var(--bg-dark)", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border)" }}>
+                <video
+                  src={s.signed_url}
+                  controls
+                  preload="metadata"
+                  style={{ width: "100%", aspectRatio: "9/16", background: "#000", display: "block" }}
+                />
+                <div style={{ padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px" }}>
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    {s.label === "hook" ? "🎯 Hook" : s.label === "mid" ? "🔥 Punto fuerte" : "🏆 Cierre"}
+                    {" · "}
+                    {Math.round(s.duration)}s
+                  </span>
+                  <span style={{ color: "var(--text-muted)", fontFamily: "monospace" }}>{s.size_mb}MB</span>
+                </div>
+                <a
+                  href={s.signed_url}
+                  download
+                  className="btn-secondary"
+                  style={{ margin: "0 12px 12px", padding: "6px 10px", fontSize: "12px", textAlign: "center", textDecoration: "none", display: "block" }}
+                >
+                  ⬇ Descargar
+                </a>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Tabs Menu */}
       <div style={{ display: "flex", gap: "16px", marginBottom: "24px", borderBottom: "1px solid var(--border)", paddingBottom: "8px" }}>
         <button 
