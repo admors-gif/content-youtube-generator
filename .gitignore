@@ -34,3 +34,11 @@ output/videos/
 
 # Archivo legacy con keys, jamás re-incluir
 hostinger_env.txt
+
+# Debug artifacts y design kit (referencia local, no se trackean)
+debug_artifact*/
+design_kit/
+test_v3_audio/
+
+# Scripts de prueba/debug ad-hoc
+scripts/check_active.py
