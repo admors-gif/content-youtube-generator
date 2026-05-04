@@ -1892,7 +1892,13 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
     El cliente solo muestra disponibilidad; la autoridad económica vive aquí.
     """
     principal = _require_principal(request)
-    payload = _validate_project_payload(await request.json())
+    body = await request.json()
+    payload = _validate_project_payload(body)
+    dry_run = bool(body.get("dryRun")) or request.query_params.get("dryRun", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     uid = principal["uid"]
     token = principal.get("token") or {}
 
@@ -1902,6 +1908,26 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
         db = firestore.client()
         user_ref = db.collection("users").document(uid)
         project_ref = db.collection("projects").document()
+
+        if dry_run:
+            user_snap = user_ref.get()
+            if user_snap.exists:
+                counts = _credits_remaining(user_snap.to_dict() or {})
+            else:
+                counts = _credits_remaining({
+                    "credits": {"included": 1, "used": 0, "extra": 0},
+                })
+            if counts["remaining"] <= 0:
+                raise HTTPException(status_code=402, detail="insufficient credits")
+            return {
+                "ok": True,
+                "dryRun": True,
+                "wouldCreateProject": True,
+                "wouldChargeCredits": 1,
+                "creditsRemaining": max(0, counts["remaining"] - 1),
+                "agentId": payload["agent_id"],
+                "agentFile": payload["agent_file"],
+            }
 
         @firestore.transactional
         def _txn(transaction):
