@@ -339,16 +339,27 @@ body::before {
    LAYOUT shell (cf-shell + cf-main)
    ───────────────────────────────────────────────────────────────────────── */
 
-.cf-shell { display: flex; min-height: 100vh; }
+/* HACK DEFENSIVO 2026-05-04: Tailwind v4 con `@import "tailwindcss"` aplica
+   un preflight reset que en algunos casos sobrescribe margin-left de clases
+   custom. Usamos !important para forzar la cascade en las dos reglas críticas
+   del shell. Deuda técnica documentada: investigar si Tailwind v4 + custom
+   CSS layers permite eliminar este !important. */
+.cf-shell {
+  display: flex !important;
+  min-height: 100vh;
+}
 .cf-main {
-  flex: 1;
-  margin-left: var(--sidebar-w);
+  flex: 1 !important;
+  margin-left: var(--sidebar-w) !important;
   padding: var(--content-pad-y) var(--content-pad-x);
   max-width: calc(var(--sidebar-w) + var(--content-max));
   position: relative;
   z-index: 5;
 }
 @media (max-width: 900px) {
-  .cf-main { margin-left: 0; padding: var(--s-5) var(--s-5); }
+  .cf-main {
+    margin-left: 0 !important;
+    padding: var(--s-5) var(--s-5);
+  }
 }
 
