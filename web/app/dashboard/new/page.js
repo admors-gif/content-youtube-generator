@@ -1,20 +1,12 @@
 "use client";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { db } from "@/lib/firebase";
-import {
-  collection,
-  addDoc,
-  serverTimestamp,
-  doc,
-  updateDoc,
-  increment,
-} from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { SYSTEM_AGENTS } from "@/lib/agents";
 import Icon from "@/components/Icon";
 import { getAgentColor, getMonogram } from "@/lib/agentVisual";
 import { authHeaders, getApiBase } from "@/lib/apiClient";
+import { getCreditCounts } from "@/lib/credits";
 
 /**
  * Wizard Nuevo Documental — Editorial Cinematic v2.
@@ -25,7 +17,7 @@ import { authHeaders, getApiBase } from "@/lib/apiClient";
  *   - fetchRecommendations() → POST /recommend-agent
  *   - recommendationMap (rank por agentId)
  *   - creditsLeft
- *   - handleCreate() → addDoc + decrement crédito + webhook n8n + redirect
+ *   - handleCreate() → backend transaccional + redirect
  *
  * Aplica visual del kit:
  *   - Header: back + eyebrow ember PASO N DE 2 + display Fraunces italic
@@ -255,14 +247,9 @@ export default function NewProjectPage() {
     return acc;
   }, {});
 
-  /* PRESERVADO: créditos */
-  const creditsLeft =
-    Math.max(
-      0,
-      (profile?.credits?.included || 0) - (profile?.credits?.used || 0),
-    ) + (profile?.credits?.extra || 0);
+  const { remaining: creditsLeft } = getCreditCounts(profile);
 
-  /* PRESERVADO: handleCreate completo (addDoc + decrement + webhook n8n) */
+  /* Crear proyecto: el backend valida saldo, descuenta crédito y dispara guion */
   const handleCreate = async () => {
     if (!selectedAgent || !topic.trim()) return;
     if (creditsLeft <= 0) {
@@ -273,66 +260,26 @@ export default function NewProjectPage() {
     }
     setCreating(true);
     try {
-      const docRef = await addDoc(collection(db, "projects"), {
-        userId: user.uid,
-        title: topic.trim(),
-        agentId: selectedAgent.agentId,
-        agentFile: selectedAgent.promptFile,
-        status: "draft",
-        progress: {
-          currentStep: 0,
-          totalSteps: 6,
-          stepName: "Preparando tu proyecto...",
-          percent: 5,
-        },
-        script: {
-          plain: "",
-          tagged: "",
-          wordCount: 0,
-          estimatedMinutes: 0,
-          approved: false,
-        },
-        scenes: [],
-        voice: {
-          model: "es-US-Neural2-A",
-          gender: "female",
-          speed: 1.0,
-          pitch: 0,
-        },
-        output: {},
-        seo: {},
-        costs: {},
-        createdAt: serverTimestamp(),
-        completedAt: null,
+      const res = await fetch(`${getApiBase()}/projects/create`, {
+        method: "POST",
+        headers: await authHeaders(user, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          title: topic.trim(),
+          agentId: selectedAgent.agentId,
+          agentFile: selectedAgent.promptFile,
+        }),
       });
-
-      // Descontar crédito
-      await updateDoc(doc(db, "users", user.uid), {
-        "credits.used": increment(1),
-      });
-
-      // Webhook n8n (background, no bloquea redirect)
-      try {
-        const webhookUrl = process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL;
-        if (webhookUrl) {
-          fetch(webhookUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              projectId: docRef.id,
-              userId: user.uid,
-              topic: topic.trim(),
-              agentFile: selectedAgent.promptFile,
-            }),
-          }).catch((err) => console.error("Error contactando a n8n:", err));
-        } else {
-          console.warn("Falta NEXT_PUBLIC_N8N_WEBHOOK_URL en .env.local");
-        }
-      } catch (err) {
-        console.error("Error al preparar el webhook:", err);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.projectId) {
+        const message =
+          res.status === 402
+            ? "No tienes créditos disponibles. Mejora tu plan o compra créditos extra."
+            : data.detail || data.error || "No se pudo crear el proyecto.";
+        alert(message);
+        return;
       }
 
-      router.push(`/dashboard/project/${docRef.id}`);
+      router.push(`/dashboard/project/${data.projectId}`);
     } catch (e) {
       alert("Error al crear proyecto: " + e.message);
     } finally {

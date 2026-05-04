@@ -1,0 +1,59 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownsUserDoc(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function ownProject() {
+      return signedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    function validInitialProfile(uid) {
+      return ownsUserDoc(uid)
+        && request.resource.data.keys().hasOnly([
+          "uid",
+          "email",
+          "displayName",
+          "photoURL",
+          "plan",
+          "credits",
+          "totalVideosCreated",
+          "createdAt",
+          "lastActive",
+        ])
+        && request.resource.data.uid == uid
+        && request.resource.data.plan == "free"
+        && request.resource.data.credits.included == 1
+        && request.resource.data.credits.used == 0
+        && request.resource.data.credits.extra == 0
+        && request.resource.data.totalVideosCreated == 0;
+    }
+
+    match /users/{uid} {
+      allow read: if ownsUserDoc(uid);
+      allow create: if validInitialProfile(uid);
+      allow update: if ownsUserDoc(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "displayName",
+          "photoURL",
+          "lastActive",
+        ]);
+      allow delete: if false;
+    }
+
+    match /projects/{projectId} {
+      allow read: if ownProject();
+      allow create, update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

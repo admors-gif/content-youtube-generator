@@ -7,10 +7,6 @@ import {
   where,
   orderBy,
   onSnapshot,
-  deleteDoc,
-  doc,
-  updateDoc,
-  increment,
 } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -21,14 +17,16 @@ import {
   getMonogram,
 } from "@/lib/agentVisual";
 import { formatRelativeTime, getStatusBucket } from "@/lib/format";
+import { authHeaders, getApiBase } from "@/lib/apiClient";
+import { getCreditCounts } from "@/lib/credits";
 
 /**
  * Dashboard Editorial — v2 design system.
  *
  * Preserva 100% la lógica del legacy:
  *   - useEffect con onSnapshot + fallback query sin orderBy (composite index)
- *   - handleDelete con devolución condicional de crédito (hasScript)
- *   - creditsLeft calculado igual
+ *   - handleDelete vía backend con devolución condicional transaccional
+ *   - creditsLeft con fórmula centralizada
  *
  * Cambia SOLO la presentación: header eyebrow + display Fraunces italic,
  * stat trio en cf-card, filter strip + search, project rows con monograma
@@ -340,7 +338,7 @@ export default function DashboardPage() {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
 
-  /* PRESERVADO: delete con devolución condicional de crédito */
+  /* Delete con devolución condicional de crédito en backend */
   const handleDelete = async (e, project) => {
     e.stopPropagation();
     const hasScript =
@@ -350,11 +348,13 @@ export default function DashboardPage() {
       : `¿Eliminar "${project.title}"?\n\nNo se generó guión. Se te devolverá el crédito.`;
     if (!confirm(msg)) return;
     try {
-      await deleteDoc(doc(db, "projects", project.id));
-      if (!hasScript) {
-        await updateDoc(doc(db, "users", user.uid), {
-          "credits.used": increment(-1),
-        });
+      const res = await fetch(`${getApiBase()}/projects/${encodeURIComponent(project.id)}`, {
+        method: "DELETE",
+        headers: await authHeaders(user),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || data.error || "No se pudo eliminar");
       }
     } catch (err) {
       alert("Error al eliminar: " + err.message);
@@ -400,11 +400,13 @@ export default function DashboardPage() {
     return () => unsub();
   }, [user]);
 
-  /* PRESERVADO: créditos */
-  const included = profile?.credits?.included ?? 0;
-  const used = profile?.credits?.used ?? 0;
-  const extra = profile?.credits?.extra ?? 0;
-  const creditsLeft = Math.max(0, included - used) + extra;
+  const {
+    included,
+    used,
+    extra,
+    total,
+    remaining: creditsLeft,
+  } = getCreditCounts(profile);
 
   /* Métricas derivadas para el stat trio */
   const totalProjects = projects.length;
@@ -544,7 +546,7 @@ export default function DashboardPage() {
         <div className="cf-fade cf-fade--3" style={{ flex: 1, minWidth: 200 }}>
           <Stat
             label="CRÉDITOS"
-            value={`${used}/${included || "—"}`}
+            value={`${used}/${total || included || "—"}`}
             sub={
               creditsLeft === 0
                 ? "Sin créditos disponibles"

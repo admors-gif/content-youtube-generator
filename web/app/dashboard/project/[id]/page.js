@@ -8,7 +8,7 @@ import React, {
 } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
-import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { SYSTEM_AGENTS } from "@/lib/agents";
 import { authHeaders, getApiBase } from "@/lib/apiClient";
 
@@ -208,19 +208,16 @@ export default function ProjectDetailsPage({ params }) {
     async ({ overrideModeration = false } = {}) => {
       try {
         setTimerActive(false);
-        await updateDoc(doc(db, "projects", id), {
-          "script.plain": editedScript,
-          "script.approved": true,
-          status: "producing",
-          "progress.percent": 2,
-          "progress.stepName": "Iniciando producción...",
-        });
         const vpsUrl = getApiBase();
         try {
           const res = await fetch(`${vpsUrl}/produce`, {
             method: "POST",
             headers: await authHeaders(user, { "Content-Type": "application/json" }),
-            body: JSON.stringify({ projectId: id, overrideModeration }),
+            body: JSON.stringify({
+              projectId: id,
+              overrideModeration,
+              scriptPlain: editedScript,
+            }),
           });
           if (res.status === 403) {
             const data = await res.json().catch(() => ({}));
@@ -241,15 +238,8 @@ export default function ProjectDetailsPage({ params }) {
                 body: JSON.stringify({
                   projectId: id,
                   overrideModeration: true,
+                  scriptPlain: editedScript,
                 }),
-              });
-            } else {
-              await updateDoc(doc(db, "projects", id), {
-                "script.approved": false,
-                status: "script_ready",
-                "progress.percent": 0,
-                "progress.stepName":
-                  "Revisión pendiente — edita el guión y vuelve a aprobar",
               });
             }
           }

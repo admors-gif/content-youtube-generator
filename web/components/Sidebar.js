@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import Icon from "@/components/Icon";
+import { getCreditCounts } from "@/lib/credits";
 
 /**
  * Sidebar Editorial / Cinematic — v2 design system.
@@ -134,14 +135,10 @@ function NavLink({ item, isActive }) {
 function PlanStrip({ profile }) {
   const plan = (profile?.plan || "free").toLowerCase();
   const meta = PLAN_LABELS[plan] || PLAN_LABELS.free;
-  const included = profile?.credits?.included ?? 0;
-  const used = profile?.credits?.used ?? 0;
-  const extra = profile?.credits?.extra ?? 0;
-  const totalAvailable = Math.max(0, included - used) + extra;
-  const totalCapacity = included + extra;
+  const { total, remaining } = getCreditCounts(profile);
   const pct =
-    totalCapacity > 0
-      ? Math.min(100, Math.max(0, (totalAvailable / totalCapacity) * 100))
+    total > 0
+      ? Math.min(100, Math.max(0, (remaining / total) * 100))
       : 0;
 
   return (
@@ -172,7 +169,7 @@ function PlanStrip({ profile }) {
           marginBottom: 6,
         }}
       >
-        CRÉDITOS · {totalAvailable}/{totalCapacity || "—"}
+        CRÉDITOS · {remaining}/{total || "—"}
       </div>
       <div
         style={{

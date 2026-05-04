@@ -1,6 +1,7 @@
 "use client";
 import { useAuth } from "@/context/AuthContext";
 import Icon from "@/components/Icon";
+import { getCreditCounts } from "@/lib/credits";
 
 /**
  * Billing stub — Editorial Cinematic v2.
@@ -32,9 +33,9 @@ const PLANS = [
     credits: "8 documentales",
     features: [
       "Acceso a los 28 agentes",
-      "Voz ElevenLabs v3 premium",
+      "Voces premium cinematográficas",
       "Shorts + thumbnails incluidos",
-      "Recomendador de agentes IA",
+      "Recomendador de agentes",
     ],
     cta: "Más popular",
     accent: true,
@@ -59,10 +60,13 @@ const PLANS = [
 export default function BillingPage() {
   const { profile } = useAuth();
   const plan = (profile?.plan || "free").toLowerCase();
-  const included = profile?.credits?.included ?? 0;
-  const used = profile?.credits?.used ?? 0;
-  const extra = profile?.credits?.extra ?? 0;
-  const available = Math.max(0, included - used) + extra;
+  const {
+    included,
+    used,
+    extra,
+    total,
+    remaining: available,
+  } = getCreditCounts(profile);
 
   return (
     <div>
@@ -166,7 +170,7 @@ export default function BillingPage() {
               color: "var(--ember)",
             }}
           >
-            {used}/{included || "—"}
+            {used}/{total || included || "—"}
           </div>
           <div
             style={{

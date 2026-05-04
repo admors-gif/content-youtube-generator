@@ -123,7 +123,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS_ORIGINS,
     allow_origin_regex=_CORS_ORIGIN_REGEX,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Admin-Token"],
     allow_credentials=False,
 )
@@ -241,6 +241,56 @@ def _require_admin(request: Request, *, allow_local: bool = False) -> dict:
         return {**principal, "admin": True}
 
     raise HTTPException(status_code=403, detail="admin access required")
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _credits_remaining(profile: dict) -> dict:
+    credits = profile.get("credits") or {}
+    included = max(0, _safe_int(credits.get("included"), 0))
+    extra = max(0, _safe_int(credits.get("extra"), 0))
+    used = max(0, _safe_int(credits.get("used"), 0))
+    total = included + extra
+    remaining = max(0, total - used)
+    return {
+        "included": included,
+        "extra": extra,
+        "used": used,
+        "total": total,
+        "remaining": remaining,
+    }
+
+
+def _validate_project_payload(data: dict) -> dict:
+    title = (data.get("title") or data.get("topic") or "").strip()
+    agent_id = (data.get("agentId") or "").strip()
+    agent_file = (data.get("agentFile") or "").strip()
+
+    if not title:
+        raise HTTPException(status_code=400, detail="title required")
+    if len(title) > 180:
+        raise HTTPException(status_code=400, detail="title too long")
+    if not agent_id.startswith("agent_"):
+        raise HTTPException(status_code=400, detail="invalid agentId")
+    if (
+        not agent_file.endswith(".md")
+        or "/" in agent_file
+        or "\\" in agent_file
+        or ".." in agent_file
+    ):
+        raise HTTPException(status_code=400, detail="invalid agentFile")
+    prompt_path = Path("prompts") / agent_file
+    if not prompt_path.is_file():
+        raise HTTPException(status_code=400, detail="agent prompt not found")
+    if agent_file[:-3] != agent_id:
+        raise HTTPException(status_code=400, detail="agent mismatch")
+
+    return {"title": title, "agent_id": agent_id, "agent_file": agent_file}
 
 
 def _upload_video_to_storage(local_path: Path, project_id: str, content_type: str = None) -> dict | None:
@@ -1834,6 +1884,158 @@ def _humanize_seconds(s: float) -> str:
     h = s // 3600
     return f"{h}h {(s % 3600) // 60}m"
 
+
+@app.post("/projects/create")
+async def create_project(request: Request, background_tasks: BackgroundTasks):
+    """
+    Crea un proyecto y descuenta 1 crédito en una transacción atómica.
+    El cliente solo muestra disponibilidad; la autoridad económica vive aquí.
+    """
+    principal = _require_principal(request)
+    payload = _validate_project_payload(await request.json())
+    uid = principal["uid"]
+    token = principal.get("token") or {}
+
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        user_ref = db.collection("users").document(uid)
+        project_ref = db.collection("projects").document()
+
+        @firestore.transactional
+        def _txn(transaction):
+            user_snap = user_ref.get(transaction=transaction)
+            if user_snap.exists:
+                profile = user_snap.to_dict() or {}
+                counts = _credits_remaining(profile)
+                if counts["remaining"] <= 0:
+                    raise HTTPException(status_code=402, detail="insufficient credits")
+                transaction.update(user_ref, {
+                    "credits.used": firestore.Increment(1),
+                    "lastActive": firestore.SERVER_TIMESTAMP,
+                })
+            else:
+                email = token.get("email") or ""
+                display_name = token.get("name") or (email.split("@")[0] if email else "Usuario")
+                profile = {
+                    "uid": uid,
+                    "email": email,
+                    "displayName": display_name,
+                    "photoURL": token.get("picture"),
+                    "plan": "free",
+                    "credits": {"included": 1, "used": 0, "extra": 0},
+                    "totalVideosCreated": 0,
+                }
+                counts = _credits_remaining(profile)
+                transaction.set(user_ref, {
+                    **profile,
+                    "credits": {"included": 1, "used": 1, "extra": 0},
+                    "createdAt": firestore.SERVER_TIMESTAMP,
+                    "lastActive": firestore.SERVER_TIMESTAMP,
+                })
+
+            project_data = {
+                "userId": uid,
+                "title": payload["title"],
+                "agentId": payload["agent_id"],
+                "agentFile": payload["agent_file"],
+                "status": "draft",
+                "progress": {
+                    "currentStep": 0,
+                    "totalSteps": 6,
+                    "stepName": "Preparando tu proyecto...",
+                    "percent": 5,
+                },
+                "script": {
+                    "plain": "",
+                    "tagged": "",
+                    "wordCount": 0,
+                    "estimatedMinutes": 0,
+                    "approved": False,
+                },
+                "scenes": [],
+                "voice": {"style": "narrative", "speed": 1.0, "pitch": 0},
+                "output": {},
+                "seo": {},
+                "costs": {"creditCost": 1},
+                "creditCharged": True,
+                "creditChargedAt": firestore.SERVER_TIMESTAMP,
+                "createdAt": firestore.SERVER_TIMESTAMP,
+                "completedAt": None,
+            }
+            transaction.set(project_ref, project_data)
+            return counts
+
+        counts = _txn(db.transaction())
+        background_tasks.add_task(
+            run_script,
+            payload["title"],
+            payload["agent_file"],
+            project_ref.id,
+        )
+        return {
+            "ok": True,
+            "projectId": project_ref.id,
+            "creditsRemaining": max(0, counts["remaining"] - 1),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+@app.delete("/projects/{project_id}")
+def delete_project(project_id: str, request: Request):
+    """
+    Elimina un proyecto y devuelve el crédito solo si no se generó guion.
+    El reembolso es transaccional e idempotente: sin documento no hay doble refund.
+    """
+    principal = _require_principal(request, allow_admin=True)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        project_ref = db.collection("projects").document(project_id)
+
+        @firestore.transactional
+        def _txn(transaction):
+            snap = project_ref.get(transaction=transaction)
+            if not snap.exists:
+                raise HTTPException(status_code=404, detail="project not found")
+            project = snap.to_dict() or {}
+            owner_uid = project.get("userId")
+            if not principal.get("admin") and owner_uid != principal["uid"]:
+                raise HTTPException(status_code=403, detail="project access denied")
+
+            script = project.get("script") or {}
+            has_script = bool(_safe_int(script.get("wordCount"), 0) > 0 or script.get("plain"))
+            refunded = False
+            next_used = None
+
+            if not has_script and owner_uid:
+                user_ref = db.collection("users").document(owner_uid)
+                user_snap = user_ref.get(transaction=transaction)
+                if user_snap.exists:
+                    counts = _credits_remaining(user_snap.to_dict() or {})
+                    next_used = max(0, counts["used"] - 1)
+                    transaction.update(user_ref, {
+                        "credits.used": next_used,
+                        "lastActive": firestore.SERVER_TIMESTAMP,
+                    })
+                    refunded = counts["used"] > next_used
+
+            transaction.delete(project_ref)
+            return {"refunded": refunded, "hasScript": has_script, "creditsUsed": next_used}
+
+        result = _txn(db.transaction())
+        return {"ok": True, "projectId": project_id, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
 @app.post("/generate")
 async def trigger_generation(request: Request, background_tasks: BackgroundTasks):
     data = await request.json()
@@ -1871,6 +2073,13 @@ async def trigger_production(request: Request, background_tasks: BackgroundTasks
     data = await request.json()
     project_id = data.get("projectId")
     override_moderation = bool(data.get("overrideModeration", False))
+    script_plain = data.get("scriptPlain")
+    if isinstance(script_plain, str):
+        script_plain = script_plain.strip()
+        if len(script_plain) > 250_000:
+            raise HTTPException(status_code=400, detail="script too long")
+    else:
+        script_plain = None
 
     if not project_id:
         return {"status": "error", "message": "Missing 'projectId'"}
@@ -1922,6 +2131,23 @@ async def trigger_production(request: Request, background_tasks: BackgroundTasks
             "duplicate_blocked": True,
             "message": f"Production already in progress (started {age}s ago)",
         }
+
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        update_data = {
+            "script.approved": True,
+            "status": "producing",
+            "progress.percent": 2,
+            "progress.stepName": "Iniciando producción...",
+        }
+        if script_plain:
+            update_data["script.plain"] = script_plain
+        db.collection("projects").document(project_id).update(update_data)
+    except Exception as update_err:
+        _release_production_lock(project_id, lock_result.get("lock_id"))
+        raise HTTPException(status_code=500, detail=f"project update failed: {str(update_err)[:120]}")
 
     try:
         from worker_tasks import produce_video
