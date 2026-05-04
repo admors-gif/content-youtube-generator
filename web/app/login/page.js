@@ -514,6 +514,23 @@ export default function LoginPage() {
           </div>
         </div>
       </div>
+
+      <style jsx>{`
+        .cf-login-shell {
+          min-height: 100vh;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+        }
+        @media (max-width: 900px) {
+          .cf-login-shell {
+            grid-template-columns: 1fr;
+          }
+          .cf-login-shell > div {
+            padding: 32px 24px !important;
+            border-right: none !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }

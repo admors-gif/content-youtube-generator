@@ -352,18 +352,3 @@ body::before {
   .cf-main { margin-left: 0; padding: var(--s-5) var(--s-5); }
 }
 
-/* Login split editorial — antes vivía como <style jsx> en login/page.js
-   pero generaba hydration mismatch (styled-jsx hash distinto SSR vs CSR).
-   Migrado a globals.css para SSR-safe. */
-.cf-login-shell {
-  min-height: 100vh;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-}
-@media (max-width: 900px) {
-  .cf-login-shell { grid-template-columns: 1fr; }
-  .cf-login-shell > div {
-    padding: 32px 24px !important;
-    border-right: none !important;
-  }
-}
