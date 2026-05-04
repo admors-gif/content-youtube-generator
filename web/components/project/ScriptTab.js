@@ -1,4 +1,5 @@
 "use client";
+import Icon from "@/components/Icon";
 import ModerationAlert from "./ModerationAlert";
 import FactCheckPanel from "./FactCheckPanel";
 import PodcastBubbles from "./PodcastBubbles";
@@ -7,19 +8,18 @@ import StatsPanel from "./StatsPanel";
 import ViralityPanel from "./ViralityPanel";
 
 /**
- * ScriptTab (orquestador presentacional).
+ * ScriptTab — Editorial Cinematic v2.
  *
- * Compone los paneles de moderación + fact-check + editor de guión
- * (con podcast bubbles para format=podcast) + sidebar (stats + virality).
+ * Orquestador del tab de guión. Compone:
+ *   - ModerationAlert (si hay project.moderation)
+ *   - FactCheckPanel (si hay project.factCheck.claims)
+ *   - cf-card guion editor con header eyebrow + h3 word count + acciones
+ *     - estado "esperando IA": "El estudio está rodando" + Icon clapperboard
+ *     - estado script disponible: PodcastBubbles si format=podcast +
+ *       textarea Fraunces italic 18px + ApproveTimer + cf-btn "Aprobar y producir"
+ *   - sidebar: StatsPanel + ViralityPanel
  *
  * Recibe del container TODA la state — no maneja nada interno propio.
- *
- *   - project, editedScript, setEditedScript
- *   - timerActive, timerSeconds, timerPaused, setTimerPaused
- *   - autoApproveSeconds (constante para el ratio del conic-gradient)
- *   - onApprove (callback handleSaveScript del container)
- *
- * Fase 7.1: render IDÉNTICO al legacy.
  */
 export default function ScriptTab({
   project,
@@ -36,52 +36,79 @@ export default function ScriptTab({
   const isProducing = project.status === "producing";
   const isApproved =
     project.script?.approved && project.status !== "script_ready";
+  const wordCount = project.script?.wordCount || 0;
+  const minutes = project.script?.estimatedMinutes || 0;
 
   return (
     <div
-      className="animate-fade-in"
+      className="cf-fade"
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 300px",
-        gap: "24px",
+        gridTemplateColumns: "1fr 320px",
+        gap: "var(--s-5)",
       }}
     >
       <div>
         <ModerationAlert moderation={project.moderation} />
         <FactCheckPanel factCheck={project.factCheck} />
 
-        <div
-          className="glass-card"
-          style={{ padding: "24px", position: "relative" }}
-        >
+        <div className="cf-card" style={{ padding: "var(--s-5)" }}>
           <div
             style={{
               display: "flex",
               justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: "16px",
+              alignItems: "flex-start",
+              marginBottom: "var(--s-4)",
+              gap: 12,
+              flexWrap: "wrap",
             }}
           >
-            <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>
-              Edición de Guión
-            </h3>
+            <div>
+              <div
+                style={{
+                  font: "var(--t-mono-sm)",
+                  color: isApproved ? "var(--ok)" : "var(--paper-mute)",
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                }}
+              >
+                {isApproved
+                  ? "GUIÓN APROBADO"
+                  : hasScript
+                    ? "EN REVISIÓN"
+                    : "EN ELABORACIÓN"}
+              </div>
+              <div
+                style={{
+                  font: "var(--t-h3)",
+                  color: "var(--paper)",
+                  marginTop: 4,
+                  fontFamily: "var(--font-display)",
+                  fontWeight: 600,
+                }}
+              >
+                {hasScript
+                  ? `${wordCount.toLocaleString("es")} palabras${minutes ? ` · ${minutes} min estimados` : ""}`
+                  : "Guionizando…"}
+              </div>
+            </div>
 
-            {hasScript ? (
-              isProducing ? (
-                <span
-                  className="badge badge-starter"
-                  style={{ animation: "pulse 2s infinite" }}
-                >
-                  ⚙️ Produciendo...
+            {hasScript &&
+              (isProducing ? (
+                <span className="cf-badge cf-badge--creator">
+                  <span
+                    className="dot"
+                    style={{ animation: "cf-pulse 1.6s ease-in-out infinite" }}
+                  />
+                  PRODUCIENDO
                 </span>
-              ) : isApproved ? (
-                <span className="badge badge-free">✅ Ya aprobado</span>
-              ) : (
+              ) : isApproved ? null : (
                 <div
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: "10px",
+                    gap: 12,
+                    flexWrap: "wrap",
                   }}
                 >
                   {timerActive && (
@@ -94,100 +121,134 @@ export default function ScriptTab({
                   )}
                   <button
                     onClick={onApprove}
-                    className="btn-glow"
-                    style={{ padding: "8px 16px", fontSize: "13px" }}
+                    className="cf-btn cf-btn--primary"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
                   >
-                    Aprobar y Producir 🚀
+                    <Icon name="check" size={14} />
+                    Aprobar y producir
                   </button>
                 </div>
-              )
-            ) : (
-              <span
-                className="badge badge-free"
-                style={{ animation: "pulse 2s infinite" }}
-              >
-                Esperando a la IA...
-              </span>
-            )}
+              ))}
           </div>
 
           {hasScript ? (
             <>
-              {/* Vista de conversación (solo para podcast) */}
               {project.format === "podcast" && (
                 <PodcastBubbles scriptText={editedScript} />
               )}
               <textarea
                 value={editedScript}
                 onChange={(e) => setEditedScript(e.target.value)}
+                disabled={isApproved || isProducing}
+                placeholder="El guión aparecerá aquí…"
                 style={{
                   width: "100%",
-                  background: "rgba(0,0,0,0.2)",
-                  color: "white",
-                  padding: "16px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--border)",
+                  background: "var(--ink-0)",
+                  color: "var(--paper)",
+                  padding: "16px 18px",
+                  borderRadius: "var(--r-2)",
+                  border: "1px solid var(--rule-1)",
                   outline: "none",
-                  fontFamily: "serif",
-                  fontSize: "18px",
-                  lineHeight: "1.6",
+                  fontFamily: "var(--font-display)",
+                  fontStyle: "italic",
+                  fontWeight: 400,
+                  fontSize: 18,
+                  lineHeight: 1.6,
                   resize: "vertical",
-                  minHeight: "500px",
+                  minHeight: 500,
+                  letterSpacing: "-0.005em",
+                  transition: "border-color var(--dur-base) var(--ease-out)",
+                  cursor:
+                    isApproved || isProducing ? "not-allowed" : "text",
+                  opacity: isApproved || isProducing ? 0.85 : 1,
                 }}
-                placeholder="El guión aparecerá aquí..."
+                onFocus={(e) =>
+                  (e.currentTarget.style.borderColor = "var(--ember)")
+                }
+                onBlur={(e) =>
+                  (e.currentTarget.style.borderColor = "var(--rule-1)")
+                }
               />
             </>
           ) : (
             <div
               style={{
-                height: "400px",
+                minHeight: 360,
                 display: "flex",
                 flexDirection: "column",
                 justifyContent: "center",
                 alignItems: "center",
                 textAlign: "center",
-                border: "2px dashed var(--border)",
-                borderRadius: "12px",
+                border: "1px dashed var(--rule-1)",
+                borderRadius: "var(--r-2)",
+                padding: "var(--s-6)",
+                background: "var(--ink-0)",
+                gap: 14,
               }}
             >
               <div
                 style={{
-                  fontSize: "48px",
-                  marginBottom: "16px",
-                  animation: "bounce 2s infinite",
+                  width: 56,
+                  height: 56,
+                  borderRadius: "var(--r-2)",
+                  background: "var(--ember-tint)",
+                  color: "var(--ember)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  animation: "cf-pulse 2.4s ease-in-out infinite",
                 }}
               >
-                🤖
+                <Icon name="clapperboard" size={26} />
+              </div>
+              <div
+                style={{
+                  font: "var(--t-mono-sm)",
+                  color: "var(--ember)",
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                }}
+              >
+                INVESTIGACIÓN EN CURSO
               </div>
               <h4
                 style={{
-                  fontSize: "18px",
-                  fontWeight: "bold",
-                  margin: "0 0 8px 0",
+                  fontFamily: "var(--font-display)",
+                  fontStyle: "italic",
+                  fontWeight: 700,
+                  fontSize: 28,
+                  margin: 0,
+                  color: "var(--paper)",
+                  letterSpacing: "-0.02em",
                 }}
               >
-                El Chef está cocinando
+                El estudio está rodando
               </h4>
               <p
                 style={{
-                  color: "var(--text-muted)",
-                  fontSize: "14px",
-                  maxWidth: "300px",
+                  color: "var(--paper-dim)",
+                  fontSize: 14,
+                  maxWidth: 360,
                   margin: 0,
+                  lineHeight: 1.5,
                 }}
               >
-                El motor de IA está investigando el tema y escribiendo una
-                narrativa cinematográfica. Esto toma de 1 a 2 minutos.
+                Estamos investigando el tema y escribiendo una narrativa
+                cinematográfica. Suele tomar entre 1 y 2 minutos.
               </p>
             </div>
           )}
         </div>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--s-5)" }}>
         <StatsPanel
-          wordCount={project.script?.wordCount || 0}
-          estimatedMinutes={project.script?.estimatedMinutes || 0}
+          wordCount={wordCount}
+          estimatedMinutes={minutes}
           approved={!!project.script?.approved}
         />
         {editedScript && <ViralityPanel text={editedScript} />}

@@ -1,201 +1,170 @@
 "use client";
+import Link from "next/link";
+import Icon from "@/components/Icon";
+import { getMonogram } from "@/lib/agentVisual";
+import { formatRelativeTime } from "@/lib/format";
+
 /**
- * Project header (presentacional).
+ * ProjectHeader — Editorial Cinematic v2.
  *
- * Recibe del container:
- *   - project, agent (objeto SYSTEM_AGENTS o undefined)
- *   - displayPercent (smooth interpolated)
- *   - eta (string o null)
- *   - isProcessing (bool)
+ * Header limpio: back link + eyebrow agente (color del agente) +
+ * fecha relativa + título Fraunces italic + acciones download.
+ *
+ * La barra de progreso ya NO vive aquí (sale a ProgressPanel separado
+ * cuando isProcessing) — ver `web/components/project/ProgressPanel.js`.
+ *
+ * Recibe:
+ *   - project, agent (objeto SYSTEM_AGENTS)
  *   - id (projectId)
- *   - onDownloadVideo, onDownloadAll (callbacks)
- *
- * Fase 7.1: render IDÉNTICO al legacy (glass-card, badge, etc.).
- * Fase 7.2 reemplazará el visual por cf-card + iconos editoriales.
+ *   - onDownloadVideo (fetch URL firmada y open)
  */
 export default function ProjectHeader({
   project,
   agent,
-  displayPercent,
-  eta,
-  isProcessing,
   id,
   onDownloadVideo,
 }) {
-  return (
-    <div
-      className="glass-card"
-      style={{
-        marginBottom: "32px",
-        padding: "24px",
-        display: "flex",
-        flexWrap: "wrap",
-        justifyContent: "space-between",
-        alignItems: "center",
-        gap: "16px",
-        borderLeft: `4px solid ${agent?.color || "var(--accent)"}`,
-      }}
-    >
-      <div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "12px",
-            marginBottom: "8px",
-          }}
-        >
-          <span style={{ fontSize: "32px" }}>{agent?.emoji}</span>
-          <span className="badge badge-pro">{project.status.toUpperCase()}</span>
-        </div>
-        <h1 style={{ fontSize: "28px", fontWeight: "800", margin: "0 0 4px 0" }}>
-          {project.title}
-        </h1>
-        <p
-          style={{
-            fontSize: "14px",
-            color: "var(--text-secondary)",
-            margin: 0,
-          }}
-        >
-          Agente: {agent?.name || project.agentId} • Creado:{" "}
-          {project.createdAt?.toDate?.().toLocaleDateString?.()}
-        </p>
-      </div>
+  const color = agent?.color || "var(--ember)";
+  const mono = getMonogram(project.agentId);
+  const created = formatRelativeTime(project.createdAt);
+  const isCompleted = project.status === "completed";
 
-      {/* Barra de Progreso Mágica — Smooth Interpolation */}
+  return (
+    <header className="cf-fade" style={{ marginBottom: "var(--s-6)" }}>
       <div
         style={{
-          background: "var(--bg-card)",
-          padding: "16px",
-          borderRadius: "12px",
-          border: "1px solid var(--border)",
-          minWidth: "300px",
-          position: "relative",
-          overflow: "hidden",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 12,
         }}
       >
-        <div
+        <Link
+          href="/dashboard"
           style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            height: "4px",
-            background:
-              displayPercent >= 100
-                ? "var(--success, #4ade80)"
-                : "var(--accent)",
-            transition: "width 0.8s ease-out",
-            width: `${Math.round(displayPercent)}%`,
-            boxShadow: isProcessing
-              ? "0 0 12px var(--accent), 0 0 24px var(--accent)"
-              : "0 0 10px var(--accent)",
-          }}
-        />
-        {isProcessing && (
-          <div
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              height: "4px",
-              width: "100%",
-              background:
-                "linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent)",
-              animation: "shimmer 2s infinite",
-            }}
-          />
-        )}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
+            color: "var(--paper-mute)",
+            textDecoration: "none",
+            display: "inline-flex",
             alignItems: "center",
-            marginBottom: "4px",
+            gap: 6,
+            font: "var(--t-mono-sm)",
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+            transition: "color var(--dur-base) var(--ease-out)",
           }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--paper)")}
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.color = "var(--paper-mute)")
+          }
         >
-          <span
-            style={{
-              fontSize: "11px",
-              fontWeight: "bold",
-              textTransform: "uppercase",
-              letterSpacing: "1px",
-              color:
-                displayPercent >= 100
-                  ? "var(--success, #4ade80)"
-                  : "var(--accent)",
-            }}
-          >
-            Progreso
-          </span>
-          <span style={{ fontSize: "12px", fontFamily: "monospace" }}>
-            {Math.round(displayPercent)}%
-          </span>
-        </div>
-        <p
-          style={{
-            fontSize: "14px",
-            fontWeight: "500",
-            margin: 0,
-            animation: isProcessing ? "pulse 2s infinite" : "none",
-          }}
-        >
-          {project.progress?.stepName || "Procesando..."}
-        </p>
-        {eta && (
-          <p
-            style={{
-              fontSize: "11px",
-              color: "var(--text-muted)",
-              margin: "6px 0 0 0",
-              fontFamily: "monospace",
-            }}
-          >
-            ⏱️ {eta}
-          </p>
-        )}
+          <Icon name="arrowLeft" size={14} /> DASHBOARD
+        </Link>
       </div>
 
-      {(project.status === "completed" || project.status === "producing") && (
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          {project.status === "completed" && (
-            <>
-              <button
-                onClick={onDownloadVideo}
-                className="btn-glow"
-                style={{
-                  padding: "10px 20px",
-                  fontSize: "13px",
-                  border: "none",
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                📥 Descargar Video
-              </button>
-              <a
-                href={`${process.env.NEXT_PUBLIC_VPS_API_URL || "https://api.valtyk.com"}/download/all/${encodeURIComponent(id)}`}
-                className="btn-secondary"
-                style={{
-                  padding: "10px 20px",
-                  fontSize: "13px",
-                  textDecoration: "none",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Todo el material del proyecto en un ZIP organizado"
-              >
-                📦 Descargar todo el material
-              </a>
-            </>
-          )}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 24,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", gap: 16, flex: 1, minWidth: 0 }}>
+          {/* Tile monograma del agente */}
+          <div
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: "var(--r-2)",
+              background: `${color}22`,
+              color,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontFamily: "var(--font-display)",
+              fontStyle: "italic",
+              fontWeight: 800,
+              fontSize: 24,
+              lineHeight: 1,
+              flex: "none",
+              border: `1px solid ${color}3D`,
+            }}
+          >
+            {mono}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                font: "var(--t-mono-sm)",
+                color: "var(--paper-dim)",
+                marginBottom: 8,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                flexWrap: "wrap",
+              }}
+            >
+              <span style={{ color, fontWeight: 600 }}>
+                {agent?.name?.toUpperCase() || project.agentId}
+              </span>
+              {created && (
+                <>
+                  <span aria-hidden>·</span>
+                  <span>CREADO {created.toUpperCase()}</span>
+                </>
+              )}
+            </div>
+            <h1
+              style={{
+                fontFamily: "var(--font-display)",
+                fontStyle: "italic",
+                fontWeight: 700,
+                fontSize: "clamp(28px, 4vw, 44px)",
+                lineHeight: 1.05,
+                letterSpacing: "-0.02em",
+                color: "var(--paper)",
+                margin: 0,
+              }}
+            >
+              {project.title}
+            </h1>
+          </div>
         </div>
-      )}
-    </div>
+
+        {isCompleted && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              onClick={onDownloadVideo}
+              className="cf-btn cf-btn--secondary"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <Icon name="download" size={16} /> Descargar video
+            </button>
+            <a
+              href={`${process.env.NEXT_PUBLIC_VPS_API_URL || "https://api.valtyk.com"}/download/all/${encodeURIComponent(id)}`}
+              className="cf-btn cf-btn--ghost"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                textDecoration: "none",
+              }}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Todo el material del proyecto en un ZIP organizado"
+            >
+              <Icon name="package" size={16} /> Material completo
+            </a>
+          </div>
+        )}
+      </div>
+    </header>
   );
 }

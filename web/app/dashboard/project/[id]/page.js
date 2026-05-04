@@ -12,6 +12,7 @@ import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { SYSTEM_AGENTS } from "@/lib/agents";
 
 import ProjectHeader from "@/components/project/ProjectHeader";
+import ProgressPanel from "@/components/project/ProgressPanel";
 import VideoPlayer from "@/components/project/VideoPlayer";
 import ShortsGrid from "@/components/project/ShortsGrid";
 import ThumbnailsGrid from "@/components/project/ThumbnailsGrid";
@@ -292,15 +293,41 @@ export default function ProjectDetailsPage({ params }) {
           justifyContent: "center",
           alignItems: "center",
           height: "60vh",
+          font: "var(--t-mono-sm)",
+          color: "var(--paper-mute)",
+          letterSpacing: "0.18em",
+          textTransform: "uppercase",
         }}
       >
-        <div className="spinner"></div>
+        ENTRANDO AL ESTUDIO
       </div>
     );
   }
 
   if (!project) {
-    return <div>Proyecto no encontrado.</div>;
+    return (
+      <div
+        className="cf-card"
+        style={{
+          padding: "var(--s-7)",
+          textAlign: "center",
+          color: "var(--paper-dim)",
+        }}
+      >
+        <div
+          style={{
+            font: "var(--t-mono-sm)",
+            color: "var(--paper-mute)",
+            marginBottom: 8,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+          }}
+        >
+          PROYECTO NO ENCONTRADO
+        </div>
+        <div>Verifica el enlace o vuelve al dashboard.</div>
+      </div>
+    );
   }
 
   const agent = SYSTEM_AGENTS.find((a) => a.agentId === project.agentId);
@@ -338,17 +365,35 @@ export default function ProjectDetailsPage({ params }) {
     }
   };
 
+  const TABS = [
+    { id: "script", label: "Guión y voz" },
+    { id: "scenes", label: "Escenas" },
+  ];
+
   return (
-    <div className="animate-fade-in" style={{ paddingBottom: "80px" }}>
+    <div style={{ paddingBottom: "var(--s-7)" }}>
       <ProjectHeader
         project={project}
         agent={agent}
-        displayPercent={displayPercent}
-        eta={eta}
-        isProcessing={isProcessing}
         id={id}
         onDownloadVideo={handleDownloadVideo}
       />
+
+      {/* Live progress: solo cuando isProcessing */}
+      {isProcessing && (
+        <div
+          className="cf-fade cf-fade--1"
+          style={{ marginBottom: "var(--s-6)" }}
+        >
+          <ProgressPanel
+            displayPercent={displayPercent}
+            stepName={project.progress?.stepName}
+            eta={eta}
+            status={project.status}
+            scenes={project.scenes}
+          />
+        </div>
+      )}
 
       {project.status === "completed" && (
         <VideoPlayer
@@ -367,75 +412,55 @@ export default function ProjectDetailsPage({ params }) {
         <ThumbnailsGrid thumbnails={project.thumbnails} />
       )}
 
-      {/* Tabs Menu */}
+      {/* Tabs editorial */}
       <div
         style={{
           display: "flex",
-          gap: "16px",
-          marginBottom: "24px",
-          borderBottom: "1px solid var(--border)",
-          paddingBottom: "8px",
+          gap: 4,
+          borderBottom: "1px solid var(--rule-1)",
+          marginBottom: "var(--s-5)",
         }}
       >
-        <button
-          style={{
-            padding: "8px 16px",
-            fontSize: "14px",
-            fontWeight: "bold",
-            transition: "all 0.3s",
-            color: activeTab === "script" ? "var(--accent)" : "var(--text-secondary)",
-            borderBottom:
-              activeTab === "script"
-                ? "2px solid var(--accent)"
-                : "2px solid transparent",
-            background: "none",
-            borderTop: "none",
-            borderLeft: "none",
-            borderRight: "none",
-            cursor: "pointer",
-          }}
-          onClick={() => setActiveTab("script")}
-        >
-          📄 Guión (Teleprompter)
-        </button>
-        <button
-          style={{
-            padding: "8px 16px",
-            fontSize: "14px",
-            fontWeight: "bold",
-            transition: "all 0.3s",
-            color: activeTab === "scenes" ? "var(--accent)" : "var(--text-secondary)",
-            borderBottom:
-              activeTab === "scenes"
-                ? "2px solid var(--accent)"
-                : "2px solid transparent",
-            background: "none",
-            borderTop: "none",
-            borderLeft: "none",
-            borderRight: "none",
-            cursor: "pointer",
-          }}
-          onClick={() => setActiveTab("scenes")}
-        >
-          🎬 Escenas Visuales
-        </button>
+        {TABS.map((t) => {
+          const active = activeTab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id)}
+              style={{
+                all: "unset",
+                cursor: "pointer",
+                padding: "12px 20px",
+                fontSize: 15,
+                fontWeight: active ? 600 : 400,
+                color: active ? "var(--paper)" : "var(--paper-dim)",
+                borderBottom: `2px solid ${active ? "var(--ember)" : "transparent"}`,
+                marginBottom: -1,
+                transition: "all var(--dur-base) var(--ease-out)",
+              }}
+            >
+              {t.label}
+            </button>
+          );
+        })}
       </div>
 
-      {activeTab === "script" && (
-        <ScriptTab
-          project={project}
-          editedScript={editedScript}
-          setEditedScript={setEditedScript}
-          timerActive={timerActive}
-          timerSeconds={timerSeconds}
-          timerPaused={timerPaused}
-          setTimerPaused={setTimerPaused}
-          autoApproveSeconds={AUTO_APPROVE_SECONDS}
-          onApprove={handleSaveScript}
-        />
-      )}
-
-      {activeTab === "scenes" && <ScenesTab project={project} />}
+      <div className="cf-fade cf-fade--2">
+        {activeTab === "script" && (
+          <ScriptTab
+            project={project}
+            editedScript={editedScript}
+            setEditedScript={setEditedScript}
+            timerActive={timerActive}
+            timerSeconds={timerSeconds}
+            timerPaused={timerPaused}
+            setTimerPaused={setTimerPaused}
+            autoApproveSeconds={AUTO_APPROVE_SECONDS}
+            onApprove={handleSaveScript}
+          />
+        )}
+        {activeTab === "scenes" && <ScenesTab project={project} />}
+      </div>
     </div>
   );
 }

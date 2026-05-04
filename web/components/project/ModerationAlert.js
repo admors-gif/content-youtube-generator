@@ -1,44 +1,44 @@
 "use client";
+import Icon from "@/components/Icon";
+
 /**
- * ModerationAlert (presentacional).
+ * ModerationAlert — Editorial Cinematic v2.
  *
- * Recibe del container:
- *   - moderation: { verdict: "block"|"warn"|"ok", critical_blocks: [], warnings: [] }
- *
- * Si no hay moderation o el verdict es desconocido, no renderiza nada (null).
- *
- * Fase 7.1: render IDÉNTICO al legacy. Fase 7.2 lo migrará a cf-card con
- * paletas semánticas (ok/warn/bad) del kit.
+ * cf-card con paleta semántica del kit (ok / warn / bad) según verdict.
+ * Items en cf-mono uppercase con porcentaje.
  */
+const VERDICT_PRESETS = {
+  block: {
+    label: "REQUIERE TU REVISIÓN ANTES DE CONTINUAR",
+    badgeCls: "cf-badge--bad",
+    iconName: "alert",
+    iconColor: "var(--bad)",
+    bg: "rgba(216, 98, 90, 0.06)",
+    borderColor: "var(--bad)",
+  },
+  warn: {
+    label: "CONTENIDO SENSIBLE DETECTADO",
+    badgeCls: "cf-badge--warn",
+    iconName: "alert",
+    iconColor: "var(--warn)",
+    bg: "rgba(212, 168, 87, 0.05)",
+    borderColor: "var(--warn)",
+  },
+  ok: {
+    label: "CONTENIDO APTO",
+    badgeCls: "cf-badge--ok",
+    iconName: "check",
+    iconColor: "var(--ok)",
+    bg: "rgba(111, 190, 142, 0.05)",
+    borderColor: "var(--ok)",
+  },
+};
+
 export default function ModerationAlert({ moderation }) {
   if (!moderation) return null;
 
   const verdict = moderation.verdict || "ok";
-  const palette =
-    verdict === "block"
-      ? {
-          bg: "rgba(220, 38, 38, 0.08)",
-          border: "rgba(220, 38, 38, 0.4)",
-          color: "#fca5a5",
-          icon: "🚫",
-          label: "Requiere tu revisión antes de continuar",
-        }
-      : verdict === "warn"
-        ? {
-            bg: "rgba(234, 179, 8, 0.08)",
-            border: "rgba(234, 179, 8, 0.4)",
-            color: "#fde68a",
-            icon: "⚠️",
-            label: "Contenido sensible detectado (esperado para este nicho)",
-          }
-        : {
-            bg: "rgba(34, 197, 94, 0.08)",
-            border: "rgba(34, 197, 94, 0.4)",
-            color: "#86efac",
-            icon: "✅",
-            label: "Contenido apto",
-          };
-
+  const preset = VERDICT_PRESETS[verdict] || VERDICT_PRESETS.ok;
   const items =
     verdict === "block"
       ? moderation.critical_blocks || []
@@ -49,47 +49,61 @@ export default function ModerationAlert({ moderation }) {
   return (
     <div
       style={{
-        marginBottom: "16px",
-        padding: "16px",
-        borderRadius: "10px",
-        background: palette.bg,
-        border: `1px solid ${palette.border}`,
+        marginBottom: "var(--s-4)",
+        padding: "var(--s-4) var(--s-5)",
+        borderRadius: "var(--r-2)",
+        background: preset.bg,
+        border: `1px solid ${preset.borderColor}`,
       }}
     >
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "8px",
-          marginBottom: items.length ? "10px" : 0,
+          gap: 10,
+          marginBottom: items.length ? 10 : 0,
         }}
       >
-        <span style={{ fontSize: "20px" }}>{palette.icon}</span>
-        <span
-          style={{
-            color: palette.color,
-            fontWeight: "bold",
-            fontSize: "14px",
-          }}
-        >
-          {palette.label}
+        <span style={{ color: preset.iconColor, display: "flex" }}>
+          <Icon name={preset.iconName} size={18} />
         </span>
+        <span className={`cf-badge ${preset.badgeCls}`}>{preset.label}</span>
       </div>
       {items.length > 0 && (
         <ul
           style={{
             margin: 0,
             padding: "0 0 0 28px",
-            color: palette.color,
-            fontSize: "13px",
+            color: "var(--paper)",
+            fontSize: 13,
             lineHeight: 1.7,
           }}
         >
           {items.map((it) => (
-            <li key={it.category}>
-              <strong>{it.category}</strong>: intensidad{" "}
-              {(it.score * 100).toFixed(0)}% (umbral:{" "}
-              {(it.threshold * 100).toFixed(0)}%)
+            <li key={it.category} style={{ marginBottom: 4 }}>
+              <span
+                style={{
+                  font: "var(--t-mono-sm)",
+                  color: "var(--paper-mute)",
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                  marginRight: 8,
+                }}
+              >
+                {it.category}
+              </span>
+              <span style={{ color: preset.iconColor, fontWeight: 600 }}>
+                {(it.score * 100).toFixed(0)}%
+              </span>
+              <span
+                style={{
+                  font: "var(--t-mono-sm)",
+                  color: "var(--paper-dim)",
+                  marginLeft: 6,
+                }}
+              >
+                · umbral {(it.threshold * 100).toFixed(0)}%
+              </span>
             </li>
           ))}
         </ul>
@@ -97,9 +111,9 @@ export default function ModerationAlert({ moderation }) {
       {verdict === "block" && (
         <div
           style={{
-            marginTop: "10px",
-            fontSize: "12px",
-            color: "var(--text-muted)",
+            marginTop: 10,
+            font: "var(--t-caption)",
+            color: "var(--paper-dim)",
           }}
         >
           Si decides aprobar de todos modos, se te pedirá confirmación.

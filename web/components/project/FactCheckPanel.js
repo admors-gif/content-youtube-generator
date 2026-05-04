@@ -1,13 +1,11 @@
 "use client";
+import Icon from "@/components/Icon";
+
 /**
- * FactCheckPanel (presentacional).
+ * FactCheckPanel — Editorial Cinematic v2.
  *
- * Recibe del container:
- *   - factCheck: { claims: [...], summary: { total, high, medium, low } }
- *
- * Si no hay claims, no renderiza nada (null).
- *
- * Fase 7.1: render IDÉNTICO al legacy. Fase 7.2 → cf-card + chips mono.
+ * cf-card con eyebrow VERIFICACIÓN DE DATOS + 3 chips contadores
+ * (alta/media/baja) + lista de claims con border-left según confidence.
  */
 export default function FactCheckPanel({ factCheck }) {
   if (!factCheck?.claims || factCheck.claims.length === 0) return null;
@@ -19,12 +17,10 @@ export default function FactCheckPanel({ factCheck }) {
 
   return (
     <div
+      className="cf-card"
       style={{
-        marginBottom: "16px",
-        padding: "16px",
-        borderRadius: "10px",
-        background: "rgba(99, 102, 241, 0.06)",
-        border: "1px solid rgba(99, 102, 241, 0.3)",
+        marginBottom: "var(--s-4)",
+        padding: "var(--s-4) var(--s-5)",
       }}
     >
       <div
@@ -32,30 +28,40 @@ export default function FactCheckPanel({ factCheck }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          marginBottom: "10px",
+          marginBottom: 12,
+          gap: 12,
+          flexWrap: "wrap",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ fontSize: "20px" }}>📚</span>
-          <span
-            style={{ color: "#a5b4fc", fontWeight: "bold", fontSize: "14px" }}
-          >
-            Verificación de datos del guión
-          </span>
-        </div>
-        <div style={{ display: "flex", gap: "8px", fontSize: "12px" }}>
-          <span style={{ color: "#86efac" }}>● {summary.high} altas</span>
-          <span style={{ color: "#fde68a" }}>● {summary.medium} medias</span>
-          <span style={{ color: "#fca5a5" }}>● {summary.low} bajas</span>
-        </div>
-      </div>
-      {lowOrMedium.length > 0 ? (
-        <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Icon name="bookOpen" size={16} style={{ color: "var(--info)" }} />
           <div
             style={{
-              fontSize: "12px",
-              color: "var(--text-muted)",
-              marginBottom: "8px",
+              font: "var(--t-mono-sm)",
+              color: "var(--paper-mute)",
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+            }}
+          >
+            VERIFICACIÓN DE DATOS
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <span className="cf-badge cf-badge--ok">{summary.high} ALTAS</span>
+          <span className="cf-badge cf-badge--warn">
+            {summary.medium} MEDIAS
+          </span>
+          <span className="cf-badge cf-badge--bad">{summary.low} BAJAS</span>
+        </div>
+      </div>
+
+      {lowOrMedium.length > 0 ? (
+        <>
+          <div
+            style={{
+              font: "var(--t-caption)",
+              color: "var(--paper-dim)",
+              marginBottom: 10,
             }}
           >
             Datos que deberías revisar antes de publicar:
@@ -63,56 +69,92 @@ export default function FactCheckPanel({ factCheck }) {
           <ul
             style={{
               margin: 0,
-              padding: "0 0 0 16px",
-              fontSize: "13px",
-              lineHeight: 1.6,
-              color: "var(--text-secondary)",
+              padding: 0,
+              listStyle: "none",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
             }}
           >
-            {lowOrMedium.slice(0, 6).map((c, i) => (
-              <li key={i} style={{ marginBottom: "6px" }}>
-                <span
+            {lowOrMedium.slice(0, 6).map((c, i) => {
+              const isLow = (c.confidence || "").toLowerCase() === "baja";
+              const accentColor = isLow ? "var(--bad)" : "var(--warn)";
+              return (
+                <li
+                  key={i}
                   style={{
-                    color:
-                      (c.confidence || "").toLowerCase() === "media"
-                        ? "#fde68a"
-                        : "#fca5a5",
+                    paddingLeft: 12,
+                    borderLeft: `2px solid ${accentColor}`,
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    color: "var(--paper)",
                   }}
                 >
-                  [{(c.confidence || "?").toUpperCase()}]
-                </span>{" "}
-                <span>{c.claim}</span>
-                {c.verdict && (
                   <div
                     style={{
-                      fontSize: "11px",
-                      color: "var(--text-muted)",
-                      marginLeft: "8px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginBottom: 4,
                     }}
                   >
-                    {c.verdict}
+                    <span
+                      style={{
+                        font: "var(--t-mono-sm)",
+                        color: accentColor,
+                        letterSpacing: "0.16em",
+                        fontWeight: 600,
+                      }}
+                    >
+                      [{(c.confidence || "?").toUpperCase()}]
+                    </span>
                   </div>
-                )}
-                {c.source_url && (
-                  <a
-                    href={c.source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      fontSize: "11px",
-                      color: "#a5b4fc",
-                      marginLeft: "8px",
-                    }}
-                  >
-                    fuente ↗
-                  </a>
-                )}
-              </li>
-            ))}
+                  <div>{c.claim}</div>
+                  {c.verdict && (
+                    <div
+                      style={{
+                        font: "var(--t-caption)",
+                        color: "var(--paper-dim)",
+                        marginTop: 4,
+                      }}
+                    >
+                      {c.verdict}
+                    </div>
+                  )}
+                  {c.source_url && (
+                    <a
+                      href={c.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        font: "var(--t-mono-sm)",
+                        color: "var(--ember)",
+                        textDecoration: "none",
+                        marginTop: 4,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                      }}
+                    >
+                      FUENTE <Icon name="arrowRight" size={12} />
+                    </a>
+                  )}
+                </li>
+              );
+            })}
           </ul>
-        </div>
+        </>
       ) : (
-        <div style={{ fontSize: "13px", color: "#86efac" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            font: "var(--t-caption)",
+            color: "var(--ok)",
+          }}
+        >
+          <Icon name="check" size={14} />
           Todos los datos verificables tienen evidencia sólida.
         </div>
       )}

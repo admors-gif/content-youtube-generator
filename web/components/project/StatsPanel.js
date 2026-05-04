@@ -1,32 +1,41 @@
 "use client";
+
 /**
- * StatsPanel (presentacional).
+ * StatsPanel — Editorial Cinematic v2.
  *
- * Sidebar stats: palabras, minutos estimados, estado.
- *
- * Recibe del container:
- *   - wordCount, estimatedMinutes, approved (todos opcionales / safe defaults)
- *
- * Fase 7.1: render IDÉNTICO. Fase 7.2 → cf-card + eyebrow mono uppercase.
+ * cf-card sidebar con eyebrow ESTADÍSTICAS + tres rows mono.
  */
 export default function StatsPanel({
   wordCount = 0,
   estimatedMinutes = 0,
   approved = false,
 }) {
+  const rows = [
+    { label: "PALABRAS", value: wordCount.toLocaleString("es") },
+    {
+      label: "DURACIÓN ESTIMADA",
+      value: estimatedMinutes ? `${estimatedMinutes} min` : "—",
+    },
+    {
+      label: "ESTADO",
+      value: approved ? "APROBADO" : "BORRADOR",
+      accent: approved ? "var(--ok)" : "var(--warn)",
+    },
+  ];
+
   return (
-    <div className="glass-card" style={{ padding: "20px" }}>
-      <h4
+    <div className="cf-card" style={{ padding: "var(--s-5)" }}>
+      <div
         style={{
-          fontWeight: "bold",
-          margin: "0 0 16px 0",
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
+          font: "var(--t-mono-sm)",
+          color: "var(--paper-mute)",
+          letterSpacing: "0.18em",
+          textTransform: "uppercase",
+          marginBottom: 16,
         }}
       >
-        📊 Estadísticas
-      </h4>
+        ESTADÍSTICAS
+      </div>
       <ul
         style={{
           listStyle: "none",
@@ -34,51 +43,43 @@ export default function StatsPanel({
           margin: 0,
           display: "flex",
           flexDirection: "column",
-          gap: "12px",
-          fontSize: "14px",
+          gap: 12,
         }}
       >
-        <li
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            borderBottom: "1px solid var(--border)",
-            paddingBottom: "8px",
-          }}
-        >
-          <span style={{ color: "var(--text-secondary)" }}>Palabras:</span>
-          <span style={{ fontFamily: "monospace" }}>{wordCount}</span>
-        </li>
-        <li
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            borderBottom: "1px solid var(--border)",
-            paddingBottom: "8px",
-          }}
-        >
-          <span style={{ color: "var(--text-secondary)" }}>Minutos est:</span>
-          <span style={{ fontFamily: "monospace" }}>
-            {estimatedMinutes} min
-          </span>
-        </li>
-        <li
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            paddingBottom: "8px",
-          }}
-        >
-          <span style={{ color: "var(--text-secondary)" }}>Estado:</span>
-          <span
+        {rows.map((r, i) => (
+          <li
+            key={r.label}
             style={{
-              color: approved ? "#4ade80" : "#facc15",
-              fontWeight: "bold",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "baseline",
+              gap: 12,
+              borderBottom:
+                i < rows.length - 1 ? "1px solid var(--rule-1)" : "none",
+              paddingBottom: i < rows.length - 1 ? 10 : 0,
             }}
           >
-            {approved ? "Aprobado" : "Borrador"}
-          </span>
-        </li>
+            <span
+              style={{
+                font: "var(--t-mono-sm)",
+                color: "var(--paper-mute)",
+                letterSpacing: "0.12em",
+              }}
+            >
+              {r.label}
+            </span>
+            <span
+              style={{
+                font: "var(--t-mono)",
+                fontFamily: "var(--font-mono)",
+                color: r.accent || "var(--paper)",
+                fontWeight: 600,
+              }}
+            >
+              {r.value}
+            </span>
+          </li>
+        ))}
       </ul>
     </div>
   );
