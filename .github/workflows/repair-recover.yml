@@ -1,0 +1,42 @@
+name: Repair recovered project
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: "Firestore project id"
+        required: true
+
+concurrency:
+  group: repair-recover-${{ github.event.inputs.project_id }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    name: Run recover endpoint inside VPS
+    runs-on: [self-hosted, linux, vps, docker]
+    timeout-minutes: 35
+
+    steps:
+      - name: Call local API recover endpoint
+        run: |
+          set -euo pipefail
+          PID="${{ github.event.inputs.project_id }}"
+          docker exec content-factory python - "$PID" <<'PY'
+          import json
+          import sys
+          import urllib.request
+
+          project_id = sys.argv[1]
+          req = urllib.request.Request(
+              f"http://127.0.0.1:8000/recover-from-disk/{project_id}",
+              data=b"",
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=2000) as response:
+              body = response.read().decode("utf-8", errors="replace")
+              print(body)
+              parsed = json.loads(body)
+              if not parsed.get("ok"):
+                  raise SystemExit(f"recover failed: {body}")
+          PY
