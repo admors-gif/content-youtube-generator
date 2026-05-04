@@ -431,17 +431,45 @@ def assemble_final_video(scenes, project_dir, mode, luma_indices=None):
     print("   4.4 Merge final...")
     safe_title = project_dir.name
     final_video = project_dir / f"FINAL_{mode}_{safe_title}.mp4"
-    
-    mix_cmd = [
-        "ffmpeg", "-y",
-        "-i", str(master_visual),
-        "-i", str(master_audio),
-        "-c:v", "copy",
-        "-c:a", "aac", "-b:a", "192k",
-        "-shortest",
-        "-movflags", "+faststart",
-        str(final_video)
-    ]
+
+    # FIX B7 (2026-05-03): si el video es más corto que el audio, `-shortest`
+    # cortaba la narración 1-2s antes del final. Ahora detectamos el déficit
+    # y extendemos el video clonando el último frame (tpad) + 0.5s de aire
+    # para que la última palabra termine de pronunciarse antes del fade.
+    # Si video >= audio: stream copy directo (rápido, sin re-encode).
+    audio_deficit = master_audio_dur - master_visual_dur
+    needs_pad = audio_deficit > 0.05  # tolerance 50ms
+    pad_seconds = audio_deficit + 0.5  # extra 0.5s de respiración al final
+
+    if needs_pad:
+        print(f"   [PAD] Video {audio_deficit:.2f}s más corto que audio — extendiendo último frame +{pad_seconds:.2f}s")
+        mix_cmd = [
+            "ffmpeg", "-y",
+            "-i", str(master_visual),
+            "-i", str(master_audio),
+            "-filter_complex",
+            f"[0:v]tpad=stop_mode=clone:stop_duration={pad_seconds:.3f}[v]",
+            "-map", "[v]",
+            "-map", "1:a",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+            "-pix_fmt", "yuv420p", "-r", "30",
+            "-c:a", "aac", "-b:a", "192k",
+            "-shortest",  # ahora el shortest = audio (que termina antes del pad extra)
+            "-movflags", "+faststart",
+            str(final_video)
+        ]
+    else:
+        # Video con buffer suficiente: merge directo (rápido)
+        mix_cmd = [
+            "ffmpeg", "-y",
+            "-i", str(master_visual),
+            "-i", str(master_audio),
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k",
+            "-shortest",
+            "-movflags", "+faststart",
+            str(final_video)
+        ]
     
     result = subprocess.run(mix_cmd, capture_output=True, text=True, timeout=120)
     
