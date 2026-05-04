@@ -289,7 +289,7 @@ def generate_luma_clips(scenes, images_dir, luma_dir, max_luma=15):
 # ============================================================
 # PASO 4: ENSAMBLAR VIDEO FINAL (sync perfecto)
 # ============================================================
-def assemble_final_video(scenes, project_dir, mode, luma_indices=None):
+def assemble_final_video(scenes, project_dir, mode, luma_indices=None, format_label=None):
     """
     Ensamblaje con sync perfecto:
     1. Crear master audio (concatenar todas las narraciones)
@@ -430,7 +430,8 @@ def assemble_final_video(scenes, project_dir, mode, luma_indices=None):
     # ── STEP 4: Merge final (video + audio) ──
     print("   4.4 Merge final...")
     safe_title = project_dir.name
-    final_video = project_dir / f"FINAL_{mode}_{safe_title}.mp4"
+    label = format_label or mode
+    final_video = project_dir / f"FINAL_{label}_{safe_title}.mp4"
 
     # FIX B7 (2026-05-03): si el video es más corto que el audio, `-shortest`
     # cortaba la narración 1-2s antes del final. Ahora detectamos el déficit
@@ -556,7 +557,10 @@ if __name__ == "__main__":
     if data.get("format") == "podcast" and mode == "cinematico":
         print("⚠️  Format=podcast detectado — overrideando mode 'cinematico' a 'narrativa' (Luma no aplica)")
         mode = "narrativa"
-    
+
+    # Label visible en filename: refleja el formato real, no el modo interno del pipeline.
+    format_label = "podcast" if data.get("format") == "podcast" else mode
+
     # Determinar título y agente
     # Usar topic para nombre de carpeta (consistente con VPS)
     raw_title = data.get("topic", "video_sin_titulo")
@@ -650,7 +654,7 @@ if __name__ == "__main__":
     # ════════════════════════════════════════════════════════
     final_video = None
     if not skip_assembly:
-        final_video = assemble_final_video(scenes, project_dir, mode, luma_indices)
+        final_video = assemble_final_video(scenes, project_dir, mode, luma_indices, format_label=format_label)
     
     # ════════════════════════════════════════════════════════
     # PASO 5: SUBTÍTULOS (Whisper + ASS + FFmpeg)

@@ -21,20 +21,21 @@ import Icon from "@/components/Icon";
 const PHASE_DEFS = [
   { id: "research", label: "Investigación" },
   { id: "script",   label: "Guión" },
-  { id: "voice",    label: "Voz · ElevenLabs" },
   { id: "images",   label: "Imágenes" },
+  { id: "voice",    label: "Voz" },
   { id: "assembly", label: "Montaje" },
+  { id: "delivery", label: "Entrega" },
 ];
 
 /**
  * Mapea status legacy del backend a phases visuales.
  *
  * Backend statuses (pipeline):
- *   draft → scripting → script_ready → producing → prompting → imaging
- *   → voicing → assembling → completed
+ *   draft → researching → scripting → script_ready → imaging
+ *   → voicing → assembling → publishing → completed
  *
- * Visual phases (5):
- *   Investigación + Guión + Voz + Imágenes + Montaje
+ * Visual phases (6):
+ *   Investigación + Guión + Imágenes + Voz + Montaje + Entrega
  *
  * Convención: una phase está "ok" si ya pasamos por ella, "current" si es
  * la que está corriendo ahora, "pending" si aún no llegamos.
@@ -47,14 +48,16 @@ function getPhasesFromStatus(status, scenes) {
   let states = {
     research: "pending",
     script:   "pending",
-    voice:    "pending",
     images:   "pending",
+    voice:    "pending",
     assembly: "pending",
+    delivery: "pending",
   };
   let imagesSub = totalScenes ? `${withImg}/${totalScenes}` : null;
 
   switch (status) {
     case "draft":
+    case "researching":
       states.research = "current";
       break;
     case "scripting":
@@ -67,35 +70,42 @@ function getPhasesFromStatus(status, scenes) {
       break;
     case "producing":
     case "prompting":
+    case "imaging":
       states.research = "ok";
       states.script = "ok";
-      states.voice = "current";
+      states.images = "current";
       break;
     case "voicing":
       states.research = "ok";
       states.script = "ok";
+      states.images = "ok";
       states.voice = "current";
       break;
-    case "imaging":
-      states.research = "ok";
-      states.script = "ok";
-      states.voice = "ok";
-      states.images = "current";
-      break;
     case "assembling":
+    case "rendering":
+    case "subtitling":
       states.research = "ok";
       states.script = "ok";
-      states.voice = "ok";
       states.images = "ok";
+      states.voice = "ok";
       states.assembly = "current";
+      break;
+    case "publishing":
+      states.research = "ok";
+      states.script = "ok";
+      states.images = "ok";
+      states.voice = "ok";
+      states.assembly = "ok";
+      states.delivery = "current";
       break;
     case "completed":
       states = {
         research: "ok",
         script: "ok",
-        voice: "ok",
         images: "ok",
+        voice: "ok",
         assembly: "ok",
+        delivery: "ok",
       };
       imagesSub = totalScenes ? `${totalScenes}/${totalScenes}` : null;
       break;
@@ -110,6 +120,23 @@ function getPhasesFromStatus(status, scenes) {
   }));
 }
 
+function sanitizeStepName(stepName = "") {
+  return stepName
+    .replace(/Subiendo\s+a\s+Storage/gi, "Preparando entrega")
+    .replace(/\bcon\s+FLUX\b/gi, "")
+    .replace(/\bFLUX\b/gi, "visuales")
+    .replace(/\bcon\s+ElevenLabs\b|\bcon\s+Eleven Labs\b/gi, "")
+    .replace(/\bElevenLabs\b|\bEleven Labs\b/gi, "voz")
+    .replace(/\bClaude(?:\s+(?:Opus|Sonnet|3\.5))?\b/gi, "el estudio")
+    .replace(/\bGPT[-\w.]*\b|\bOpenAI\b/gi, "el estudio")
+    .replace(/\bLuma(?:\s+AI)?\b/gi, "movimiento")
+    .replace(/\bWhisper\b/gi, "subtítulos")
+    .replace(/\bTavily\b|\bComfyUI?\b|\bFirebase\b|\bStorage\b|\bVPS\b|\bn8n\b|\bAPI\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+\.\.\./g, "...")
+    .trim();
+}
+
 export default function ProgressPanel({
   displayPercent,
   stepName,
@@ -118,7 +145,8 @@ export default function ProgressPanel({
   scenes,
 }) {
   const phases = getPhasesFromStatus(status, scenes);
-  const pct = Math.round(displayPercent);
+  const pct = Math.max(0, Math.min(100, Math.round(displayPercent || 0)));
+  const safeStepName = sanitizeStepName(stepName);
 
   return (
     <div className="cf-card" style={{ padding: "var(--s-5)" }}>
@@ -167,7 +195,7 @@ export default function ProgressPanel({
               </span>
             )}
           </div>
-          {stepName && (
+          {safeStepName && (
             <div
               style={{
                 font: "var(--t-caption)",
@@ -175,7 +203,7 @@ export default function ProgressPanel({
                 marginTop: 4,
               }}
             >
-              {stepName}
+              {safeStepName}
             </div>
           )}
         </div>

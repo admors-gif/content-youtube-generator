@@ -155,7 +155,7 @@ def research_topic(topic: str, project_id: str = None) -> str:
     
     print(f"\n🔍 MOTOR 0: Investigando '{topic}' en la web...")
     if project_id:
-        update_progress(project_id, "🔍 Investigando tema en la web...", 3)
+        update_progress(project_id, "🔍 Investigando el tema...", 3, {"status": "researching"})
     
     try:
         # Búsqueda principal
@@ -188,7 +188,7 @@ def research_topic(topic: str, project_id: str = None) -> str:
         print(f"   ✅ Investigación completada: {source_count} fuentes, {word_count} palabras")
         
         if project_id:
-            update_progress(project_id, f"🔍 {source_count} fuentes encontradas", 5)
+            update_progress(project_id, f"🔍 {source_count} fuentes seleccionadas", 5, {"status": "researching"})
         
         return research_text
         
@@ -697,6 +697,37 @@ PODCAST_SPEAKER_NAMES = {
     "HOST_B": "B",
 }
 
+PODCAST_TARGET_VISUAL_SCENES = 12
+PODCAST_MAX_VISUAL_SCENES = 15
+
+PODCAST_VISUAL_TEMPLATES = [
+    (
+        "Object macro",
+        "Editorial macro photography of a symbolic object related to {topic}, warm amber studio light, shallow depth of field, minimalist composition, no text, magazine cover quality, photorealistic, 4k",
+        ["object", "warm", "editorial"],
+    ),
+    (
+        "Atmospheric place",
+        "Empty contemporary studio corner suggesting a deep conversation about {topic}, warm practical lamps, deep teal shadows, calm cinematic atmosphere, no people facing camera, editorial style, 8k",
+        ["studio", "atmosphere", "conversation"],
+    ),
+    (
+        "Conceptual abstract",
+        "Abstract visualization of emotional patterns connected to {topic}, flowing amber and deep teal particles, organic data shapes, clean dark background, conceptual editorial style, cinematic, 8k",
+        ["abstract", "emotion", "data"],
+    ),
+    (
+        "Human detail anonymous",
+        "Anonymous human hands near a microphone and notebook, warm window light, intimate podcast mood, face not visible, thoughtful editorial photography about {topic}, magazine quality, 4k",
+        ["human", "podcast", "intimate"],
+    ),
+    (
+        "Symbolic still life",
+        "Symbolic still life for {topic}: ceramic cup, open notebook, soft shadows, amber highlights, deep teal background, minimalist editorial composition, no readable text, photorealistic, 4k",
+        ["still-life", "symbolic", "warm"],
+    ),
+]
+
 
 def _parse_podcast_script(text: str) -> list:
     """
@@ -741,7 +772,40 @@ def _parse_podcast_script(text: str) -> list:
     return blocks
 
 
-def _group_blocks_into_scenes(blocks: list, words_per_scene: int = 35) -> list:
+def _merge_scene_range(scene_range: list, scene_number: int) -> dict:
+    """Une varias escenas podcast en una sola manteniendo dialogue_blocks."""
+    blocks = []
+    for scene in scene_range:
+        blocks.extend(scene.get("dialogue_blocks") or [])
+    return {
+        "scene_number": scene_number,
+        "narration_text": "\n".join(f"{b['name']}: {b['text']}" for b in blocks),
+        "narration": " ".join(b["text"] for b in blocks),
+        "dialogue_blocks": blocks,
+    }
+
+
+def _cap_podcast_scenes(scenes: list, max_scene_count: int) -> list:
+    """Reduce escenas agrupando rangos contiguos para no disparar FLUX/TTS/KB."""
+    if not max_scene_count or len(scenes) <= max_scene_count:
+        return scenes
+
+    capped = []
+    total = len(scenes)
+    for i in range(max_scene_count):
+        start = round(i * total / max_scene_count)
+        end = round((i + 1) * total / max_scene_count)
+        chunk = scenes[start:end] or scenes[start:start + 1]
+        capped.append(_merge_scene_range(chunk, i + 1))
+    return capped
+
+
+def _group_blocks_into_scenes(
+    blocks: list,
+    words_per_scene: int = 35,
+    target_scene_count: int = None,
+    max_scene_count: int = None,
+) -> list:
     """
     Agrupa los dialogue_blocks en 'escenas' visuales para que cada escena
     cubra ~12-18 segundos de audio (≈ 35 palabras a ~3 wps).
@@ -761,6 +825,12 @@ def _group_blocks_into_scenes(blocks: list, words_per_scene: int = 35) -> list:
         }
       ]
     """
+    if target_scene_count and blocks:
+        total_words = sum(len((blk.get("text") or "").split()) for blk in blocks)
+        # Podcast video no necesita una imagen cada 12s. Apuntamos a escenas
+        # macro de 1-2 minutos para evitar 100+ generaciones de FLUX.
+        words_per_scene = max(90, min(220, (total_words + target_scene_count - 1) // target_scene_count))
+
     scenes = []
     current_blocks = []
     current_word_count = 0
@@ -792,7 +862,50 @@ def _group_blocks_into_scenes(blocks: list, words_per_scene: int = 35) -> list:
             "dialogue_blocks": current_blocks,
         })
 
-    return scenes
+    return _cap_podcast_scenes(scenes, max_scene_count)
+
+
+def _topic_tags(topic: str) -> list:
+    words = [
+        w.lower()
+        for w in _re.findall(r"[A-Za-zÁÉÍÓÚáéíóúÑñ0-9]{4,}", topic or "")
+        if w.lower() not in {"para", "porque", "sobre", "como", "este", "esta", "tus"}
+    ]
+    tags = []
+    for word in words:
+        clean = (
+            word.replace("á", "a").replace("é", "e").replace("í", "i")
+            .replace("ó", "o").replace("ú", "u").replace("ñ", "n")
+        )
+        if clean not in tags:
+            tags.append(clean)
+    return tags[:2]
+
+
+def _build_podcast_visual_scenes(topic: str, grouped_scenes: list) -> list:
+    """
+    Construye escenas visuales podcast de forma determinística y acotada.
+    El objetivo es evitar que el generador documental produzca 100+ escenas.
+    """
+    topic_clean = (topic or "the episode theme").strip()
+    topic_tags = _topic_tags(topic)
+    visual_scenes = []
+
+    for i, scene in enumerate(grouped_scenes):
+        category, template, base_tags = PODCAST_VISUAL_TEMPLATES[i % len(PODCAST_VISUAL_TEMPLATES)]
+        prompt = template.format(topic=topic_clean)
+        tags = (base_tags + topic_tags)[:5]
+        visual_scenes.append({
+            "scene_number": i + 1,
+            "narration_text": scene.get("narration_text", ""),
+            "narration": scene.get("narration", ""),
+            "dialogue_blocks": scene.get("dialogue_blocks", []),
+            "prompt": prompt,
+            "tags": tags,
+            "visual_category": category,
+        })
+
+    return visual_scenes
 
 
 def generate_podcast_script(topic: str, agent_file: str = "agent_podcast_general.md", project_id: str = None) -> dict:
@@ -903,7 +1016,7 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
 
     # Validar que al menos un motor de IA esté disponible
     if not claude_client and not openai_client:
-        error_msg = "No hay motor de IA disponible. Configura ANTHROPIC_API_KEY o OPENAI_API_KEY."
+        error_msg = "El estudio no tiene motores creativos configurados."
         print(f"❌ FATAL: {error_msg}")
         update_progress(project_id, f"Error: {error_msg}", 0, {"status": "error"})
         return None
@@ -915,7 +1028,7 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
         print("🎙️  Modo PODCAST detectado — pipeline conversacional con 2 voces")
 
     try:
-        update_progress(project_id, "Iniciando generación de guión narrativo (Claude 3.5)...", 10)
+        update_progress(project_id, "Escribiendo la estructura narrativa...", 10, {"status": "scripting"})
 
         # PASO 1: Generar guión (podcast usa generador especializado)
         if is_podcast:
@@ -924,7 +1037,7 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
             result = generate_script(topic, agent_file)
         script = result["script"]
 
-        update_progress(project_id, "Agregando etiquetas de emoción y director...", 35)
+        update_progress(project_id, "Afinando ritmo, emoción y voz...", 35, {"status": "scripting"})
 
         # PASO 2: Agregar etiquetas de emoción (tagger especializado para podcast
         # respeta densidades por speaker)
@@ -937,15 +1050,23 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
         podcast_scenes_grouped = None
         if is_podcast:
             podcast_blocks = _parse_podcast_script(tagged_script)
-            podcast_scenes_grouped = _group_blocks_into_scenes(podcast_blocks, words_per_scene=35)
+            podcast_scenes_grouped = _group_blocks_into_scenes(
+                podcast_blocks,
+                target_scene_count=PODCAST_TARGET_VISUAL_SCENES,
+                max_scene_count=PODCAST_MAX_VISUAL_SCENES,
+            )
             print(f"   🎭 Podcast parseado: {len(podcast_blocks)} bloques de diálogo → "
                   f"{len(podcast_scenes_grouped)} escenas visuales")
 
-        update_progress(project_id, "Creando escenas y prompts visuales (Claude Opus)...", 60)
+        update_progress(project_id, "Diseñando escenas visuales...", 60, {"status": "prompting"})
 
         # PASO 3: Generar prompts de video (estética podcast vs documental)
-        video_prompt_file = "video_prompt_generator_podcast.md" if is_podcast else "video_prompt_generator.md"
-        video_scenes = generate_video_prompts(script, prompt_file=video_prompt_file)
+        if is_podcast:
+            video_scenes = _build_podcast_visual_scenes(topic, podcast_scenes_grouped)
+            print(f"   🎬 Podcast visual: {len(video_scenes)} escenas macro "
+                  f"(target={PODCAST_TARGET_VISUAL_SCENES}, max={PODCAST_MAX_VISUAL_SCENES})")
+        else:
+            video_scenes = generate_video_prompts(script, prompt_file="video_prompt_generator.md")
 
         # Para podcast: enriquecer las escenas generadas con los dialogue_blocks
         # del parsing previo, alineando por scene_number cuando es posible.
@@ -962,7 +1083,7 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
                     if not scene.get("narration_text"):
                         scene["narration_text"] = grouped["narration_text"]
 
-        update_progress(project_id, "Optimizando metadata SEO para YouTube...", 85)
+        update_progress(project_id, "Preparando título, descripción y empaque...", 85, {"status": "prompting"})
 
         # PASO 4: Generar SEO metadata (mismo para ambos formatos)
         seo = generate_seo_metadata(topic, script[:500])
@@ -988,8 +1109,8 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
         if is_podcast:
             full_result["podcast"] = {
                 "show_name": "Este no es otro podcast más",
-                "host_a": {"name": "Mateo", "voice": "Salvatore"},
-                "host_b": {"name": "Lucía", "voice": "Serafina"},
+                "host_a": {"name": "Mateo", "voice": "Will"},
+                "host_b": {"name": "Lucía", "voice": "Lina"},
                 "total_blocks": len(podcast_blocks),
             }
 
@@ -1016,7 +1137,7 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
                 if is_podcast:
                     firestore_payload["format"] = "podcast"
                     firestore_payload["podcast"] = full_result["podcast"]
-                update_progress(project_id, "¡Generación completada!", 100, firestore_payload)
+                update_progress(project_id, "Guion listo para revisión", 100, firestore_payload)
                 print(f"✅ Firebase actualizado para proyecto {project_id}")
             except Exception as e:
                 print(f"⚠️ Fallo al guardar en Firebase: {e}")
@@ -1041,7 +1162,7 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
         import traceback
         traceback.print_exc()
         # Reportar el error a Firebase para que la UI muestre el fallo
-        update_progress(project_id, f"Error: {str(e)[:150]}", 0, {"status": "error"})
+        update_progress(project_id, "Error: el estudio creativo se detuvo", 0, {"status": "error"})
         return None
 
 

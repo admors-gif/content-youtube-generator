@@ -282,7 +282,7 @@ export default function NewProjectPage() {
         progress: {
           currentStep: 0,
           totalSteps: 6,
-          stepName: "Iniciando generación en la nube...",
+          stepName: "Preparando tu proyecto...",
           percent: 5,
         },
         script: {

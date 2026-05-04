@@ -33,7 +33,15 @@ export default function ScriptTab({
   onApprove,
 }) {
   const hasScript = !!project.script?.plain;
-  const isProducing = project.status === "producing";
+  const isProducing = [
+    "producing",
+    "imaging",
+    "voicing",
+    "assembling",
+    "rendering",
+    "subtitling",
+    "publishing",
+  ].includes(project.status);
   const isApproved =
     project.script?.approved && project.status !== "script_ready";
   const wordCount = project.script?.wordCount || 0;

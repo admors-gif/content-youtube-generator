@@ -242,7 +242,7 @@ def _run_factory_subprocess(args, monitor_thread, stop_event, timeout=7200, log_
 # duplicado de jobs costosos para el mismo project_id (doble click rápido,
 # race UI, retry browser). El lock expira tras LOCK_MAX_AGE_SEC para no
 # bloquear retries legítimos cuando un job realmente murió sin limpiar.
-PRODUCTION_LOCK_MAX_AGE_SEC = 300  # 5 minutos
+PRODUCTION_LOCK_MAX_AGE_SEC = int(os.environ.get("PRODUCTION_LOCK_MAX_AGE_SEC", "14400"))  # 4 horas
 
 
 def _try_acquire_production_lock(project_id: str) -> dict:
@@ -615,6 +615,48 @@ def _is_valid_media_file(path: Path, min_duration_seconds: float = 1.0) -> tuple
         return False, 0.0, str(e)[:300]
 
 
+def _pick_valid_final_video(
+    video_dir: Path,
+    prefer_subtitles: bool = True,
+    min_duration_seconds: float = 30.0,
+) -> tuple[Path | None, bool, list[dict]]:
+    """
+    Elige el FINAL_*.mp4 mas reciente y reproducible.
+
+    El bug del podcast corrupto nacio de tomar `glob()[0]`: un archivo MP4 puede
+    tener bytes y aun asi no tener moov atom. Esta funcion fuerza ffprobe antes
+    de que descarga, shorts o upload usen el archivo.
+    """
+    if not video_dir.is_dir():
+        return None, False, [{"error": f"folder {video_dir} not found"}]
+
+    subtitled = sorted(video_dir.glob("FINAL_SUB_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+    regular = sorted(
+        [p for p in video_dir.glob("FINAL_*.mp4") if "FINAL_SUB_" not in p.name],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    candidates = (subtitled + regular) if prefer_subtitles else (regular + subtitled)
+
+    invalid = []
+    seen = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        ok, duration, err = _is_valid_media_file(candidate, min_duration_seconds=min_duration_seconds)
+        if ok:
+            return candidate, "FINAL_SUB_" in candidate.name, invalid
+        invalid.append({
+            "name": candidate.name,
+            "size_mb": round(candidate.stat().st_size / (1024 * 1024), 1) if candidate.exists() else 0,
+            "duration": round(duration, 3),
+            "error": err,
+        })
+
+    return None, False, invalid
+
+
 def _remux_recovered_final(video_dir: Path, safe_title: str) -> tuple[Path | None, dict]:
     """
     Repara un proyecto que tiene master_visual/master_audio validos pero FINAL corrupto.
@@ -742,15 +784,13 @@ def build_shorts_for_project(video_dir: Path, project_id: str) -> list:
     Retorna lista de dicts: [{"index": 1, "start": 0, "end": 60,
                               "gs_path": "...", "signed_url": "..."}]
     """
-    # Encontrar el video final preferido (con subs si existe)
-    final_videos = list(video_dir.glob("FINAL_SUB_*.mp4"))
-    if not final_videos:
-        final_videos = [v for v in video_dir.glob("FINAL_*.mp4") if "FINAL_SUB_" not in v.name]
-    if not final_videos:
+    src, _has_subs, invalid_candidates = _pick_valid_final_video(video_dir)
+    if not src:
         print(f"   ⚠️ No se encontró FINAL video en {video_dir} para generar shorts")
+        if invalid_candidates:
+            print(f"   ⚠️ FINAL inválidos: {invalid_candidates[:3]}")
         return []
 
-    src = final_videos[0]
     duration = _video_duration_seconds(src)
     if duration < 90:
         print(f"   ⚠️ Video {duration:.0f}s muy corto para 3 shorts; salteando")
@@ -1483,16 +1523,16 @@ def download_all(project_id: str):
 def download_video(project: str):
     """Descarga el video final ensamblado."""
     video_dir = Path(f"/app/output/videos/{project}")
-    # Buscar el archivo FINAL_*.mp4
-    finals = list(video_dir.glob("FINAL_*.mp4"))
-    video_file = finals[0] if finals else None
-    if not video_file:
-        # Buscar cualquier .mp4 que no sea de kenburns
-        all_mp4 = [f for f in video_dir.glob("*.mp4") if "kenburns" not in str(f)]
-        video_file = all_mp4[0] if all_mp4 else None
+    video_file, _has_subs, invalid_candidates = _pick_valid_final_video(video_dir, min_duration_seconds=1)
     if not video_file:
         from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=404, content={"error": f"Video not found in {video_dir}"})
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": f"Valid final video not found in {video_dir}",
+                "invalid_candidates": invalid_candidates[:5],
+            },
+        )
     
     file_size = video_file.stat().st_size
     safe_name = video_file.name.encode('ascii', 'ignore').decode('ascii') or "video.mp4"
@@ -1817,7 +1857,7 @@ async def retry_production(request: Request, background_tasks: BackgroundTasks):
         doc_ref.update({
             "status": "producing",
             "progress.percent": 5,
-            "progress.stepName": "Retrying production...",
+            "progress.stepName": "Reiniciando producción...",
         })
 
         # Encolar via Celery (mismo patron que /produce)
@@ -2103,6 +2143,9 @@ def run_production(project_id):
             if current_status == "completed" and status != "completed":
                 # Drop silencioso: no spammear logs por cada tick del monitor zombie
                 return
+            current_percent = (current.get("progress") or {}).get("percent") or 0
+            if status != "error" and current_status != "script_ready" and percent < current_percent:
+                return
         except Exception:
             pass  # Si la lectura falla, dejar pasar la escritura (defensivo)
 
@@ -2198,7 +2241,7 @@ def run_production(project_id):
         images_dir.mkdir(parents=True, exist_ok=True)
         
         # ═══════════════════════════════════════════
-        # PASO 1: Generar Imágenes con FLUX (5% → 40%)
+        # PASO 1: Generar visuales base (5% → 35%)
         # ═══════════════════════════════════════════
         
         # Detectar imágenes existentes para evitar regenerar
@@ -2206,10 +2249,10 @@ def run_production(project_id):
         existing_count = len([f for f in existing_images if f.stat().st_size > 1000])
         
         if existing_count >= len(scenes):
-            print(f"   ✅ {existing_count}/{len(scenes)} imágenes ya existen — saltando FLUX")
-            update_progress(40, f"✅ {existing_count} imágenes ya existentes (reutilizadas)")
+            print(f"   ✅ {existing_count}/{len(scenes)} imágenes ya existen — reutilizando")
+            update_progress(35, f"✅ {existing_count} visuales preparados", "imaging")
         else:
-            update_progress(5, f"Generando {len(scenes)} imágenes con FLUX... ({existing_count} existentes)")
+            update_progress(5, f"Creando {len(scenes)} visuales... ({existing_count} preparados)", "imaging")
             
             # Monitorear progreso de imágenes
             stop_monitoring = threading.Event()
@@ -2233,8 +2276,8 @@ def run_production(project_id):
                                         s["imageUrl"] = image_url
                                         break
                                 doc_ref.update({"scenes": updated_scenes})
-                                pct = 5 + int((len(reported) / len(scenes)) * 35)
-                                update_progress(pct, f"🎨 Imagen {len(reported)}/{len(scenes)} generada")
+                                pct = 5 + int((len(reported) / len(scenes)) * 30)
+                                update_progress(pct, f"🎨 Visual {len(reported)}/{len(scenes)} listo", "imaging")
                             except Exception as e:
                                 print(f"   ⚠️ Monitor error: {e}")
             
@@ -2253,16 +2296,16 @@ def run_production(project_id):
             )
 
             if returncode != 0:
-                update_progress(0, f"Error generando imágenes", "error")
+                update_progress(0, f"Error creando visuales", "error")
                 print(f"STDERR: {stderr_tail}")
                 return
 
-            update_progress(40, "✅ Imágenes FLUX listas")
+            update_progress(35, "✅ Visuales base listos", "imaging")
         
         # ═══════════════════════════════════════════
-        # PASO 2-4: Narración + Luma + Ken Burns + Ensamblaje (40% → 100%)
+        # PASO 2-4: Voz + movimiento + montaje (35% → 94%)
         # ═══════════════════════════════════════════
-        update_progress(45, "🎙️ Generando narración con ElevenLabs...")
+        update_progress(42, "🎙️ Grabando voces...", "voicing")
         
         # Ejecutar factory.py completo (skip-images ya que las tenemos)
         # Monitorear progreso por pasos
@@ -2271,26 +2314,39 @@ def run_production(project_id):
             audio_dir = Path(f"/app/output/videos/{safe_title}/audio")
             kb_dir = Path(f"/app/output/videos/{safe_title}/kenburns")
             luma_dir = Path(f"/app/output/videos/{safe_title}/luma_clips")
+            master_audio = Path(f"/app/output/videos/{safe_title}/master_audio.mp3")
+            master_visual = Path(f"/app/output/videos/{safe_title}/master_visual.mp4")
             
             while not stop_monitoring.is_set():
                 time.sleep(5)
                 try:
-                    # Audio progress (45% → 65%)
+                    # Audio progress (42% → 60%)
                     audio_count = len(list(audio_dir.glob("narration_*.mp3"))) if audio_dir.exists() else 0
                     if audio_count > 0 and audio_count < len(scenes):
-                        pct = 45 + int((audio_count / len(scenes)) * 20)
-                        update_progress(pct, f"🎙️ Narración {audio_count}/{len(scenes)}")
+                        pct = 42 + int((audio_count / len(scenes)) * 18)
+                        update_progress(pct, f"🎙️ Voz {audio_count}/{len(scenes)}", "voicing")
                     elif audio_count >= len(scenes):
-                        # Ken Burns progress (65% → 85%)
+                        update_progress(60, "🎙️ Voz completa", "voicing")
+                        # Motion/visual render progress (60% → 80%)
                         kb_count = len(list(kb_dir.glob("scene_*.mp4"))) if kb_dir.exists() else 0
                         if kb_count > 0 and kb_count < len(scenes):
-                            pct = 65 + int((kb_count / len(scenes)) * 15)
-                            update_progress(pct, f"🎬 Ken Burns {kb_count}/{len(scenes)}")
+                            pct = 60 + int((kb_count / len(scenes)) * 18)
+                            update_progress(pct, f"🎬 Movimiento {kb_count}/{len(scenes)}", "assembling")
                         elif kb_count >= len(scenes):
-                            # Luma progress (80% → 90%)
+                            update_progress(80, "🎬 Montando la película final", "assembling")
                             luma_count = len(list(luma_dir.glob("luma_*.mp4"))) if luma_dir.exists() else 0
                             if luma_count > 0:
-                                update_progress(85, f"🎥 Luma clips: {luma_count}")
+                                update_progress(82, f"🎥 Movimiento premium: {luma_count}", "assembling")
+                    if master_audio.exists() and master_audio.stat().st_size > 0:
+                        update_progress(62, "🎙️ Mezcla de audio lista", "assembling")
+                    if master_visual.exists() and master_visual.stat().st_size > 0:
+                        update_progress(86, "🎞️ Render maestro en curso", "assembling")
+                    valid_final, _has_subs, _invalid = _pick_valid_final_video(
+                        Path(f"/app/output/videos/{safe_title}"),
+                        min_duration_seconds=30,
+                    )
+                    if valid_final:
+                        update_progress(90, "🎞️ Película final ensamblada", "assembling")
                 except:
                     pass
         
@@ -2313,7 +2369,7 @@ def run_production(project_id):
         )
 
         if returncode != 0:
-            update_progress(40, f"Error en pipeline cinemático", "error")
+            update_progress(35, f"Error durante el montaje final", "error")
             print(f"STDERR: {stderr_tail}")
             return
         
@@ -2321,15 +2377,13 @@ def run_production(project_id):
         # PASO EXTRA: Subtítulos explícitos (fallback)
         # ═══════════════════════════════════════════
         video_dir = Path(f"/app/output/videos/{safe_title}")
-        sub_videos = list(video_dir.glob("FINAL_SUB_*.mp4"))
+        final_candidate, candidate_has_subs, invalid_candidates = _pick_valid_final_video(video_dir)
         
-        if not sub_videos:
+        if not candidate_has_subs:
             # factory.py no generó subtítulos — intentar directamente
-            update_progress(92, "📝 Generando subtítulos...")
-            regular_videos = list(video_dir.glob("FINAL_*.mp4"))
-            regular_videos = [v for v in regular_videos if "FINAL_SUB_" not in v.name]
+            update_progress(92, "📝 Generando subtítulos...", "assembling")
             
-            if regular_videos:
+            if final_candidate:
                 try:
                     sys.path.insert(0, "/app/scripts")
                     from generate_subtitles import add_subtitles_to_video
@@ -2343,11 +2397,12 @@ def run_production(project_id):
                     else:
                         print(f"   🎤 Audio maestro listo ({master_audio.stat().st_size // 1024} KB) → Whisper")
                         subtitled = add_subtitles_to_video(
-                            video_path=regular_videos[0],
+                            video_path=final_candidate,
                             audio_path=master_audio,
                         )
                         if subtitled:
-                            sub_videos = [subtitled]
+                            final_candidate = subtitled
+                            candidate_has_subs = True
                             print(f"   ✅ Subtítulos generados: {subtitled.name}")
                         else:
                             print("   ⚠️ Subtítulos fallaron — continuando sin subs")
@@ -2357,25 +2412,33 @@ def run_production(project_id):
         # ═══════════════════════════════════════════
         # COMPLETADO
         # ═══════════════════════════════════════════
-        # Refrescar listas después del paso de subtítulos
-        sub_videos = list(video_dir.glob("FINAL_SUB_*.mp4"))
-        regular_videos = list(video_dir.glob("FINAL_*.mp4"))
-        regular_videos = [v for v in regular_videos if "FINAL_SUB_" not in v.name]
-        
-        if sub_videos:
-            final_path = str(sub_videos[0])
-            has_subs = True
-        elif regular_videos:
-            final_path = str(regular_videos[0])
-            has_subs = False
+        # Refrescar selección después del paso de subtítulos y validar con ffprobe
+        final_candidate, candidate_has_subs, invalid_candidates = _pick_valid_final_video(video_dir)
+        if not final_candidate:
+            print("   🔧 FINAL inválido o ausente; intentando remux automático desde masters", flush=True)
+            remuxed, recovery_info = _remux_recovered_final(video_dir, safe_title)
+            if remuxed:
+                final_candidate = remuxed
+                candidate_has_subs = False
+                print(f"   ✅ Remux automático listo: {remuxed.name} ({recovery_info})", flush=True)
+
+        if final_candidate:
+            final_path = str(final_candidate)
+            has_subs = candidate_has_subs
         else:
+            if invalid_candidates:
+                print(f"   ⚠️ No hay FINAL válido. Candidatos inválidos: {invalid_candidates[:5]}", flush=True)
             final_path = ""
             has_subs = False
+
+        if not final_path:
+            update_progress(0, "Error: no se pudo validar el video final", "error")
+            return
         
         # Subir video final a Firebase Storage para entrega via CDN (sin pegar al VPS)
         storage_info = None
         if final_path:
-            update_progress(96, "☁️ Subiendo a Storage...")
+            update_progress(96, "☁️ Preparando entrega...", "publishing")
             storage_info = _upload_video_to_storage(Path(final_path), project_id)
 
         # Generar shorts vertical 9:16 (3 momentos del video final)
@@ -2383,7 +2446,7 @@ def run_production(project_id):
         shorts_results = []
         if final_path and storage_info:
             try:
-                update_progress(97, "✂️ Generando shorts...")
+                update_progress(97, "✂️ Creando versiones cortas...", "publishing")
                 shorts_results = build_shorts_for_project(video_dir, project_id)
                 print(f"   📱 Shorts generados: {len(shorts_results)}/3", flush=True)
             except Exception as shorts_err:
@@ -2398,7 +2461,7 @@ def run_production(project_id):
         thumbnails_results = []
         if storage_info:
             try:
-                update_progress(99, "🖼️ Generando thumbnails...")
+                update_progress(99, "🖼️ Diseñando miniaturas...", "publishing")
                 project_title = project.get("title", "")
                 thumbnails_results = build_thumbnails_for_project(video_dir, project_id, project_title)
                 print(f"   🖼️ Thumbnails generados: {len(thumbnails_results)}/3", flush=True)
@@ -2410,7 +2473,7 @@ def run_production(project_id):
                 except Exception:
                     pass
 
-        status_msg = "🏆 ¡Video cinemático finalizado!" if not has_subs else "🏆 ¡Video cinemático con subtítulos finalizado!"
+        status_msg = "🏆 Tu video está listo" if not has_subs else "🏆 Tu video con subtítulos está listo"
 
         update_payload = {
             "status": "completed",
@@ -2424,6 +2487,8 @@ def run_production(project_id):
             update_payload["videoStoragePath"] = storage_info["gs_path"]
             update_payload["videoUrl"] = storage_info["signed_url"]
             update_payload["videoUrlExpiresAt"] = firestore.SERVER_TIMESTAMP
+            update_payload["videoSizeMB"] = round(Path(final_path).stat().st_size / (1024 * 1024), 1)
+            update_payload["videoDurationSeconds"] = round(_video_duration_seconds(Path(final_path)), 1)
         if shorts_results:
             update_payload["shorts"] = shorts_results
         if thumbnails_results:
@@ -2451,7 +2516,7 @@ def run_production(project_id):
             pass
         raise
     except Exception as e:
-        update_progress(0, f"Error: {str(e)[:100]}", "error")
+        update_progress(0, "Error: se detuvo la producción", "error")
         print(f"❌ [PRODUCE] Error: {e}")
     finally:
         # SIEMPRE liberar el lock de producción al terminar (éxito, error,

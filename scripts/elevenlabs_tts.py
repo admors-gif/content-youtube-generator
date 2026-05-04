@@ -12,6 +12,7 @@ import os
 import json
 import time
 import sys
+import re
 from pathlib import Path
 from dotenv import load_dotenv
 import httpx
@@ -161,6 +162,63 @@ def get_voice_settings(voice_name: str) -> dict:
     return VOICE_SETTINGS.get(voice_name, VOICE_SETTINGS["Salvatore"])
 
 
+V3_AUDIO_TAGS = {
+    "laughs",
+    "laughs softly",
+    "sighs",
+    "exhales",
+    "sarcastic",
+    "whispers",
+    "hesitates",
+}
+
+V3_TAG_ALIASES = {
+    "risa": "laughs",
+    "risas": "laughs",
+    "rie": "laughs",
+    "ríe": "laughs",
+    "risa suave": "laughs softly",
+    "rie suave": "laughs softly",
+    "ríe suave": "laughs softly",
+    "suspira": "sighs",
+    "suspiro": "sighs",
+    "exhala": "exhales",
+    "respira": "exhales",
+    "susurra": "whispers",
+    "susurro": "whispers",
+    "duda": "hesitates",
+    "titubea": "hesitates",
+    "sarcasmo": "sarcastic",
+    "sarcastico": "sarcastic",
+    "sarcástico": "sarcastic",
+    "laughing softly": "laughs softly",
+    "laughing": "laughs",
+    "whispering": "whispers",
+    "deep breath": "exhales",
+}
+
+V3_PAUSE_TAGS = {"pausa", "pause", "silencio", "silence"}
+
+
+def _prepare_tts_text(text: str, model: str) -> str:
+    """Normaliza tags para que la voz no lea instrucciones literales."""
+    if model != "eleven_v3" or "[" not in (text or ""):
+        return text
+
+    def replace_tag(match):
+        raw = match.group(1).strip()
+        key = raw.lower()
+        if key in V3_PAUSE_TAGS:
+            return "... "
+        key = V3_TAG_ALIASES.get(key, key)
+        if key in V3_AUDIO_TAGS:
+            return f"[{key}]"
+        return ""
+
+    cleaned = re.sub(r"\[([^\[\]]{1,80})\]", replace_tag, text)
+    return re.sub(r"\s{2,}", " ", cleaned).strip()
+
+
 def generate_narration(
     text: str,
     output_path: Path,
@@ -196,8 +254,10 @@ def generate_narration(
         "Accept": "audio/mpeg"
     }
     
+    safe_text = _prepare_tts_text(text, model)
+
     payload = {
-        "text": text,
+        "text": safe_text,
         "model_id": model,
         "voice_settings": {
             "stability": stability,
