@@ -589,6 +589,100 @@ def _video_duration_seconds(video_path: Path) -> float:
         return 0.0
 
 
+def _is_valid_media_file(path: Path, min_duration_seconds: float = 1.0) -> tuple[bool, float, str]:
+    """Valida un media file con ffprobe y retorna (ok, duration, error)."""
+    if not path.exists():
+        return False, 0.0, "file does not exist"
+    if path.stat().st_size <= 0:
+        return False, 0.0, "file is empty"
+    try:
+        out = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        if out.returncode != 0:
+            return False, 0.0, (out.stderr or "ffprobe failed")[-300:]
+        duration = float((out.stdout or "0").strip() or 0)
+        if duration < min_duration_seconds:
+            return False, duration, f"duration {duration:.2f}s below minimum"
+        return True, duration, ""
+    except Exception as e:
+        return False, 0.0, str(e)[:300]
+
+
+def _remux_recovered_final(video_dir: Path, safe_title: str) -> tuple[Path | None, dict]:
+    """
+    Repara un proyecto que tiene master_visual/master_audio validos pero FINAL corrupto.
+    No llama APIs externas: solo FFmpeg local dentro del contenedor.
+    """
+    master_visual = video_dir / "master_visual.mp4"
+    master_audio = video_dir / "master_audio.mp3"
+    info = {"used": False, "reason": "", "video_duration": 0.0, "audio_duration": 0.0}
+
+    video_ok, video_dur, video_err = _is_valid_media_file(master_visual, min_duration_seconds=5)
+    audio_ok, audio_dur, audio_err = _is_valid_media_file(master_audio, min_duration_seconds=5)
+    info.update({
+        "video_duration": round(video_dur, 3),
+        "audio_duration": round(audio_dur, 3),
+    })
+    if not video_ok or not audio_ok:
+        info["reason"] = f"invalid masters: video={video_err or video_dur}, audio={audio_err or audio_dur}"
+        return None, info
+
+    output = video_dir / f"FINAL_RECOVERED_{safe_title}.mp4"
+    audio_deficit = audio_dur - video_dur
+    needs_pad = audio_deficit > 0.05
+
+    if needs_pad:
+        pad_seconds = audio_deficit + 0.5
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(master_visual),
+            "-i", str(master_audio),
+            "-filter_complex", f"[0:v]tpad=stop_mode=clone:stop_duration={pad_seconds:.3f}[v]",
+            "-map", "[v]", "-map", "1:a",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+            "-pix_fmt", "yuv420p", "-r", "30",
+            "-c:a", "aac", "-b:a", "192k",
+            "-shortest",
+            "-movflags", "+faststart",
+            str(output),
+        ]
+    else:
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(master_visual),
+            "-i", str(master_audio),
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k",
+            "-shortest",
+            "-movflags", "+faststart",
+            str(output),
+        ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    if result.returncode != 0:
+        info["reason"] = f"ffmpeg remux failed: {(result.stderr or '')[-300:]}"
+        return None, info
+
+    final_ok, final_dur, final_err = _is_valid_media_file(output, min_duration_seconds=30)
+    if not final_ok:
+        info["reason"] = f"recovered final invalid: {final_err or final_dur}"
+        return None, info
+
+    info.update({
+        "used": True,
+        "final_duration": round(final_dur, 3),
+        "final_size_mb": round(output.stat().st_size / (1024 * 1024), 1),
+    })
+    return output, info
+
+
 def _render_short_vertical(input_video: Path, start_sec: float, end_sec: float, output_path: Path) -> bool:
     """
     Re-renderiza un segmento del video horizontal 16:9 a vertical 9:16
@@ -1827,19 +1921,50 @@ async def recover_from_disk(project_id: str):
         if not candidates:
             candidates = sorted(video_dir.glob("FINAL_*.mp4"))
         if not candidates:
+            candidates = []
+
+        # Tomar el más reciente válido por mtime. Antes se tomaba cualquier MP4,
+        # incluso si FFmpeg murió antes de escribir el moov atom.
+        final_path = None
+        invalid_candidates = []
+        for candidate in sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True):
+            ok, duration, err = _is_valid_media_file(candidate, min_duration_seconds=30)
+            if ok:
+                final_path = candidate
+                break
+            invalid_candidates.append({
+                "name": candidate.name,
+                "size_mb": round(candidate.stat().st_size / (1024 * 1024), 1),
+                "duration": round(duration, 3),
+                "error": err,
+            })
+
+        recovery_info = {"used": False}
+        if final_path is None:
+            final_path, recovery_info = _remux_recovered_final(video_dir, safe_title)
+        if final_path is None:
             return JSONResponse(
-                status_code=404,
-                content={"error": "no FINAL_*.mp4 found in disk folder"},
+                status_code=422,
+                content={
+                    "error": "no valid FINAL_*.mp4 found and remux from masters failed",
+                    "invalid_candidates": invalid_candidates,
+                    "recovery": recovery_info,
+                },
             )
 
-        # Tomar el más reciente (por mtime) por si hay múltiples versiones
-        final_path = max(candidates, key=lambda p: p.stat().st_mtime)
         has_subs = "FINAL_SUB_" in final_path.name
 
         print(f"🔧 [RECOVER] Subiendo {final_path.name} ({final_path.stat().st_size // (1024*1024)} MB) para {project_id}")
         storage_info = _upload_video_to_storage(final_path, project_id)
         if not storage_info:
             return JSONResponse(status_code=500, content={"error": "Storage upload failed"})
+
+        valid_final, final_duration, final_error = _is_valid_media_file(final_path, min_duration_seconds=30)
+        if not valid_final:
+            return JSONResponse(
+                status_code=500,
+                content={"error": f"validated final became invalid after upload candidate selection: {final_error}"},
+            )
 
         update_payload = {
             "status": "completed",
@@ -1848,10 +1973,13 @@ async def recover_from_disk(project_id: str):
             "videoPath": str(final_path),
             "videoFolder": safe_title,
             "hasSubtitles": has_subs,
+            "videoDurationSeconds": round(final_duration, 1),
+            "videoSizeMB": round(final_path.stat().st_size / (1024 * 1024), 1),
             "videoStoragePath": storage_info["gs_path"],
             "videoUrl": storage_info["signed_url"],
             "videoUrlExpiresAt": firestore.SERVER_TIMESTAMP,
             "recoveredFromDisk": True,
+            "recoveryInfo": recovery_info,
             # Limpiar lock viejo (si quedó de un job que murió sin liberar)
             "productionLockId": firestore.DELETE_FIELD,
             "productionLockedAt": firestore.DELETE_FIELD,
@@ -1863,7 +1991,10 @@ async def recover_from_disk(project_id: str):
             "video_url": storage_info["signed_url"],
             "video_folder": safe_title,
             "size_mb": round(final_path.stat().st_size / (1024 * 1024), 1),
+            "duration_seconds": round(final_duration, 1),
             "has_subtitles": has_subs,
+            "recovery": recovery_info,
+            "invalid_candidates": invalid_candidates,
             "message": f"Project {project_id} recovered from disk (no API costs)",
         }
     except Exception as e:
