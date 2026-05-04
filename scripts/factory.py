@@ -48,6 +48,7 @@ from luma_video import (
     create_generation, poll_generation, download_video
 )
 from generate_subtitles import add_subtitles_to_video
+from media_validation import validate_media_file
 
 
 # ============================================================
@@ -475,8 +476,14 @@ def assemble_final_video(scenes, project_dir, mode, luma_indices=None, format_la
     result = subprocess.run(mix_cmd, capture_output=True, text=True, timeout=120)
     
     if result.returncode == 0 and final_video.exists():
+        valid_final, final_dur, validation_error = validate_media_file(
+            final_video,
+            min_duration_seconds=30,
+        )
+        if not valid_final:
+            print(f"   [!] Video final invalido: {validation_error}")
+            return None
         size_mb = final_video.stat().st_size / (1024 * 1024)
-        final_dur = get_audio_duration(final_video)
         dur_min = int(final_dur // 60)
         dur_sec = int(final_dur % 60)
         

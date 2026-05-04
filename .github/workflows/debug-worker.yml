@@ -115,6 +115,20 @@ jobs:
             done
             echo "=== Final MP4s ==="
             docker exec content-factory bash -lc "ls -la /app/output/videos/$ST/FINAL_*.mp4 2>/dev/null || echo no FINAL"
+            echo ""
+            echo "=== Media durations (ffprobe) ==="
+            docker exec content-factory bash -lc '
+              shopt -s nullglob
+              files=(/app/output/videos/'"$ST"'/FINAL_*.mp4 /app/output/videos/'"$ST"'/master_visual.mp4 /app/output/videos/'"$ST"'/master_audio.mp3)
+              if [ ${#files[@]} -eq 0 ]; then
+                echo "no media files"
+              fi
+              for f in "${files[@]}"; do
+                echo "--- $(basename "$f")"
+                ls -lh "$f" 2>/dev/null
+                ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$f" 2>&1 || true
+              done
+            '
           } > debug_output/09_project_files.txt 2>&1
           set -e
 

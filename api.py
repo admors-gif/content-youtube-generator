@@ -8,6 +8,10 @@ import json
 import logging
 from datetime import timedelta, datetime, timezone
 from pathlib import Path
+from scripts.media_validation import (
+    pick_valid_final_video as _pick_valid_final_video_impl,
+    validate_media_file as _validate_media_file,
+)
 
 FIREBASE_STORAGE_BUCKET = os.environ.get(
     "FIREBASE_STORAGE_BUCKET",
@@ -246,6 +250,13 @@ def _require_admin(request: Request, *, allow_local: bool = False) -> dict:
 def _safe_int(value, default: int = 0) -> int:
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return default
 
@@ -763,28 +774,7 @@ def _video_duration_seconds(video_path: Path) -> float:
 
 def _is_valid_media_file(path: Path, min_duration_seconds: float = 1.0) -> tuple[bool, float, str]:
     """Valida un media file con ffprobe y retorna (ok, duration, error)."""
-    if not path.exists():
-        return False, 0.0, "file does not exist"
-    if path.stat().st_size <= 0:
-        return False, 0.0, "file is empty"
-    try:
-        out = subprocess.run(
-            [
-                "ffprobe", "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                str(path),
-            ],
-            capture_output=True, text=True, timeout=30,
-        )
-        if out.returncode != 0:
-            return False, 0.0, (out.stderr or "ffprobe failed")[-300:]
-        duration = float((out.stdout or "0").strip() or 0)
-        if duration < min_duration_seconds:
-            return False, duration, f"duration {duration:.2f}s below minimum"
-        return True, duration, ""
-    except Exception as e:
-        return False, 0.0, str(e)[:300]
+    return _validate_media_file(path, min_duration_seconds=min_duration_seconds)
 
 
 def _pick_valid_final_video(
@@ -799,34 +789,22 @@ def _pick_valid_final_video(
     tener bytes y aun asi no tener moov atom. Esta funcion fuerza ffprobe antes
     de que descarga, shorts o upload usen el archivo.
     """
-    if not video_dir.is_dir():
-        return None, False, [{"error": f"folder {video_dir} not found"}]
-
-    subtitled = sorted(video_dir.glob("FINAL_SUB_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
-    regular = sorted(
-        [p for p in video_dir.glob("FINAL_*.mp4") if "FINAL_SUB_" not in p.name],
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
+    return _pick_valid_final_video_impl(
+        video_dir,
+        prefer_subtitles=prefer_subtitles,
+        min_duration_seconds=min_duration_seconds,
     )
-    candidates = (subtitled + regular) if prefer_subtitles else (regular + subtitled)
 
-    invalid = []
-    seen = set()
-    for candidate in candidates:
-        if candidate in seen:
-            continue
-        seen.add(candidate)
-        ok, duration, err = _is_valid_media_file(candidate, min_duration_seconds=min_duration_seconds)
-        if ok:
-            return candidate, "FINAL_SUB_" in candidate.name, invalid
-        invalid.append({
-            "name": candidate.name,
-            "size_mb": round(candidate.stat().st_size / (1024 * 1024), 1) if candidate.exists() else 0,
-            "duration": round(duration, 3),
-            "error": err,
-        })
 
-    return None, False, invalid
+def _completed_project_has_valid_delivery(project: dict, min_duration_seconds: float = 30.0) -> bool:
+    """
+    Idempotency guard para retries: solo saltamos un job si el proyecto ya tiene
+    URL de entrega y una duracion final plausible. Un `completed` con 0:00 no
+    debe bloquear una reparacion futura.
+    """
+    if project.get("status") != "completed" or not project.get("videoUrl"):
+        return False
+    return _safe_float(project.get("videoDurationSeconds"), 0.0) >= min_duration_seconds
 
 
 def _remux_recovered_final(video_dir: Path, safe_title: str) -> tuple[Path | None, dict]:
@@ -2566,7 +2544,7 @@ def run_production(project_id):
         # muere después de escribir status=completed pero antes del ACK por
         # acks_late + reject_on_worker_lost), no re-correr el pipeline. Para
         # forzar regeneración real, usar /retry — que sí resetea status.
-        if project.get("status") == "completed" and project.get("videoUrl"):
+        if _completed_project_has_valid_delivery(project):
             print(f"⏭️  [PRODUCE] Project {project_id} ya está completed (videoUrl presente). Skipping retry idempotente.")
             try:
                 import sentry_sdk
@@ -2577,6 +2555,12 @@ def run_production(project_id):
             except Exception:
                 pass
             return
+        if project.get("status") == "completed" and project.get("videoUrl"):
+            print(
+                f"⚠️ [PRODUCE] Project {project_id} estaba completed pero sin duración válida; "
+                "continuando para reparar entrega.",
+                flush=True,
+            )
 
         title = project.get("title", "video_sin_titulo")
         scenes = project.get("scenes", [])
@@ -2833,12 +2817,46 @@ def run_production(project_id):
         if not final_path:
             update_progress(0, "Error: no se pudo validar el video final", "error")
             return
+
+        final_ok, final_duration, final_err = _is_valid_media_file(Path(final_path), min_duration_seconds=30)
+        if not final_ok:
+            print(f"   ⚠️ Video final inválido antes de entrega: {final_err}", flush=True)
+            update_progress(0, "Error: no se pudo validar el video final", "error")
+            return
         
         # Subir video final a Firebase Storage para entrega via CDN (sin pegar al VPS)
         storage_info = None
         if final_path:
             update_progress(96, "☁️ Preparando entrega...", "publishing")
             storage_info = _upload_video_to_storage(Path(final_path), project_id)
+            if not storage_info:
+                doc_ref.update({
+                    "status": "error",
+                    "progress.percent": 96,
+                    "progress.stepName": "Error: no se pudo preparar la entrega",
+                    "videoPath": final_path,
+                    "videoFolder": safe_title,
+                    "videoDurationSeconds": round(final_duration, 1),
+                    "videoSizeMB": round(Path(final_path).stat().st_size / (1024 * 1024), 1),
+                    "deliveryRecoverableFromDisk": True,
+                    "deliveryError": "storage_upload_failed",
+                    "videoStoragePath": firestore.DELETE_FIELD,
+                    "videoUrl": firestore.DELETE_FIELD,
+                    "videoUrlExpiresAt": firestore.DELETE_FIELD,
+                })
+                print(
+                    f"   ⚠️ Video local válido, pero Storage falló. Proyecto marcado error recuperable: {final_path}",
+                    flush=True,
+                )
+                try:
+                    import sentry_sdk
+                    sentry_sdk.capture_message(
+                        f"Storage upload failed after valid render for {project_id}",
+                        level="error",
+                    )
+                except Exception:
+                    pass
+                return
 
         # Generar shorts vertical 9:16 (3 momentos del video final)
         # No bloqueante: si falla, el video largo ya está completado.
@@ -2887,7 +2905,7 @@ def run_production(project_id):
             update_payload["videoUrl"] = storage_info["signed_url"]
             update_payload["videoUrlExpiresAt"] = firestore.SERVER_TIMESTAMP
             update_payload["videoSizeMB"] = round(Path(final_path).stat().st_size / (1024 * 1024), 1)
-            update_payload["videoDurationSeconds"] = round(_video_duration_seconds(Path(final_path)), 1)
+            update_payload["videoDurationSeconds"] = round(final_duration, 1)
         if shorts_results:
             update_payload["shorts"] = shorts_results
         if thumbnails_results:
