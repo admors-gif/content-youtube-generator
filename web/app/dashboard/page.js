@@ -66,11 +66,18 @@ function ProjectRow({ project, onOpen, onDelete, fadeClass }) {
 
   return (
     <div className={`cf-fade ${fadeClass}`}>
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onOpen}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onOpen();
+          }
+        }}
         className="cf-card"
         style={{
-          all: "unset",
           cursor: "pointer",
           display: "block",
           padding: "var(--s-5)",
@@ -272,7 +279,7 @@ function ProjectRow({ project, onOpen, onDelete, fadeClass }) {
             </div>
           </div>
         )}
-      </button>
+      </div>
     </div>
   );
 }
