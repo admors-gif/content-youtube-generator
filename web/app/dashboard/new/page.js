@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import { SYSTEM_AGENTS } from "@/lib/agents";
 import Icon from "@/components/Icon";
 import { getAgentColor, getMonogram } from "@/lib/agentVisual";
+import { authHeaders, getApiBase } from "@/lib/apiClient";
 
 /**
  * Wizard Nuevo Documental — Editorial Cinematic v2.
@@ -227,12 +228,11 @@ export default function NewProjectPage() {
     setRecommending(true);
     setRecommendError(null);
     setRecommendations([]);
-    const apiBase =
-      process.env.NEXT_PUBLIC_VPS_API_URL || "https://api.valtyk.com";
+    const apiBase = getApiBase();
     try {
       const res = await fetch(`${apiBase}/recommend-agent`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authHeaders(user, { "Content-Type": "application/json" }),
         body: JSON.stringify({ topic: idea }),
       });
       const data = await res.json();

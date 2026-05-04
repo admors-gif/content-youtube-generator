@@ -15,14 +15,14 @@ import { formatRelativeTime } from "@/lib/format";
  *
  * Recibe:
  *   - project, agent (objeto SYSTEM_AGENTS)
- *   - id (projectId)
  *   - onDownloadVideo (fetch URL firmada y open)
+ *   - onDownloadAll (fetch ZIP autenticado)
  */
 export default function ProjectHeader({
   project,
   agent,
-  id,
   onDownloadVideo,
+  onDownloadAll,
 }) {
   const color = agent?.color || "var(--ember)";
   const mono = getMonogram(project.agentId);
@@ -147,21 +147,18 @@ export default function ProjectHeader({
             >
               <Icon name="download" size={16} /> Descargar video
             </button>
-            <a
-              href={`${process.env.NEXT_PUBLIC_VPS_API_URL || "https://api.valtyk.com"}/download/all/${encodeURIComponent(id)}`}
+            <button
+              onClick={onDownloadAll}
               className="cf-btn cf-btn--ghost"
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 8,
-                textDecoration: "none",
               }}
-              target="_blank"
-              rel="noopener noreferrer"
               title="Todo el material del proyecto en un ZIP organizado"
             >
               <Icon name="package" size={16} /> Material completo
-            </a>
+            </button>
           </div>
         )}
       </div>

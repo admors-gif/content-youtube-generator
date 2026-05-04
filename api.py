@@ -1,4 +1,4 @@
-from fastapi import FastAPI, BackgroundTasks, Request
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import subprocess
@@ -98,12 +98,34 @@ if firebase_creds:
 
 app = FastAPI(title="Content Factory API")
 
-# CORS para que el frontend pueda cargar imágenes
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "https://content-youtube-generator.vercel.app",
+]
+_CORS_ORIGINS = [
+    origin.strip().rstrip("/")
+    for origin in os.environ.get(
+        "CONTENT_FACTORY_CORS_ORIGINS",
+        ",".join(_DEFAULT_CORS_ORIGINS),
+    ).split(",")
+    if origin.strip()
+]
+_CORS_ORIGIN_REGEX = os.environ.get(
+    "CONTENT_FACTORY_CORS_ORIGIN_REGEX",
+    r"https://.*\.vercel\.app",
+).strip() or None
+
+# CORS restringido: los endpoints sensibles validan Firebase ID token.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_CORS_ORIGINS,
+    allow_origin_regex=_CORS_ORIGIN_REGEX,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Admin-Token"],
+    allow_credentials=False,
 )
 
 
@@ -119,6 +141,106 @@ def _ensure_firebase_initialized():
             raise RuntimeError("firebase-admin.json no encontrado")
         cred = credentials.Certificate(cred_path)
         firebase_admin.initialize_app(cred, {"storageBucket": FIREBASE_STORAGE_BUCKET})
+
+
+_ADMIN_TOKEN = os.environ.get("CONTENT_FACTORY_ADMIN_TOKEN", "").strip()
+_ADMIN_UIDS = {
+    uid.strip()
+    for uid in os.environ.get("CONTENT_FACTORY_ADMIN_UIDS", "").split(",")
+    if uid.strip()
+}
+_ADMIN_EMAILS = {
+    email.strip().lower()
+    for email in os.environ.get("CONTENT_FACTORY_ADMIN_EMAILS", "").split(",")
+    if email.strip()
+}
+_LOCAL_CLIENTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _is_local_request(request: Request) -> bool:
+    client_host = getattr(getattr(request, "client", None), "host", "") or ""
+    return client_host in _LOCAL_CLIENTS
+
+
+def _require_principal(
+    request: Request,
+    *,
+    allow_admin: bool = False,
+    allow_local: bool = False,
+) -> dict:
+    """Verifica Firebase ID token o, para tareas internas, un admin/local gate."""
+    if allow_local and _is_local_request(request):
+        return {"admin": True, "uid": "local"}
+
+    admin_token = request.headers.get("x-admin-token", "").strip()
+    if allow_admin and _ADMIN_TOKEN and admin_token and admin_token == _ADMIN_TOKEN:
+        return {"admin": True, "uid": "admin"}
+
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="authentication required")
+
+    id_token = auth_header.split(" ", 1)[1].strip()
+    if not id_token:
+        raise HTTPException(status_code=401, detail="empty auth token")
+
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import auth
+        decoded = auth.verify_id_token(id_token)
+        uid = decoded.get("uid")
+        if not uid:
+            raise ValueError("missing uid")
+        return {"admin": False, "uid": uid, "token": decoded}
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="invalid auth token")
+
+
+def _require_project_access(
+    request: Request,
+    project_id: str,
+    *,
+    allow_admin: bool = False,
+    allow_local: bool = False,
+) -> dict:
+    principal = _require_principal(request, allow_admin=allow_admin, allow_local=allow_local)
+    if principal.get("admin"):
+        return principal
+
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        doc = db.collection("projects").document(project_id).get()
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="project not found")
+        data = doc.to_dict() or {}
+        if data.get("userId") != principal["uid"]:
+            raise HTTPException(status_code=403, detail="project access denied")
+        return {**principal, "project": data}
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="project access check failed")
+
+
+def _require_admin(request: Request, *, allow_local: bool = False) -> dict:
+    principal = _require_principal(request, allow_admin=True, allow_local=allow_local)
+    if principal.get("admin"):
+        return principal
+
+    token = principal.get("token") or {}
+    uid = principal.get("uid")
+    email = (token.get("email") or "").strip().lower()
+    is_admin_claim = bool(token.get("admin"))
+    is_admin_uid = bool(uid and uid in _ADMIN_UIDS)
+    is_admin_email = bool(email and email in _ADMIN_EMAILS)
+    if is_admin_claim or is_admin_uid or is_admin_email:
+        return {**principal, "admin": True}
+
+    raise HTTPException(status_code=403, detail="admin access required")
 
 
 def _upload_video_to_storage(local_path: Path, project_id: str, content_type: str = None) -> dict | None:
@@ -1155,12 +1277,13 @@ _AGENT_CATALOG = """
 
 
 @app.post("/thumbnails/build/{project_id}")
-def thumbnails_build(project_id: str, force: bool = False):
+def thumbnails_build(project_id: str, request: Request, force: bool = False):
     """
     Genera thumbnails on-demand para un proyecto completado (backfill).
     Idempotency: si ya hay thumbnails y no se pasa ?force=true, devuelve los
     existentes sin regenerar (evita ~$0.90 USD de FLUX por doble click).
     """
+    _require_project_access(request, project_id, allow_admin=True)
     try:
         _ensure_firebase_initialized()
         from firebase_admin import firestore
@@ -1198,11 +1321,12 @@ def thumbnails_build(project_id: str, force: bool = False):
 
 
 @app.post("/shorts/build/{project_id}")
-def shorts_build(project_id: str):
+def shorts_build(project_id: str, request: Request):
     """
     Genera shorts on-demand para un proyecto ya completado.
     Útil para backfill de proyectos producidos antes de Sprint 2.1.
     """
+    _require_project_access(request, project_id, allow_admin=True)
     try:
         _ensure_firebase_initialized()
         from firebase_admin import firestore
@@ -1227,7 +1351,7 @@ def shorts_build(project_id: str):
 
 
 @app.post("/factcheck/run/{project_id}")
-def factcheck_run(project_id: str, force: bool = False):
+def factcheck_run(project_id: str, request: Request, force: bool = False):
     """
     Corre fact-checking del guion del proyecto on-demand.
     Util para backfill o re-check tras editar el guion.
@@ -1235,6 +1359,7 @@ def factcheck_run(project_id: str, force: bool = False):
     Idempotency: si ya hay factCheck reciente (<1h) y el script no cambió,
     devuelve el cached. Pasar ?force=true para forzar re-check.
     """
+    _require_project_access(request, project_id, allow_admin=True)
     try:
         _ensure_firebase_initialized()
         from firebase_admin import firestore
@@ -1279,13 +1404,14 @@ def factcheck_run(project_id: str, force: bool = False):
 
 
 @app.post("/moderation/check/{project_id}")
-def moderation_check(project_id: str):
+def moderation_check(project_id: str, request: Request):
     """
     Corre moderacion del guion del proyecto y guarda el resultado en Firestore.
     Util para:
       - Backfill de proyectos viejos sin moderacion
       - Re-check despues de que el usuario edita el guion manualmente
     """
+    _require_project_access(request, project_id, allow_admin=True)
     try:
         _ensure_firebase_initialized()
         from firebase_admin import firestore
@@ -1312,6 +1438,7 @@ async def recommend_agent(request: Request):
     Dado un tema/idea de video del usuario, devuelve los 3 agentes más adecuados
     en orden de mejor a peor match. Cada uno con score (0-100) y razón corta.
     """
+    _require_principal(request)
     try:
         data = await request.json()
         topic = (data.get("topic") or "").strip()
@@ -1367,11 +1494,12 @@ async def recommend_agent(request: Request):
         )
 
 @app.get("/video-url/{project_id}")
-def get_video_url(project_id: str):
+def get_video_url(project_id: str, request: Request):
     """
     Devuelve una URL firmada fresca (7 días) para el video del proyecto.
     El frontend llama a este endpoint para obtener un link de descarga válido.
     """
+    _require_project_access(request, project_id, allow_admin=True)
     try:
         _ensure_firebase_initialized()
         from firebase_admin import firestore, storage
@@ -1407,7 +1535,7 @@ def get_video_url(project_id: str):
 
 
 @app.get("/download/all/{project_id}")
-def download_all(project_id: str):
+def download_all(project_id: str, request: Request):
     """
     Streamea un ZIP con TODO el material del proyecto organizado en carpetas:
     video/, audio/narrations/, images/, luma_clips/, ken_burns/, composites/,
@@ -1416,6 +1544,7 @@ def download_all(project_id: str):
     Usa zipstream-ng para construir el ZIP on-the-fly (no en memoria),
     crítico cuando hay 88+ archivos por proyecto y video final de 150-200MB.
     """
+    _require_project_access(request, project_id, allow_admin=True)
     try:
         _ensure_firebase_initialized()
         from firebase_admin import firestore
@@ -1520,8 +1649,9 @@ def download_all(project_id: str):
 
 
 @app.get("/download/video/{project}")
-def download_video(project: str):
+def download_video(project: str, request: Request):
     """Descarga el video final ensamblado."""
+    _require_project_access(request, project, allow_admin=True)
     video_dir = Path(f"/app/output/videos/{project}")
     video_file, _has_subs, invalid_candidates = _pick_valid_final_video(video_dir, min_duration_seconds=1)
     if not video_file:
@@ -1549,8 +1679,9 @@ def download_video(project: str):
     )
 
 @app.get("/download/images/{project}")
-def download_images_zip(project: str):
+def download_images_zip(project: str, request: Request):
     """Descarga todas las imágenes del proyecto como ZIP."""
+    _require_project_access(request, project, allow_admin=True)
     import zipfile
     images_dir = Path(f"/app/output/videos/{project}/images")
     if not images_dir.exists():
@@ -1580,11 +1711,12 @@ def health_check():
 
 
 @app.get("/queue/status/{task_id}")
-def queue_status(task_id: str):
+def queue_status(task_id: str, request: Request):
     """
     Estado de un job en la cola Celery. Útil para debug y para que
     el frontend pueda confirmar que un job sigue vivo.
     """
+    _require_admin(request)
     try:
         from worker_app import celery_app
         result = celery_app.AsyncResult(task_id)
@@ -1600,8 +1732,9 @@ def queue_status(task_id: str):
 
 
 @app.get("/queue/health")
-def queue_health():
+def queue_health(request: Request):
     """Verifica que el broker (Redis) esté accesible y haya workers conectados."""
+    _require_admin(request)
     try:
         from worker_app import celery_app
         i = celery_app.control.inspect(timeout=2)
@@ -1621,7 +1754,7 @@ def queue_health():
 
 
 @app.get("/metrics")
-def metrics():
+def metrics(request: Request):
     """
     Snapshot operacional del sistema. Pensado para chequeo rápido del operador
     (curl o dashboard interno futuro), no expuesto al usuario final.
@@ -1633,6 +1766,7 @@ def metrics():
       - sizes.total_storage_mb: suma de videoSizeMB de todos los completados
       - api_uptime_seconds: cuánto lleva corriendo este worker
     """
+    _require_admin(request)
     try:
         _ensure_firebase_initialized()
         from firebase_admin import firestore
@@ -1710,6 +1844,12 @@ async def trigger_generation(request: Request, background_tasks: BackgroundTasks
     if not topic:
         return {"status": "error", "message": "Missing 'topic' in request body"}
 
+    principal = _require_principal(request, allow_admin=True)
+    if project_id and not principal.get("admin"):
+        _require_project_access(request, project_id)
+    elif not project_id and not principal.get("admin"):
+        raise HTTPException(status_code=403, detail="projectId required")
+
     # Ejecutar en segundo plano para no dejar colgada la petición HTTP a n8n
     background_tasks.add_task(run_script, topic, agent_file, project_id)
     
@@ -1734,6 +1874,8 @@ async def trigger_production(request: Request, background_tasks: BackgroundTasks
 
     if not project_id:
         return {"status": "error", "message": "Missing 'projectId'"}
+
+    _require_project_access(request, project_id)
 
     # Moderation gate — solo bloquea si hay critical_blocks Y no hay override
     try:
@@ -1819,6 +1961,8 @@ async def retry_production(request: Request, background_tasks: BackgroundTasks):
     
     if not project_id:
         return {"status": "error", "message": "Missing 'projectId'"}
+
+    _require_project_access(request, project_id)
     
     # Resetear estado en Firebase
     try:
@@ -1891,6 +2035,8 @@ async def reset_project_status(request: Request):
     
     if not project_id:
         return {"status": "error", "message": "Missing 'projectId'"}
+
+    _require_project_access(request, project_id, allow_admin=True)
     
     try:
         import firebase_admin
@@ -1917,7 +2063,7 @@ async def reset_project_status(request: Request):
 
 
 @app.post("/recover-from-disk/{project_id}")
-async def recover_from_disk(project_id: str):
+async def recover_from_disk(project_id: str, request: Request):
     """
     Recupera un proyecto cuyo video FINAL_SUB_*.mp4 quedó en disco del VPS
     pero NO subió a Storage ni se completó en Firestore. Esto pasa cuando el
@@ -1932,6 +2078,7 @@ async def recover_from_disk(project_id: str):
 
     Retorna {ok, video_url, message}. NO hay costo en APIs externas.
     """
+    _require_project_access(request, project_id, allow_admin=True, allow_local=True)
     try:
         _ensure_firebase_initialized()
         from firebase_admin import firestore

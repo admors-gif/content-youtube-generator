@@ -10,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { SYSTEM_AGENTS } from "@/lib/agents";
+import { authHeaders, getApiBase } from "@/lib/apiClient";
 
 import ProjectHeader from "@/components/project/ProjectHeader";
 import ProgressPanel from "@/components/project/ProgressPanel";
@@ -83,11 +84,11 @@ export default function ProjectDetailsPage({ params }) {
 
   const loadVideoPlayer = async () => {
     setVideoState({ url: null, loading: true, error: null });
-    const vpsBase =
-      process.env.NEXT_PUBLIC_VPS_API_URL || "https://api.valtyk.com";
+    const vpsBase = getApiBase();
     try {
       const res = await fetch(
         `${vpsBase}/video-url/${encodeURIComponent(id)}`,
+        { headers: await authHeaders(user) },
       );
       const data = await res.json();
       if (data.url) {
@@ -214,12 +215,11 @@ export default function ProjectDetailsPage({ params }) {
           "progress.percent": 2,
           "progress.stepName": "Iniciando producción...",
         });
-        const vpsUrl =
-          process.env.NEXT_PUBLIC_VPS_API_URL || "https://api.valtyk.com";
+        const vpsUrl = getApiBase();
         try {
           const res = await fetch(`${vpsUrl}/produce`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: await authHeaders(user, { "Content-Type": "application/json" }),
             body: JSON.stringify({ projectId: id, overrideModeration }),
           });
           if (res.status === 403) {
@@ -237,7 +237,7 @@ export default function ProjectDetailsPage({ params }) {
             if (confirmed) {
               await fetch(`${vpsUrl}/produce`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: await authHeaders(user, { "Content-Type": "application/json" }),
                 body: JSON.stringify({
                   projectId: id,
                   overrideModeration: true,
@@ -260,7 +260,7 @@ export default function ProjectDetailsPage({ params }) {
         alert("Error: " + e.message);
       }
     },
-    [id, editedScript],
+    [id, editedScript, user],
   );
 
   // Countdown timer
@@ -345,11 +345,11 @@ export default function ProjectDetailsPage({ params }) {
 
   // Download video handler — fetch URL firmada y abre en nueva pestaña
   const handleDownloadVideo = async () => {
-    const vpsBase =
-      process.env.NEXT_PUBLIC_VPS_API_URL || "https://api.valtyk.com";
+    const vpsBase = getApiBase();
     try {
       const res = await fetch(
         `${vpsBase}/video-url/${encodeURIComponent(id)}`,
+        { headers: await authHeaders(user) },
       );
       const data = await res.json();
       if (data.url) {
@@ -365,6 +365,31 @@ export default function ProjectDetailsPage({ params }) {
     }
   };
 
+  const handleDownloadAll = async () => {
+    const vpsBase = getApiBase();
+    try {
+      const res = await fetch(`${vpsBase}/download/all/${encodeURIComponent(id)}`, {
+        headers: await authHeaders(user),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(`No se pudo preparar el material: ${data.error || res.statusText}`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(project.title || id).replace(/[^a-zA-Z0-9_-]/g, "_")}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`Error al descargar material: ${err.message}`);
+    }
+  };
+
   const TABS = [
     { id: "script", label: "Guión y voz" },
     { id: "scenes", label: "Escenas" },
@@ -375,8 +400,8 @@ export default function ProjectDetailsPage({ params }) {
       <ProjectHeader
         project={project}
         agent={agent}
-        id={id}
         onDownloadVideo={handleDownloadVideo}
+        onDownloadAll={handleDownloadAll}
       />
 
       {/* Live progress: solo cuando isProcessing */}
