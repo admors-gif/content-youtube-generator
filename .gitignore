@@ -3,7 +3,10 @@
 .env.txt
 __pycache__/
 *.pyc
+.pytest_cache/
 .test-tmp/
+.codex-tmp/
+output/pytest-tmp/
 output/clips/*
 output/audio/*
 output/final/*

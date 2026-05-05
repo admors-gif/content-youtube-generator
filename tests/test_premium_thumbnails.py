@@ -12,14 +12,24 @@ def test_attraction_thumbnail_plans_are_clickable_and_text_safe():
     assert len(plans) == 3
     assert plans[0]["hook"] == "TU CEREBRO\nYA ELIGIÓ"
     assert all(len(plan["hook"].splitlines()) <= 3 for plan in plans)
-    assert "No generated text" in prompt
+    assert 'Main headline text to render exactly, large and crisp: "TU CEREBRO / YA ELIGIÓ"' in prompt
+    assert "The thumbnail must already include the headline text" in prompt
     assert "No visible hands or fingers" in prompt
-    assert "TU CEREBRO" not in prompt
+    assert "TU CEREBRO" in prompt
 
 
-def test_generation_size_uses_exact_thumbnail_ratio_for_latest_image_model():
-    assert api._thumbnail_generation_size("gpt-image-2") == "1280x720"
+def test_generation_size_uses_landscape_size_for_latest_image_models():
+    assert api._thumbnail_generation_size("gpt-image-1.5") == "1536x1024"
     assert api._thumbnail_generation_size("gpt-image-1") == "1536x1024"
+    assert api._thumbnail_generation_size("chatgpt-image-latest") == "1536x1024"
+
+
+def test_thumbnail_model_normalizes_unsupported_media_models(monkeypatch):
+    monkeypatch.setenv("CONTENT_FACTORY_PREMIUM_THUMBNAIL_MODEL", "gpt-image-2")
+    assert api._thumbnail_model() == "gpt-image-1.5"
+
+    monkeypatch.setenv("CONTENT_FACTORY_PREMIUM_THUMBNAIL_MODEL", "sora-2")
+    assert api._thumbnail_model() == "gpt-image-1.5"
 
 
 def test_autohypnosis_thumbnail_plan_avoids_medical_claims_and_generated_text():
@@ -35,9 +45,9 @@ def test_autohypnosis_thumbnail_plan_avoids_medical_claims_and_generated_text():
 
     assert plans[0]["hook"] == "REPROGRAMA\nTU MENTE"
     assert "guided self-hypnosis thumbnail" in prompt
-    assert "No generated text" in prompt
+    assert 'Main headline text to render exactly, large and crisp: "REPROGRAMA / TU MENTE"' in prompt
     assert "medical claims" in prompt
-    assert "REPROGRAMA" not in prompt
+    assert "REPROGRAMA" in prompt
 
 
 def test_premium_thumbnail_renderer_outputs_valid_jpeg(tmp_path):
@@ -63,3 +73,21 @@ def test_premium_thumbnail_renderer_outputs_valid_jpeg(tmp_path):
     assert ok is True
     assert out.exists()
     assert out.stat().st_size > 10_000
+
+
+def test_generated_thumbnail_finalize_outputs_youtube_jpeg(tmp_path):
+    from PIL import Image, ImageDraw
+
+    raw = tmp_path / "raw.jpg"
+    out = tmp_path / "final.jpg"
+    img = Image.new("RGB", (1536, 1024), (12, 10, 30))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((120, 220, 1416, 804), fill=(30, 18, 80))
+    draw.text((430, 460), "CONFÍA EN TI", fill=(255, 255, 255))
+    img.save(raw)
+
+    ok = api._finalize_generated_thumbnail(Path(raw), Path(out))
+
+    assert ok is True
+    assert out.exists()
+    assert Image.open(out).size == (1280, 720)

@@ -1211,8 +1211,9 @@ def build_shorts_for_project(video_dir: Path, project_id: str) -> list:
     return results
 
 
-# ── Thumbnails (3 variantes por video, reuso de imagenes existentes) ──────
-# Paleta + tipografia por defecto para canales tipo "Cronicas Oscuras".
+# ── Thumbnails (3 variantes por video) ─────────────────────────────────────
+# Ruta principal: GPT Image genera la miniatura completa con texto integrado.
+# Fallback: composicion local con frases cortas, nunca con el titulo completo.
 # Mas adelante (Phase 3.2 multi-channel) se podra parametrizar por canal.
 THUMBNAIL_DEFAULT_THEME = {
     "font_path_primary": "/usr/share/fonts/truetype/montserrat/Montserrat-Black.ttf",
@@ -1254,17 +1255,26 @@ def _premium_thumbnails_enabled() -> bool:
 
 
 def _thumbnail_model() -> str:
-    return os.environ.get("CONTENT_FACTORY_PREMIUM_THUMBNAIL_MODEL", "gpt-image-2").strip() or "gpt-image-2"
+    model = os.environ.get("CONTENT_FACTORY_PREMIUM_THUMBNAIL_MODEL", "gpt-image-1.5").strip() or "gpt-image-1.5"
+    normalized = model.lower()
+    if normalized in {"gpt-image-2", "image-2"} or normalized.startswith("sora-"):
+        print(f"   ⚠️ Modelo de thumbnail '{model}' no es un generador de imagen fija soportado; usando gpt-image-1.5")
+        return "gpt-image-1.5"
+    return model
 
 
 def _thumbnail_quality() -> str:
-    return os.environ.get("CONTENT_FACTORY_PREMIUM_THUMBNAIL_QUALITY", "medium").strip() or "medium"
+    return os.environ.get("CONTENT_FACTORY_PREMIUM_THUMBNAIL_QUALITY", "high").strip() or "high"
 
 
 def _thumbnail_generation_size(model: str) -> str:
-    # GPT Image 2 supports exact 16:9 sizes; older image models are safer on
-    # common landscape sizes and then get cropped by our renderer.
-    return "1280x720" if model.startswith("gpt-image-2") else "1536x1024"
+    # GPT Image models expose landscape generation as 1536x1024. We center-crop
+    # to 1280x720 after generation, so prompts reserve a central 16:9 safe area.
+    if model.startswith("gpt-image") or model == "chatgpt-image-latest":
+        return "1536x1024"
+    if model.startswith("dall-e-3"):
+        return "1792x1024"
+    return "auto"
 
 
 def _thumbnail_font_paths() -> list[str]:
@@ -1290,8 +1300,8 @@ def _thumbnail_hook_lines(hook: str) -> list[str]:
 
 def _thumbnail_hook_plans(title: str, agent_id: str | None = None) -> list[dict]:
     """
-    Three deterministic YouTube-thumbnail concepts. We keep text outside the
-    generated image so the API never has to spell Spanish correctly.
+    Three deterministic YouTube-thumbnail concepts. Hooks stay short because
+    the image model now renders the final Spanish text inside the thumbnail.
     """
     clean_title = " ".join((title or "").split()) or "este documental"
     lower = clean_title.lower()
@@ -1367,6 +1377,7 @@ def _thumbnail_hook_plans(title: str, agent_id: str | None = None) -> list[dict]
 
 def _build_premium_thumbnail_prompt(title: str, plan: dict, agent_id: str | None = None) -> str:
     clean_title = " ".join((title or "").split()) or "este documental"
+    headline = " / ".join(_thumbnail_hook_lines(plan.get("hook", "")))
     format_hint = (
         "podcast thumbnail"
         if agent_id == "agent_podcast_general"
@@ -1374,19 +1385,30 @@ def _build_premium_thumbnail_prompt(title: str, plan: dict, agent_id: str | None
         if agent_id == "agent_autohipnosis"
         else "documentary thumbnail"
     )
+    safety_hint = (
+        "This is wellness and personal growth content, not medical treatment. "
+        "Avoid clinical, hospital, doctor, pill, or therapy imagery. "
+        if agent_id == "agent_autohipnosis"
+        else ""
+    )
     return (
-        "Create a high-conversion YouTube "
-        f"{format_hint} background image, 16:9 landscape, topic: \"{clean_title}\".\n"
+        "Create a finished, high-conversion YouTube "
+        f"{format_hint}, 16:9 landscape, topic: \"{clean_title}\".\n"
+        f"Main headline text to render exactly, large and crisp: \"{headline}\".\n"
         f"Core concept: {plan['concept']}.\n"
+        f"{safety_hint}"
         "Composition requirements:\n"
-        "- Leave a clean dark central/lower area for a large Spanish headline overlay added later.\n"
-        "- No generated text, no readable letters, no logos, no watermarks.\n"
+        "- The thumbnail must already include the headline text as part of the generated image.\n"
+        "- Spell the Spanish headline exactly; no extra words, subtitles, quotes, pseudo-text, logos, or watermarks.\n"
+        "- Make the headline huge, bold, high-contrast, and readable on a phone screen.\n"
+        "- Keep the headline and main subject fully inside the central 16:9 safe area; the image may be center-cropped from 1536x1024 to 1280x720.\n"
         "- No visible hands or fingers; crop people at face/shoulders or keep hands fully outside the frame.\n"
         "- Faces must be realistic, expressive, premium, not uncanny.\n"
-        "- Strong contrast, sharp focus, punchy blue/red/amber accents, mobile-readable composition.\n"
+        "- Strong contrast, sharp focus, punchy but tasteful color accents, mobile-readable composition.\n"
+        "- Clickbait must be safe and truthful: curiosity, transformation, mystery, or emotional payoff without deception.\n"
         "- Avoid horror, gore, distorted bodies, extra limbs, malformed anatomy, medical claims, and controversial shock imagery.\n"
         "Style: hyper-realistic cinematic poster, premium viral YouTube thumbnail, "
-        "Netflix documentary meets intelligent clickbait, crisp details, 1280x720 safe framing."
+        "Netflix documentary meets intelligent clickbait, crisp details, polished creator-grade design."
     )
 
 
@@ -1408,7 +1430,7 @@ def _write_openai_image_data(image_data, output_path: Path) -> bool:
     return False
 
 
-def _generate_premium_thumbnail_background(prompt: str, output_path: Path) -> bool:
+def _generate_premium_thumbnail_image(prompt: str, output_path: Path) -> bool:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         print("   ⚠️ OPENAI_API_KEY no configurada; usando miniaturas de escenas")
@@ -1425,6 +1447,9 @@ def _generate_premium_thumbnail_background(prompt: str, output_path: Path) -> bo
             "quality": _thumbnail_quality(),
             "n": 1,
         }
+        if model.startswith("gpt-image") or model == "chatgpt-image-latest":
+            params["output_format"] = "jpeg"
+            params["output_compression"] = 92
         response = client.images.generate(**params)
         data = getattr(response, "data", None) or []
         if not data:
@@ -1434,6 +1459,12 @@ def _generate_premium_thumbnail_background(prompt: str, output_path: Path) -> bo
     except Exception as e:
         print(f"   ⚠️ Premium thumbnail generation failed: {e}")
         return False
+
+
+def _generate_premium_thumbnail_background(prompt: str, output_path: Path) -> bool:
+    # Backward-compatible alias for older tests/scripts. New thumbnails are
+    # complete generated images, not blank backgrounds for local text overlay.
+    return _generate_premium_thumbnail_image(prompt, output_path)
 
 
 def _cover_resize_image(img, target_w: int = 1280, target_h: int = 720):
@@ -1451,6 +1482,25 @@ def _cover_resize_image(img, target_w: int = 1280, target_h: int = 720):
     left = (new_w - target_w) // 2
     top = (new_h - target_h) // 2
     return img.crop((left, top, left + target_w, top + target_h))
+
+
+def _finalize_generated_thumbnail(raw_image: Path, output_path: Path) -> bool:
+    try:
+        from PIL import Image, ImageEnhance
+    except ImportError:
+        print("   ❌ Pillow no disponible para finalizar thumbnails")
+        return False
+
+    try:
+        img = Image.open(raw_image).convert("RGB")
+        img = _cover_resize_image(img, 1280, 720)
+        img = ImageEnhance.Contrast(img).enhance(1.04)
+        img = ImageEnhance.Sharpness(img).enhance(1.05)
+        img.save(str(output_path), "JPEG", quality=94, optimize=True)
+        return output_path.exists() and output_path.stat().st_size > 0
+    except Exception as e:
+        print(f"   ❌ Generated thumbnail finalize failed: {e}")
+        return False
 
 
 def _load_thumbnail_font(size: int):
@@ -1580,14 +1630,14 @@ def _build_premium_thumbnails_for_project(video_dir: Path, project_id: str, titl
         label = plan["label"]
         variant = plan["variant"]
         safe_variant = _thumbnail_safe_filename(variant)
-        background = thumbs_dir / f"THUMB_BG_{i:02d}_{safe_variant}.png"
+        raw = thumbs_dir / f"THUMB_RAW_{i:02d}_{safe_variant}.jpg"
         out = thumbs_dir / f"THUMB_{i:02d}_{label}_{safe_variant}.jpg"
         prompt = _build_premium_thumbnail_prompt(title, plan, agent_id=agent_id)
 
         print(f"   🖼️ Diseñando miniatura premium {i}/3 ({variant})")
-        if not _generate_premium_thumbnail_background(prompt, background):
+        if not _generate_premium_thumbnail_image(prompt, raw):
             continue
-        if not _render_premium_thumbnail(background, plan["hook"], out, variant=variant, badge=badge):
+        if not _finalize_generated_thumbnail(raw, out):
             continue
         upload = _upload_video_to_storage(out, f"{project_id}/thumbnails")
         if upload:
@@ -1595,8 +1645,9 @@ def _build_premium_thumbnails_for_project(video_dir: Path, project_id: str, titl
                 "index": i,
                 "label": label,
                 "variant": variant,
-                "source": "premium",
+                "source": "gpt-image",
                 "hook": plan["hook"],
+                "model": _thumbnail_model(),
                 "size_kb": round(out.stat().st_size / 1024, 1),
                 "gs_path": upload["gs_path"],
                 "signed_url": upload["signed_url"],
@@ -1722,7 +1773,8 @@ def _render_thumbnail(source_image: Path, title_text: str, output_path: Path,
 
 
 def _build_scene_thumbnails_for_project(video_dir: Path, project_id: str, title: str,
-                                        start_index: int = 1) -> list:
+                                        start_index: int = 1,
+                                        agent_id: str | None = None) -> list:
     """
     Fallback barato: 3 thumbnails 1280x720 a partir de imagenes del video.
     """
@@ -1736,7 +1788,7 @@ def _build_scene_thumbnails_for_project(video_dir: Path, project_id: str, title:
         print(f"   ⚠️ Solo {len(scenes)} imágenes disponibles, mínimo 3 para thumbnails")
         return []
 
-    keywords = _pick_thumbnail_keywords(title)
+    plans = _thumbnail_hook_plans(title, agent_id=agent_id)
 
     # Pick 3 escenas distintas: 20%, 50%, 80% del video
     picks = [
@@ -1751,9 +1803,11 @@ def _build_scene_thumbnails_for_project(video_dir: Path, project_id: str, title:
     results = []
     for offset, (label, src, variant) in enumerate(picks, 0):
         i = start_index + offset
+        plan = plans[min(i - 1, len(plans) - 1)]
+        hook = plan.get("hook") or _pick_thumbnail_keywords(title, max_words=3)
         out = thumbs_dir / f"THUMB_{i:02d}_{label}_{variant}.jpg"
         print(f"   🖼️ Renderizando thumbnail fallback {i} ({label}, variant={variant})")
-        if not _render_thumbnail(src, keywords, out, variant=variant):
+        if not _render_thumbnail(src, hook, out, variant=variant):
             continue
         upload = _upload_video_to_storage(out, f"{project_id}/thumbnails")
         if upload:
@@ -1762,6 +1816,7 @@ def _build_scene_thumbnails_for_project(video_dir: Path, project_id: str, title:
                 "label": label,
                 "variant": variant,
                 "source": "scene",
+                "hook": hook,
                 "size_kb": round(out.stat().st_size / 1024, 1),
                 "gs_path": upload["gs_path"],
                 "signed_url": upload["signed_url"],
@@ -1784,9 +1839,9 @@ def build_thumbnails_for_project(video_dir: Path, project_id: str, title: str,
     Genera 3 thumbnails 1280x720 y las sube a Firebase Storage.
 
     Ruta premium:
-      1. Genera una imagen base 16:9 sin texto.
-      2. Renderiza el texto nosotros para evitar letras rotas.
-      3. Si cualquier parte falla, usa el fallback de escenas existentes.
+      1. Genera la miniatura completa con GPT Image y texto integrado.
+      2. Normaliza a JPEG 1280x720.
+      3. Si cualquier parte falla, usa fallback local con hooks cortos.
     """
     use_premium = _premium_thumbnails_enabled() if premium is None else bool(premium)
     results = []
@@ -1807,6 +1862,7 @@ def build_thumbnails_for_project(video_dir: Path, project_id: str, title: str,
         project_id,
         title,
         start_index=len(results) + 1,
+        agent_id=agent_id,
     )
     return _reindex_thumbnail_results((results + fallback)[:3])
 
