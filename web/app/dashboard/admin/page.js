@@ -33,6 +33,7 @@ function Stat({ label, value }) {
 export default function AdminPage() {
   const { user, profile } = useAuth();
   const [users, setUsers] = useState([]);
+  const [ledger, setLedger] = useState([]);
   const [metrics, setMetrics] = useState(null);
   const [queue, setQueue] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -48,18 +49,21 @@ export default function AdminPage() {
     setError("");
     try {
       const headers = await authHeaders(user);
-      const [usersRes, metricsRes, queueRes] = await Promise.all([
+      const [usersRes, metricsRes, queueRes, ledgerRes] = await Promise.all([
         fetch(`${getApiBase()}/admin/users`, { headers }),
         fetch(`${getApiBase()}/metrics`, { headers }),
         fetch(`${getApiBase()}/queue/health`, { headers }),
+        fetch(`${getApiBase()}/admin/credit-ledger?limit=25`, { headers }),
       ]);
       const usersData = await usersRes.json().catch(() => ({}));
       const metricsData = await metricsRes.json().catch(() => ({}));
       const queueData = await queueRes.json().catch(() => ({}));
+      const ledgerData = await ledgerRes.json().catch(() => ({}));
       if (!usersRes.ok) throw new Error(usersData.detail || usersData.error || "No se pudo cargar usuarios");
       setUsers(usersData.users || []);
       setMetrics(metricsRes.ok ? metricsData : null);
       setQueue(queueRes.ok ? queueData : null);
+      setLedger(ledgerRes.ok ? ledgerData.entries || [] : []);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -109,6 +113,9 @@ export default function AdminPage() {
   }
 
   const pending = users.filter((u) => u.creditRequest?.status === "pending").length;
+  const userById = new Map(users.map((item) => [item.uid, item]));
+  const maxActive = metrics?.jobs?.limits?.max_active;
+  const maxDaily = metrics?.jobs?.limits?.max_24h;
 
   return (
     <div>
@@ -130,9 +137,15 @@ export default function AdminPage() {
         }}
       >
         <Stat label="Solicitudes" value={pending} />
-        <Stat label="Procesos activos" value={metrics?.jobs?.active ?? "—"} />
+        <Stat
+          label="Capacidad activa"
+          value={`${metrics?.jobs?.active ?? "—"}/${maxActive || "∞"}`}
+        />
         <Stat label="Workers ocupados" value={queue?.active_tasks ?? "—"} />
-        <Stat label="Completados 24h" value={metrics?.jobs?.completed_24h ?? "—"} />
+        <Stat
+          label="Iniciados 24h"
+          value={`${metrics?.jobs?.started_24h ?? "—"}/${maxDaily || "∞"}`}
+        />
       </div>
 
       {error && (
@@ -227,6 +240,60 @@ export default function AdminPage() {
                       <Icon name="plus" size={14} />
                       {granting === item.uid ? "Asignando" : "Asignar"}
                     </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="cf-card" style={{ padding: "var(--s-5)", marginTop: "var(--s-5)" }}>
+        <div className="cf-mono-sm" style={{ color: "var(--paper-mute)", marginBottom: 6 }}>
+          LEDGER
+        </div>
+        <h2 className="cf-h3" style={{ margin: "0 0 var(--s-4)" }}>
+          Movimientos recientes
+        </h2>
+        {ledger.length === 0 ? (
+          <div className="cf-mono-sm">SIN MOVIMIENTOS TODAVÍA</div>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {ledger.map((entry) => {
+              const owner = userById.get(entry.uid);
+              const amount = Number(entry.amount) || 0;
+              return (
+                <div
+                  key={entry.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(220px, 1.2fr) minmax(90px, 0.4fr) minmax(120px, 0.6fr) minmax(160px, 0.8fr)",
+                    gap: 12,
+                    alignItems: "center",
+                    padding: "12px 0",
+                    borderTop: "1px solid var(--rule-1)",
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {owner?.email || entry.uid}
+                    </div>
+                    <div className="cf-mono-sm" style={{ color: "var(--paper-mute)" }}>
+                      {String(entry.reason || entry.type || "movimiento").toUpperCase()}
+                    </div>
+                  </div>
+                  <div
+                    className="cf-mono-sm"
+                    style={{ color: amount >= 0 ? "var(--ok)" : "var(--ember)" }}
+                  >
+                    {amount > 0 ? "+" : ""}
+                    {amount}
+                  </div>
+                  <div className="cf-mono-sm">
+                    {entry.balanceAfter?.remaining ?? "—"} REST.
+                  </div>
+                  <div className="cf-mono-sm" style={{ color: "var(--paper-mute)" }}>
+                    {fmtDate(entry.createdAt)}
                   </div>
                 </div>
               );

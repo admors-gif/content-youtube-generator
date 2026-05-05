@@ -311,6 +311,134 @@ def _serialize_firestore_value(value):
     return str(value)
 
 
+def _credit_ledger_payload(
+    *,
+    uid: str,
+    entry_type: str,
+    amount: int,
+    reason: str,
+    actor: str,
+    firestore,
+    project_id: str | None = None,
+    balance_before: dict | None = None,
+    balance_after: dict | None = None,
+    metadata: dict | None = None,
+) -> dict:
+    payload = {
+        "uid": uid,
+        "type": entry_type,
+        "amount": amount,
+        "reason": reason,
+        "actor": actor,
+        "createdAt": firestore.SERVER_TIMESTAMP,
+    }
+    if project_id:
+        payload["projectId"] = project_id
+    if balance_before is not None:
+        payload["balanceBefore"] = balance_before
+    if balance_after is not None:
+        payload["balanceAfter"] = balance_after
+    if metadata:
+        payload["metadata"] = metadata
+    return payload
+
+
+def _write_credit_ledger(
+    db,
+    firestore,
+    *,
+    uid: str,
+    entry_type: str,
+    amount: int,
+    reason: str,
+    actor: str,
+    project_id: str | None = None,
+    balance_before: dict | None = None,
+    balance_after: dict | None = None,
+    metadata: dict | None = None,
+    transaction=None,
+) -> str:
+    ref = db.collection("creditLedger").document()
+    payload = _credit_ledger_payload(
+        uid=uid,
+        entry_type=entry_type,
+        amount=amount,
+        reason=reason,
+        actor=actor,
+        project_id=project_id,
+        balance_before=balance_before,
+        balance_after=balance_after,
+        metadata=metadata,
+        firestore=firestore,
+    )
+    if transaction is not None:
+        transaction.set(ref, payload)
+    else:
+        ref.set(payload)
+    return ref.id
+
+
+def _balance_after_delta(counts: dict, *, used_delta: int = 0, extra_delta: int = 0) -> dict:
+    after = dict(counts or {})
+    after["used"] = max(0, _safe_int(after.get("used"), 0) + used_delta)
+    after["extra"] = max(0, _safe_int(after.get("extra"), 0) + extra_delta)
+    total = max(0, _safe_int(after.get("included"), 0)) + after["extra"]
+    after["total"] = total
+    after["remaining"] = max(0, total - after["used"])
+    return after
+
+
+def _extra_increment_for_grant(counts: dict, amount: int) -> int:
+    debt = max(0, _safe_int(counts.get("used"), 0) - _safe_int(counts.get("total"), 0))
+    return max(0, amount) + debt
+
+
+def _get_production_limits() -> dict:
+    return {
+        "paused": os.environ.get("CONTENT_FACTORY_PRODUCTION_PAUSED", "").strip().lower()
+        in {"1", "true", "yes", "on"},
+        "max_active": max(0, _safe_int(os.environ.get("CONTENT_FACTORY_MAX_ACTIVE_PRODUCTIONS"), 3)),
+        "max_24h": max(0, _safe_int(os.environ.get("CONTENT_FACTORY_MAX_PRODUCTIONS_24H"), 25)),
+    }
+
+
+def _production_capacity_snapshot(db) -> dict:
+    limits = _get_production_limits()
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=24)
+    active = 0
+    started_24h = 0
+
+    for project in db.collection("projects").stream():
+        data = project.to_dict() or {}
+        if data.get("status") == "producing":
+            active += 1
+
+        started_at = data.get("productionStartedAt")
+        if started_at and hasattr(started_at, "timestamp"):
+            if datetime.fromtimestamp(started_at.timestamp(), tz=timezone.utc) >= cutoff:
+                started_24h += 1
+
+    return {
+        **limits,
+        "active": active,
+        "started_24h": started_24h,
+        "active_available": limits["max_active"] <= 0 or active < limits["max_active"],
+        "daily_available": limits["max_24h"] <= 0 or started_24h < limits["max_24h"],
+    }
+
+
+def _assert_production_capacity(db):
+    capacity = _production_capacity_snapshot(db)
+    if capacity["paused"]:
+        raise HTTPException(status_code=503, detail="production paused by operator")
+    if not capacity["active_available"]:
+        raise HTTPException(status_code=429, detail="production capacity reached")
+    if not capacity["daily_available"]:
+        raise HTTPException(status_code=429, detail="daily production limit reached")
+    return capacity
+
+
 def _validate_project_payload(data: dict) -> dict:
     title = (data.get("title") or data.get("topic") or "").strip()
     agent_id = (data.get("agentId") or "").strip()
@@ -1906,16 +2034,14 @@ def metrics(request: Request):
         # En producción a escala, esto debe migrar a contadores agregados o cache.
         all_projects = list(db.collection("projects").stream())
 
-        active = 0
         completed_24h = 0
         errored_24h = 0
         total_size_mb = 0.0
+        capacity = _production_capacity_snapshot(db)
 
         for p in all_projects:
             d = p.to_dict() or {}
             status = d.get("status", "")
-            if status == "producing":
-                active += 1
             size = d.get("videoSizeMB")
             if isinstance(size, (int, float)):
                 total_size_mb += size
@@ -1931,10 +2057,16 @@ def metrics(request: Request):
 
         return {
             "jobs": {
-                "active": active,
+                "active": capacity["active"],
+                "started_24h": capacity["started_24h"],
                 "completed_24h": completed_24h,
                 "errored_24h": errored_24h,
                 "total_known": len(all_projects),
+                "limits": {
+                    "paused": capacity["paused"],
+                    "max_active": capacity["max_active"],
+                    "max_24h": capacity["max_24h"],
+                },
             },
             "storage": {
                 "total_video_mb": round(total_size_mb, 1),
@@ -2041,6 +2173,31 @@ def admin_users(request: Request):
         return JSONResponse(status_code=500, content={"error": str(e)[:200]})
 
 
+@app.get("/admin/credit-ledger")
+def admin_credit_ledger(request: Request, limit: int = 50):
+    """Últimos movimientos de créditos para auditoría operacional."""
+    _require_admin(request)
+    limit = max(1, min(200, _safe_int(limit, 50)))
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+
+        query = (
+            db.collection("creditLedger")
+            .order_by("createdAt", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+        )
+        entries = []
+        for doc in query.stream():
+            data = doc.to_dict() or {}
+            data["id"] = doc.id
+            entries.append(_serialize_firestore_value(data))
+        return {"ok": True, "entries": entries}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
 @app.post("/admin/users/{uid}/credits")
 async def admin_grant_user_credits(uid: str, request: Request):
     """Concede créditos extra. Solo admin; los usuarios no pueden autootorgarse saldo."""
@@ -2058,18 +2215,41 @@ async def admin_grant_user_credits(uid: str, request: Request):
         from firebase_admin import firestore
         db = firestore.client()
         user_ref = db.collection("users").document(uid)
-        snap = user_ref.get()
-        if not snap.exists:
-            raise HTTPException(status_code=404, detail="user not found")
-
         admin_email = ((principal.get("token") or {}).get("email") or principal.get("uid") or "admin")
-        user_ref.update({
-            "credits.extra": firestore.Increment(amount),
-            "creditRequest.status": "approved",
-            "creditRequest.approvedAt": firestore.SERVER_TIMESTAMP,
-            "creditRequest.approvedBy": admin_email,
-            "lastActive": firestore.SERVER_TIMESTAMP,
-        })
+
+        @firestore.transactional
+        def _txn(transaction):
+            snap = user_ref.get(transaction=transaction)
+            if not snap.exists:
+                raise HTTPException(status_code=404, detail="user not found")
+            before = _credits_remaining(snap.to_dict() or {})
+            extra_increment = _extra_increment_for_grant(before, amount)
+            after = _balance_after_delta(before, extra_delta=extra_increment)
+            transaction.update(user_ref, {
+                "credits.extra": firestore.Increment(extra_increment),
+                "creditRequest.status": "approved",
+                "creditRequest.approvedAt": firestore.SERVER_TIMESTAMP,
+                "creditRequest.approvedBy": admin_email,
+                "lastActive": firestore.SERVER_TIMESTAMP,
+            })
+            _write_credit_ledger(
+                db,
+                firestore,
+                uid=uid,
+                entry_type="grant",
+                amount=amount,
+                reason="admin_credit_grant",
+                actor=admin_email,
+                balance_before=before,
+                balance_after=after,
+                metadata={
+                    "extraIncrement": extra_increment,
+                    "debtCovered": max(0, extra_increment - amount),
+                },
+                transaction=transaction,
+            )
+
+        _txn(db.transaction())
         updated = user_ref.get().to_dict() or {}
         return {
             "ok": True,
@@ -2147,10 +2327,25 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
                 counts = _credits_remaining(profile)
                 if counts["remaining"] <= 0:
                     raise HTTPException(status_code=402, detail="insufficient credits")
+                after_counts = _balance_after_delta(counts, used_delta=1)
                 transaction.update(user_ref, {
                     "credits.used": firestore.Increment(1),
                     "lastActive": firestore.SERVER_TIMESTAMP,
                 })
+                _write_credit_ledger(
+                    db,
+                    firestore,
+                    uid=uid,
+                    entry_type="consume",
+                    amount=-1,
+                    reason="project_create",
+                    actor=uid,
+                    project_id=project_ref.id,
+                    balance_before=counts,
+                    balance_after=after_counts,
+                    metadata={"agentId": payload["agent_id"]},
+                    transaction=transaction,
+                )
             else:
                 email = token.get("email") or ""
                 display_name = token.get("name") or (email.split("@")[0] if email else "Usuario")
@@ -2166,12 +2361,27 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
                 counts = _credits_remaining(profile)
                 if counts["remaining"] <= 0:
                     raise HTTPException(status_code=402, detail="insufficient credits")
+                after_counts = _balance_after_delta(counts, used_delta=1)
                 transaction.set(user_ref, {
                     **profile,
                     "credits": {"included": 1, "used": 1, "extra": 0},
                     "createdAt": firestore.SERVER_TIMESTAMP,
                     "lastActive": firestore.SERVER_TIMESTAMP,
                 })
+                _write_credit_ledger(
+                    db,
+                    firestore,
+                    uid=uid,
+                    entry_type="consume",
+                    amount=-1,
+                    reason="project_create",
+                    actor=uid,
+                    project_id=project_ref.id,
+                    balance_before=counts,
+                    balance_after=after_counts,
+                    metadata={"agentId": payload["agent_id"]},
+                    transaction=transaction,
+                )
 
             project_data = {
                 "userId": uid,
@@ -2256,12 +2466,27 @@ def delete_project(project_id: str, request: Request):
                 user_snap = user_ref.get(transaction=transaction)
                 if user_snap.exists:
                     counts = _credits_remaining(user_snap.to_dict() or {})
-                    next_used = max(0, counts["used"] - 1)
+                    after_counts = _balance_after_delta(counts, used_delta=-1)
+                    next_used = after_counts["used"]
                     transaction.update(user_ref, {
                         "credits.used": next_used,
                         "lastActive": firestore.SERVER_TIMESTAMP,
                     })
                     refunded = counts["used"] > next_used
+                    if refunded:
+                        _write_credit_ledger(
+                            db,
+                            firestore,
+                            uid=owner_uid,
+                            entry_type="refund",
+                            amount=1,
+                            reason="project_deleted_before_script",
+                            actor=principal.get("uid", "admin"),
+                            project_id=project_id,
+                            balance_before=counts,
+                            balance_after=after_counts,
+                            transaction=transaction,
+                        )
 
             transaction.delete(project_ref)
             return {"refunded": refunded, "hasScript": has_script, "creditsUsed": next_used}
@@ -2374,6 +2599,18 @@ async def trigger_production(request: Request, background_tasks: BackgroundTasks
         _ensure_firebase_initialized()
         from firebase_admin import firestore
         db = firestore.client()
+        _assert_production_capacity(db)
+    except HTTPException:
+        _release_production_lock(project_id, lock_result.get("lock_id"))
+        raise
+    except Exception as capacity_err:
+        _release_production_lock(project_id, lock_result.get("lock_id"))
+        raise HTTPException(status_code=503, detail=f"production capacity check failed: {str(capacity_err)[:120]}")
+
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
         update_data = {
             "script.approved": True,
             "status": "producing",
@@ -2461,6 +2698,12 @@ async def retry_production(request: Request, background_tasks: BackgroundTasks):
                 "message": f"Retry already in progress (started {age}s ago)",
             }
 
+        try:
+            _assert_production_capacity(db)
+        except HTTPException:
+            _release_production_lock(project_id, lock_result.get("lock_id"))
+            raise
+
         # Resetear a estado "produced" para re-lanzar
         doc_ref.update({
             "status": "producing",
@@ -2487,6 +2730,8 @@ async def retry_production(request: Request, background_tasks: BackgroundTasks):
                 "fallback": "inline",
                 "message": f"Retry started inline for project {project_id}",
             }
+    except HTTPException:
+        raise
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
