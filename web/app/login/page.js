@@ -19,7 +19,13 @@ import Icon from "@/components/Icon";
  * Responsive: <900px colapsa a 1 columna, panel left arriba (compacto).
  */
 export default function LoginPage() {
-  const { signInWithGoogle, signInWithEmail, signUpWithEmail } = useAuth();
+  const {
+    user,
+    signInWithGoogle,
+    signInWithEmail,
+    signUpWithEmail,
+    signOut,
+  } = useAuth();
   const router = useRouter();
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
@@ -31,8 +37,23 @@ export default function LoginPage() {
   const handleGoogle = async () => {
     try {
       setLoading(true);
-      await signInWithGoogle();
+      await signInWithGoogle({ selectAccount: true });
       router.push("/dashboard");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUseAnotherAccount = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      await signOut();
+      setEmail("");
+      setPassword("");
+      setName("");
     } catch (e) {
       setError(e.message);
     } finally {
@@ -299,6 +320,24 @@ export default function LoginPage() {
               ? "Tres documentales gratis al mes. Sin tarjeta."
               : "Tres documentales al mes, sin tarjeta. Cancela cuando quieras."}
           </p>
+
+          {user && (
+            <button
+              type="button"
+              onClick={handleUseAnotherAccount}
+              disabled={loading}
+              className="cf-btn cf-btn--secondary"
+              style={{
+                width: "100%",
+                justifyContent: "center",
+                gap: 10,
+                marginBottom: "var(--s-4)",
+              }}
+            >
+              <Icon name="logOut" size={16} />
+              Usar otra cuenta
+            </button>
+          )}
 
           <form
             onSubmit={handleEmail}

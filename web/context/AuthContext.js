@@ -61,8 +61,11 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = async ({ selectAccount = true } = {}) => {
     const provider = new GoogleAuthProvider();
+    if (selectAccount) {
+      provider.setCustomParameters({ prompt: "select_account" });
+    }
     return signInWithPopup(auth, provider);
   };
 
