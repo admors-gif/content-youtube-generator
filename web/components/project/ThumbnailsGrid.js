@@ -12,6 +12,7 @@ const THUMB_LABELS = {
   early: "INICIO",
   mid: "PUNTO FUERTE",
   closing: "CIERRE",
+  late: "CIERRE",
 };
 
 export default function ThumbnailsGrid({ thumbnails }) {

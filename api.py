@@ -6,6 +6,8 @@ import os
 import sys
 import json
 import logging
+import base64
+import urllib.request
 from datetime import timedelta, datetime, timezone
 from pathlib import Path
 from scripts.media_validation import (
@@ -1240,6 +1242,335 @@ def _pick_thumbnail_keywords(title: str, max_words: int = 4) -> str:
     return " ".join(words[:max_words]).upper() if words else title.upper()[:50]
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _premium_thumbnails_enabled() -> bool:
+    return _env_bool("CONTENT_FACTORY_PREMIUM_THUMBNAILS", True)
+
+
+def _thumbnail_model() -> str:
+    return os.environ.get("CONTENT_FACTORY_PREMIUM_THUMBNAIL_MODEL", "gpt-image-2").strip() or "gpt-image-2"
+
+
+def _thumbnail_quality() -> str:
+    return os.environ.get("CONTENT_FACTORY_PREMIUM_THUMBNAIL_QUALITY", "medium").strip() or "medium"
+
+
+def _thumbnail_generation_size(model: str) -> str:
+    # GPT Image 2 supports exact 16:9 sizes; older image models are safer on
+    # common landscape sizes and then get cropped by our renderer.
+    return "1280x720" if model.startswith("gpt-image-2") else "1536x1024"
+
+
+def _thumbnail_font_paths() -> list[str]:
+    return [
+        "/usr/share/fonts/truetype/montserrat/Montserrat-Black.ttf",
+        "/usr/share/fonts/truetype/montserrat/Montserrat-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "C:/Windows/Fonts/arialbd.ttf",
+        "C:/Windows/Fonts/impact.ttf",
+    ]
+
+
+def _thumbnail_safe_filename(value: str) -> str:
+    import re
+    slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", value.strip().lower()).strip("_")
+    return slug[:48] or "thumbnail"
+
+
+def _thumbnail_hook_lines(hook: str) -> list[str]:
+    lines = [line.strip().upper() for line in (hook or "").splitlines() if line.strip()]
+    return lines[:3] or ["MIRA ESTO"]
+
+
+def _thumbnail_hook_plans(title: str, agent_id: str | None = None) -> list[dict]:
+    """
+    Three deterministic YouTube-thumbnail concepts. We keep text outside the
+    generated image so the API never has to spell Spanish correctly.
+    """
+    clean_title = " ".join((title or "").split()) or "este documental"
+    lower = clean_title.lower()
+    is_attraction = any(word in lower for word in ["atraccion", "atracción", "amor", "enamor", "pareja"])
+    is_science = any(word in lower for word in ["ciencia", "cerebro", "psicologia", "psicología", "neuro"])
+    keywords = _pick_thumbnail_keywords(clean_title, max_words=3)
+
+    if is_attraction or is_science:
+        return [
+            {
+                "label": "early",
+                "variant": "impacto",
+                "hook": "TU CEREBRO\nYA ELIGIÓ",
+                "concept": "two attractive adults in dramatic side profile facing each other, separated by a glowing neural brain and electric heart signal, blue scientific light on the left and red emotional light on the right",
+            },
+            {
+                "label": "mid",
+                "variant": "secreto",
+                "hook": "CIENCIA\nDE LA ATRACCIÓN",
+                "concept": "a glowing human brain, dopamine and oxytocin inspired molecular diagrams, magnetic energy between two people at the edges of frame, intelligent viral science thumbnail",
+            },
+            {
+                "label": "closing",
+                "variant": "revelacion",
+                "hook": "NO ES AMOR\nES QUÍMICA",
+                "concept": "cinematic podcast set with a microphone, a glowing brain and heart connection in the background, romantic tension without physical contact, premium documentary atmosphere",
+            },
+        ]
+
+    return [
+        {
+            "label": "early",
+            "variant": "impacto",
+            "hook": keywords or "LA VERDAD",
+            "concept": f"high-stakes cinematic documentary poster background about {clean_title}, a single expressive main subject on one side, bold contrast, mystery and curiosity",
+        },
+        {
+            "label": "mid",
+            "variant": "secreto",
+            "hook": "NADIE\nTE LO CONTÓ",
+            "concept": f"hidden evidence, dramatic light, symbolic objects and investigative mood connected to {clean_title}, premium viral YouTube documentary style",
+        },
+        {
+            "label": "closing",
+            "variant": "revelacion",
+            "hook": "LA PARTE\nOCULTA",
+            "concept": f"cinematic reveal moment for a documentary about {clean_title}, intense contrast, clean dark space for headline, sophisticated editorial look",
+        },
+    ]
+
+
+def _build_premium_thumbnail_prompt(title: str, plan: dict, agent_id: str | None = None) -> str:
+    clean_title = " ".join((title or "").split()) or "este documental"
+    format_hint = "podcast thumbnail" if agent_id == "agent_podcast_general" else "documentary thumbnail"
+    return (
+        "Create a high-conversion YouTube "
+        f"{format_hint} background image, 16:9 landscape, topic: \"{clean_title}\".\n"
+        f"Core concept: {plan['concept']}.\n"
+        "Composition requirements:\n"
+        "- Leave a clean dark central/lower area for a large Spanish headline overlay added later.\n"
+        "- No generated text, no readable letters, no logos, no watermarks.\n"
+        "- No visible hands or fingers; crop people at face/shoulders or keep hands fully outside the frame.\n"
+        "- Faces must be realistic, expressive, premium, not uncanny.\n"
+        "- Strong contrast, sharp focus, punchy blue/red/amber accents, mobile-readable composition.\n"
+        "- Avoid horror, gore, distorted bodies, extra limbs, malformed anatomy, and controversial shock imagery.\n"
+        "Style: hyper-realistic cinematic poster, premium viral YouTube thumbnail, "
+        "Netflix documentary meets intelligent clickbait, crisp details, 1280x720 safe framing."
+    )
+
+
+def _write_openai_image_data(image_data, output_path: Path) -> bool:
+    b64_value = getattr(image_data, "b64_json", None)
+    if b64_value is None and isinstance(image_data, dict):
+        b64_value = image_data.get("b64_json")
+    if b64_value:
+        output_path.write_bytes(base64.b64decode(b64_value))
+        return output_path.exists() and output_path.stat().st_size > 0
+
+    image_url = getattr(image_data, "url", None)
+    if image_url is None and isinstance(image_data, dict):
+        image_url = image_data.get("url")
+    if image_url:
+        with urllib.request.urlopen(image_url, timeout=90) as resp:
+            output_path.write_bytes(resp.read())
+        return output_path.exists() and output_path.stat().st_size > 0
+    return False
+
+
+def _generate_premium_thumbnail_background(prompt: str, output_path: Path) -> bool:
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        print("   ⚠️ OPENAI_API_KEY no configurada; usando miniaturas de escenas")
+        return False
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        model = _thumbnail_model()
+        params = {
+            "model": model,
+            "prompt": prompt,
+            "size": _thumbnail_generation_size(model),
+            "quality": _thumbnail_quality(),
+            "n": 1,
+        }
+        response = client.images.generate(**params)
+        data = getattr(response, "data", None) or []
+        if not data:
+            print("   ⚠️ Image API no devolvió datos para thumbnail premium")
+            return False
+        return _write_openai_image_data(data[0], output_path)
+    except Exception as e:
+        print(f"   ⚠️ Premium thumbnail generation failed: {e}")
+        return False
+
+
+def _cover_resize_image(img, target_w: int = 1280, target_h: int = 720):
+    from PIL import Image
+    src_w, src_h = img.size
+    src_ratio = src_w / src_h
+    target_ratio = target_w / target_h
+    if src_ratio > target_ratio:
+        new_h = target_h
+        new_w = int(new_h * src_ratio)
+    else:
+        new_w = target_w
+        new_h = int(new_w / src_ratio)
+    img = img.resize((new_w, new_h), Image.LANCZOS)
+    left = (new_w - target_w) // 2
+    top = (new_h - target_h) // 2
+    return img.crop((left, top, left + target_w, top + target_h))
+
+
+def _load_thumbnail_font(size: int):
+    from PIL import ImageFont
+    for font_path in _thumbnail_font_paths():
+        try:
+            if os.path.exists(font_path):
+                return ImageFont.truetype(font_path, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _fit_thumbnail_font(draw, lines: list[str], max_width: int, max_height: int):
+    for size in range(136, 54, -4):
+        font = _load_thumbnail_font(size)
+        spacing = max(6, size // 12)
+        widths = []
+        heights = []
+        for line in lines:
+            bbox = draw.textbbox((0, 0), line, font=font, stroke_width=8)
+            widths.append(bbox[2] - bbox[0])
+            heights.append(bbox[3] - bbox[1])
+        total_height = sum(heights) + spacing * (len(lines) - 1)
+        if max(widths or [0]) <= max_width and total_height <= max_height:
+            return font, spacing, widths, heights
+    font = _load_thumbnail_font(54)
+    spacing = 6
+    widths = []
+    heights = []
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=font, stroke_width=8)
+        widths.append(bbox[2] - bbox[0])
+        heights.append(bbox[3] - bbox[1])
+    return font, spacing, widths, heights
+
+
+def _render_premium_thumbnail(base_image: Path, hook_text: str, output_path: Path,
+                              variant: str = "impacto", badge: str | None = None) -> bool:
+    try:
+        from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+    except ImportError:
+        print("   ❌ Pillow no disponible para thumbnails")
+        return False
+
+    try:
+        img = Image.open(base_image).convert("RGB")
+        img = _cover_resize_image(img, 1280, 720)
+
+        img = ImageEnhance.Color(img).enhance(1.20)
+        img = ImageEnhance.Contrast(img).enhance(1.18)
+        img = ImageEnhance.Sharpness(img).enhance(1.12)
+        img = ImageEnhance.Brightness(img).enhance(0.90)
+
+        overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        gd = ImageDraw.Draw(overlay)
+        for y in range(220, 720):
+            alpha = int(((y - 220) / 500) * 210)
+            gd.line([(0, y), (1280, y)], fill=(0, 0, 0, min(alpha, 210)))
+        gd.rounded_rectangle((52, 355, 1228, 682), radius=20, fill=(0, 0, 0, 76))
+        gd.rectangle((52, 668, 1228, 682), fill=(0, 216, 255, 190 if variant == "impacto" else 120))
+        img = Image.alpha_composite(img.convert("RGBA"), overlay)
+
+        draw = ImageDraw.Draw(img, "RGBA")
+        lines = _thumbnail_hook_lines(hook_text)
+        font, spacing, widths, heights = _fit_thumbnail_font(draw, lines, 1120, 270)
+        total_height = sum(heights) + spacing * (len(lines) - 1)
+        y = 385 + (270 - total_height) // 2
+        colors = [(255, 255, 255), (255, 214, 10), (255, 255, 255)]
+
+        for idx, line in enumerate(lines):
+            width = widths[idx]
+            height = heights[idx]
+            x = (1280 - width) // 2
+            fill = colors[min(idx, len(colors) - 1)]
+            if any(token in line for token in ["ATRAC", "QUIM", "QUÍM", "OCULTA", "ELIG"]):
+                fill = (255, 214, 10)
+            shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            sd = ImageDraw.Draw(shadow)
+            sd.text((x + 8, y + 8), line, font=font, fill=(0, 0, 0, 190), stroke_width=10, stroke_fill=(0, 0, 0, 210))
+            shadow = shadow.filter(ImageFilter.GaussianBlur(1.3))
+            img = Image.alpha_composite(img, shadow)
+            draw = ImageDraw.Draw(img, "RGBA")
+            draw.text(
+                (x, y),
+                line,
+                font=font,
+                fill=fill,
+                stroke_width=8,
+                stroke_fill=(0, 0, 0),
+            )
+            y += height + spacing
+
+        if badge:
+            badge_text = badge.strip().upper()[:14]
+            badge_font = _load_thumbnail_font(34)
+            bbox = draw.textbbox((0, 0), badge_text, font=badge_font, stroke_width=2)
+            bw = bbox[2] - bbox[0] + 34
+            bh = bbox[3] - bbox[1] + 22
+            x0, y0 = 1280 - bw - 52, 52
+            draw.rounded_rectangle((x0, y0, x0 + bw, y0 + bh), radius=10, fill=(225, 52, 36, 235))
+            draw.text((x0 + 17, y0 + 9), badge_text, font=badge_font, fill=(255, 255, 255), stroke_width=2, stroke_fill=(0, 0, 0))
+
+        img.convert("RGB").save(str(output_path), "JPEG", quality=94, optimize=True)
+        return output_path.exists() and output_path.stat().st_size > 0
+    except Exception as e:
+        print(f"   ❌ Premium thumbnail render failed: {e}")
+        return False
+
+
+def _build_premium_thumbnails_for_project(video_dir: Path, project_id: str, title: str,
+                                          agent_id: str | None = None) -> list:
+    if not _premium_thumbnails_enabled():
+        return []
+
+    thumbs_dir = video_dir / "thumbnails"
+    thumbs_dir.mkdir(parents=True, exist_ok=True)
+    badge = "PODCAST" if agent_id == "agent_podcast_general" else None
+    results = []
+    for i, plan in enumerate(_thumbnail_hook_plans(title, agent_id=agent_id), 1):
+        label = plan["label"]
+        variant = plan["variant"]
+        safe_variant = _thumbnail_safe_filename(variant)
+        background = thumbs_dir / f"THUMB_BG_{i:02d}_{safe_variant}.png"
+        out = thumbs_dir / f"THUMB_{i:02d}_{label}_{safe_variant}.jpg"
+        prompt = _build_premium_thumbnail_prompt(title, plan, agent_id=agent_id)
+
+        print(f"   🖼️ Diseñando miniatura premium {i}/3 ({variant})")
+        if not _generate_premium_thumbnail_background(prompt, background):
+            continue
+        if not _render_premium_thumbnail(background, plan["hook"], out, variant=variant, badge=badge):
+            continue
+        upload = _upload_video_to_storage(out, f"{project_id}/thumbnails")
+        if upload:
+            results.append({
+                "index": i,
+                "label": label,
+                "variant": variant,
+                "source": "premium",
+                "hook": plan["hook"],
+                "size_kb": round(out.stat().st_size / 1024, 1),
+                "gs_path": upload["gs_path"],
+                "signed_url": upload["signed_url"],
+            })
+            print(f"   ✅ Miniatura premium {i} subida ({results[-1]['size_kb']} KB)")
+    return results
+
+
 def _render_thumbnail(source_image: Path, title_text: str, output_path: Path,
                       variant: str = "center", theme: dict = None) -> bool:
     """
@@ -1356,13 +1687,10 @@ def _render_thumbnail(source_image: Path, title_text: str, output_path: Path,
         return False
 
 
-def build_thumbnails_for_project(video_dir: Path, project_id: str, title: str) -> list:
+def _build_scene_thumbnails_for_project(video_dir: Path, project_id: str, title: str,
+                                        start_index: int = 1) -> list:
     """
-    Genera 3 thumbnails 1280x720 a partir de imágenes del video y los sube
-    a Firebase Storage.
-
-    Estrategia: pick 3 escenas distintas (early, mid, late) y aplica un
-    variant de composición distinto a cada una para diversidad visual.
+    Fallback barato: 3 thumbnails 1280x720 a partir de imagenes del video.
     """
     images_dir = video_dir / "images"
     if not images_dir.is_dir():
@@ -1387,9 +1715,10 @@ def build_thumbnails_for_project(video_dir: Path, project_id: str, title: str) -
     thumbs_dir.mkdir(parents=True, exist_ok=True)
 
     results = []
-    for i, (label, src, variant) in enumerate(picks, 1):
+    for offset, (label, src, variant) in enumerate(picks, 0):
+        i = start_index + offset
         out = thumbs_dir / f"THUMB_{i:02d}_{label}_{variant}.jpg"
-        print(f"   🖼️ Renderizando thumbnail {i}/3 ({label}, variant={variant})")
+        print(f"   🖼️ Renderizando thumbnail fallback {i} ({label}, variant={variant})")
         if not _render_thumbnail(src, keywords, out, variant=variant):
             continue
         upload = _upload_video_to_storage(out, f"{project_id}/thumbnails")
@@ -1398,12 +1727,54 @@ def build_thumbnails_for_project(video_dir: Path, project_id: str, title: str) -
                 "index": i,
                 "label": label,
                 "variant": variant,
+                "source": "scene",
                 "size_kb": round(out.stat().st_size / 1024, 1),
                 "gs_path": upload["gs_path"],
                 "signed_url": upload["signed_url"],
             })
             print(f"   ✅ Thumbnail {i} subido ({results[-1]['size_kb']} KB)")
     return results
+
+
+def _reindex_thumbnail_results(results: list) -> list:
+    normalized = []
+    for i, item in enumerate(results, 1):
+        normalized.append({**item, "index": i})
+    return normalized
+
+
+def build_thumbnails_for_project(video_dir: Path, project_id: str, title: str,
+                                 agent_id: str | None = None,
+                                 premium: bool | None = None) -> list:
+    """
+    Genera 3 thumbnails 1280x720 y las sube a Firebase Storage.
+
+    Ruta premium:
+      1. Genera una imagen base 16:9 sin texto.
+      2. Renderiza el texto nosotros para evitar letras rotas.
+      3. Si cualquier parte falla, usa el fallback de escenas existentes.
+    """
+    use_premium = _premium_thumbnails_enabled() if premium is None else bool(premium)
+    results = []
+    if use_premium:
+        results = _build_premium_thumbnails_for_project(
+            video_dir,
+            project_id,
+            title,
+            agent_id=agent_id,
+        )
+        if len(results) >= 3:
+            return _reindex_thumbnail_results(results[:3])
+        if results:
+            print(f"   ⚠️ Premium thumbnails incompletas ({len(results)}/3); completando con escenas")
+
+    fallback = _build_scene_thumbnails_for_project(
+        video_dir,
+        project_id,
+        title,
+        start_index=len(results) + 1,
+    )
+    return _reindex_thumbnail_results((results + fallback)[:3])
 
 
 def _build_master_audio(video_dir: Path) -> Path | None:
@@ -1532,11 +1903,11 @@ _AGENT_CATALOG = """
 
 
 @app.post("/thumbnails/build/{project_id}")
-def thumbnails_build(project_id: str, request: Request, force: bool = False):
+def thumbnails_build(project_id: str, request: Request, force: bool = False, premium: bool | None = None):
     """
     Genera thumbnails on-demand para un proyecto completado (backfill).
     Idempotency: si ya hay thumbnails y no se pasa ?force=true, devuelve los
-    existentes sin regenerar (evita ~$0.90 USD de FLUX por doble click).
+    existentes sin regenerar (evita doble gasto accidental).
     """
     _require_project_access(request, project_id, allow_admin=True)
     try:
@@ -1561,13 +1932,14 @@ def thumbnails_build(project_id: str, request: Request, force: bool = False):
 
         folder = data.get("videoFolder") or ""
         title = data.get("title") or ""
+        agent_id = data.get("agentId") or ""
         if not folder:
             return JSONResponse(status_code=400, content={"error": "project has no videoFolder"})
         video_dir = Path(f"/app/output/videos/{folder}")
         if not video_dir.is_dir():
             return JSONResponse(status_code=404, content={"error": "video folder not on disk"})
 
-        results = build_thumbnails_for_project(video_dir, project_id, title)
+        results = build_thumbnails_for_project(video_dir, project_id, title, agent_id=agent_id, premium=premium)
         if results:
             doc_ref.update({"thumbnails": results})
         return {"thumbnails": results, "count": len(results), "cached": False}
@@ -3390,7 +3762,13 @@ def run_production(project_id):
             try:
                 update_progress(99, "Diseñando miniaturas...", "publishing")
                 project_title = project.get("title", "")
-                thumbnails_results = build_thumbnails_for_project(video_dir, project_id, project_title)
+                project_agent_id = project.get("agentId", "")
+                thumbnails_results = build_thumbnails_for_project(
+                    video_dir,
+                    project_id,
+                    project_title,
+                    agent_id=project_agent_id,
+                )
                 print(f"   🖼️ Thumbnails generados: {len(thumbnails_results)}/3", flush=True)
             except Exception as thumb_err:
                 print(f"   ⚠️ Thumbnails generation failed (no bloqueante): {thumb_err}", flush=True)
