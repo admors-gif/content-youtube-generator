@@ -103,6 +103,7 @@ export default function Home() {
     >
       {/* Header sticky */}
       <header
+        className="cf-public-header"
         style={{
           position: "sticky",
           top: 0,
@@ -110,7 +111,7 @@ export default function Home() {
           backdropFilter: "blur(12px)",
           background: "rgba(11, 11, 14, 0.7)",
           borderBottom: "1px solid var(--rule-1)",
-          padding: "14px 48px",
+          padding: "14px clamp(20px, 4vw, 48px)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -118,7 +119,10 @@ export default function Home() {
           gap: 16,
         }}
       >
-        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+        <div
+          className="cf-public-logo"
+          style={{ display: "flex", alignItems: "baseline", gap: 6, flex: "0 0 auto" }}
+        >
           <span
             style={{
               fontFamily: "var(--font-sans)",
@@ -152,11 +156,16 @@ export default function Home() {
           </span>
         </div>
         <nav
+          className="cf-public-nav"
           style={{
             display: "flex",
-            gap: 28,
+            gap: "clamp(14px, 4vw, 28px)",
             font: "var(--t-caption)",
             color: "var(--paper-dim)",
+            flex: "1 1 260px",
+            justifyContent: "center",
+            flexWrap: "wrap",
+            minWidth: "max-content",
           }}
         >
           <a href="#agentes" style={{ color: "inherit", textDecoration: "none" }}>
@@ -169,7 +178,16 @@ export default function Home() {
             Precios
           </a>
         </nav>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div
+          className="cf-public-actions"
+          style={{
+            display: "flex",
+            gap: 8,
+            flex: "0 1 260px",
+            justifyContent: "flex-end",
+            flexWrap: "wrap",
+          }}
+        >
           <button className="cf-btn cf-btn--ghost cf-btn--sm" onClick={goLogin}>
             Entrar
           </button>
@@ -186,12 +204,14 @@ export default function Home() {
       <section
         style={{
           position: "relative",
-          padding: "120px 48px 96px",
+          padding:
+            "clamp(72px, 10vw, 120px) clamp(20px, 4vw, 48px) clamp(80px, 8vw, 96px)",
           textAlign: "center",
           overflow: "hidden",
         }}
       >
         <div
+          className="cf-home-hero-pill"
           style={{
             position: "absolute",
             inset: 0,
@@ -218,6 +238,10 @@ export default function Home() {
               marginBottom: 32,
               textTransform: "uppercase",
               letterSpacing: "0.06em",
+              maxWidth: "100%",
+              justifyContent: "center",
+              textAlign: "center",
+              whiteSpace: "normal",
             }}
           >
             <span
@@ -228,26 +252,33 @@ export default function Home() {
                 background: "var(--ok)",
               }}
             />
-            {SYSTEM_AGENTS.length} AGENTES ACTIVOS · ÚLTIMO PROYECTO HACE 4 MIN
+            {SYSTEM_AGENTS.length} AGENTES ACTIVOS
           </div>
           <h1
+            className="cf-home-hero-title"
             style={{
               font: "var(--t-display)",
-              fontSize: "clamp(56px, 8vw, 112px)",
+              fontSize: "clamp(30px, 8.75vw, 112px)",
               margin: 0,
               lineHeight: 0.92,
-              letterSpacing: "-0.02em",
+              letterSpacing: 0,
               fontStyle: "italic",
               fontWeight: 800,
+              textWrap: "balance",
             }}
           >
-            Veintiocho agentes.
+            Veintiocho
+            <br className="cf-mobile-break" /> agentes.
             <br />
-            <em style={{ color: "var(--ember)" }}>Un documental.</em>
+            <em style={{ color: "var(--ember)" }}>
+              Un
+              <br className="cf-mobile-break" /> documental.
+            </em>
             <br />
             Doce minutos.
           </h1>
           <p
+            className="cf-home-hero-copy"
             style={{
               font: "var(--t-body-lg)",
               fontSize: 22,

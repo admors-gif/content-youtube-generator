@@ -334,6 +334,7 @@ body::before {
 .cf-fade--2 { animation-delay: 120ms; }
 .cf-fade--3 { animation-delay: 180ms; }
 .cf-fade--4 { animation-delay: 240ms; }
+.cf-mobile-break { display: none; }
 
 /* ─────────────────────────────────────────────────────────────────────────
    LAYOUT shell (cf-shell + cf-main)
@@ -363,3 +364,38 @@ body::before {
   }
 }
 
+@media (max-width: 640px) {
+  .cf-public-header {
+    justify-content: center !important;
+    row-gap: 14px !important;
+  }
+  .cf-public-logo {
+    order: 1;
+  }
+  .cf-public-nav {
+    order: 2;
+    flex: 0 0 100% !important;
+    justify-content: center !important;
+  }
+  .cf-public-actions {
+    order: 3;
+    flex: 0 0 100% !important;
+    justify-content: center !important;
+  }
+  .cf-home-hero-pill {
+    max-width: calc(100vw - 40px) !important;
+    font-size: 10px !important;
+    line-height: 1.35 !important;
+  }
+  .cf-home-hero-title {
+    font-size: 34px !important;
+    line-height: 1.02 !important;
+  }
+  .cf-mobile-break {
+    display: initial !important;
+  }
+  .cf-home-hero-copy {
+    max-width: 320px !important;
+    font-size: 18px !important;
+  }
+}
