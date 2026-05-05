@@ -206,6 +206,8 @@ export default function NewProjectPage() {
   const [recommendations, setRecommendations] = useState([]);
   const [recommending, setRecommending] = useState(false);
   const [recommendError, setRecommendError] = useState(null);
+  const [requestingCredits, setRequestingCredits] = useState(false);
+  const [creditRequestSent, setCreditRequestSent] = useState(false);
 
   /* Filtro de tier (visual del kit, no estaba en legacy pero coexiste) */
   const [tierFilter, setTierFilter] = useState("all");
@@ -249,12 +251,29 @@ export default function NewProjectPage() {
 
   const { remaining: creditsLeft } = getCreditCounts(profile);
 
+  const handleRequestCredits = async () => {
+    setRequestingCredits(true);
+    try {
+      const res = await fetch(`${getApiBase()}/credits/request`, {
+        method: "POST",
+        headers: await authHeaders(user, { "Content-Type": "application/json" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.error || "No se pudo enviar la solicitud.");
+      setCreditRequestSent(true);
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setRequestingCredits(false);
+    }
+  };
+
   /* Crear proyecto: el backend valida saldo, descuenta crédito y dispara guion */
   const handleCreate = async () => {
     if (!selectedAgent || !topic.trim()) return;
     if (creditsLeft <= 0) {
       alert(
-        "No tienes créditos disponibles. Mejora tu plan o compra créditos extra.",
+        "Tu cuenta aún no tiene créditos activos. Solicita activación antes de producir.",
       );
       return;
     }
@@ -273,7 +292,7 @@ export default function NewProjectPage() {
       if (!res.ok || !data.projectId) {
         const message =
           res.status === 402
-            ? "No tienes créditos disponibles. Mejora tu plan o compra créditos extra."
+            ? "Tu cuenta aún no tiene créditos activos. Solicita activación antes de producir."
             : data.detail || data.error || "No se pudo crear el proyecto.";
         alert(message);
         return;
@@ -801,14 +820,38 @@ export default function NewProjectPage() {
             >
               <Icon name="coins" size={18} style={{ color: "var(--ember)" }} />
               <div style={{ flex: 1, fontSize: 14, lineHeight: 1.4 }}>
-                Este vídeo costará{" "}
-                <strong style={{ color: "var(--ember)" }}>1 crédito</strong>.
-                Tienes{" "}
-                <strong style={{ color: "var(--paper)" }}>
-                  {creditsLeft} disponible{creditsLeft === 1 ? "" : "s"}
-                </strong>
-                .
+                {creditsLeft > 0 ? (
+                  <>
+                    Este vídeo costará{" "}
+                    <strong style={{ color: "var(--ember)" }}>1 crédito</strong>.
+                    Tienes{" "}
+                    <strong style={{ color: "var(--paper)" }}>
+                      {creditsLeft} disponible{creditsLeft === 1 ? "" : "s"}
+                    </strong>
+                    .
+                  </>
+                ) : (
+                  <>
+                    Tu cuenta está lista, pero aún no tiene créditos activos.
+                    Solicita activación y el equipo revisará tu acceso.
+                  </>
+                )}
               </div>
+              {creditsLeft <= 0 && (
+                <button
+                  type="button"
+                  className="cf-btn cf-btn--secondary cf-btn--sm"
+                  onClick={handleRequestCredits}
+                  disabled={requestingCredits || creditRequestSent}
+                  style={{ flexShrink: 0 }}
+                >
+                  {creditRequestSent
+                    ? "Solicitud enviada"
+                    : requestingCredits
+                      ? "Enviando"
+                      : "Solicitar activación"}
+                </button>
+              )}
             </div>
           </div>
 

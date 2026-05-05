@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import Icon from "@/components/Icon";
 import { getCreditCounts } from "@/lib/credits";
+import { isAdminUser } from "@/lib/admin";
 
 /**
  * Sidebar Editorial / Cinematic — v2 design system.
@@ -273,13 +274,16 @@ function UserRow({ profile, onSignOut }) {
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { profile, signOut } = useAuth();
+  const { user, profile, signOut } = useAuth();
+  const navItems = isAdminUser(user, profile)
+    ? [...NAV, { id: "admin", icon: "lock", label: "Admin", href: "/dashboard/admin" }]
+    : NAV;
 
   // active = primer item cuyo href matchea el pathname
   // /dashboard sólo matchea exacto (no /dashboard/new)
   // /dashboard/new matchea /dashboard/new
   const activeId =
-    NAV.find((n) =>
+    navItems.find((n) =>
       n.href === "/dashboard"
         ? pathname === "/dashboard"
         : pathname?.startsWith(n.href),
@@ -315,7 +319,7 @@ export default function Sidebar() {
         NAVEGACIÓN
       </div>
       <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {NAV.map((n) => (
+        {navItems.map((n) => (
           <NavLink key={n.id} item={n} isActive={activeId === n.id} />
         ))}
       </nav>

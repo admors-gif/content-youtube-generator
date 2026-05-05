@@ -317,8 +317,8 @@ export default function LoginPage() {
             style={{ margin: "0 0 var(--s-6)" }}
           >
             {mode === "login"
-              ? "Tres documentales gratis al mes. Sin tarjeta."
-              : "Tres documentales al mes, sin tarjeta. Cancela cuando quieras."}
+              ? "Acceso privado para crear documentales. Sin tarjeta."
+              : "Crea tu cuenta y solicita activación de créditos."}
           </p>
 
           {user && (

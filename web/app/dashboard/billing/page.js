@@ -16,13 +16,13 @@ const PLANS = [
     name: "Free",
     price: "$0",
     period: "/ mes",
-    credits: "1 documental",
+    credits: "Sin créditos automáticos",
     features: [
-      "Acceso a 5 agentes",
-      "Calidad estándar 1080p",
-      "Sin marca de agua",
+      "Acceso al estudio privado",
+      "Demo guiada del flujo completo",
+      "Créditos activados manualmente",
     ],
-    cta: "Empezar",
+    cta: "Solicitar acceso",
     accent: false,
   },
   {

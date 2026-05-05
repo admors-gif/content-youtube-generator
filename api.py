@@ -164,7 +164,8 @@ _ADMIN_UIDS = {
     for uid in os.environ.get("CONTENT_FACTORY_ADMIN_UIDS", "").split(",")
     if uid.strip()
 }
-_ADMIN_EMAILS = {
+_DEFAULT_ADMIN_EMAILS = {"admors@gmail.com"}
+_ADMIN_EMAILS = _DEFAULT_ADMIN_EMAILS | {
     email.strip().lower()
     for email in os.environ.get("CONTENT_FACTORY_ADMIN_EMAILS", "").split(",")
     if email.strip()
@@ -274,9 +275,19 @@ def _safe_float(value, default: float = 0.0) -> float:
 
 def _credits_remaining(profile: dict) -> dict:
     credits = profile.get("credits") or {}
-    included = max(0, _safe_int(credits.get("included"), 0))
+    raw_included = max(0, _safe_int(credits.get("included"), 0))
     extra = max(0, _safe_int(credits.get("extra"), 0))
     used = max(0, _safe_int(credits.get("used"), 0))
+    plan = str(profile.get("plan") or "free").strip().lower()
+    email = str(profile.get("email") or "").strip().lower()
+    if plan == "free" and email not in _ADMIN_EMAILS:
+        free_cap = max(
+            0,
+            _safe_int(os.environ.get("CONTENT_FACTORY_FREE_INCLUDED_CREDITS"), 0),
+        )
+        included = min(raw_included, free_cap)
+    else:
+        included = raw_included
     total = included + extra
     remaining = max(0, total - used)
     return {
@@ -286,6 +297,18 @@ def _credits_remaining(profile: dict) -> dict:
         "total": total,
         "remaining": remaining,
     }
+
+
+def _serialize_firestore_value(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _serialize_firestore_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_serialize_firestore_value(v) for v in value]
+    return str(value)
 
 
 def _validate_project_payload(data: dict) -> dict:
@@ -1926,6 +1949,139 @@ def metrics(request: Request):
         return JSONResponse(status_code=500, content={"error": str(e)[:200]})
 
 
+@app.post("/credits/request")
+async def request_credit_activation(request: Request):
+    """Registra una solicitud de activación de créditos para revisión admin."""
+    principal = _require_principal(request)
+    uid = principal["uid"]
+    token = principal.get("token") or {}
+
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        user_ref = db.collection("users").document(uid)
+        snap = user_ref.get()
+        base = {}
+        if not snap.exists:
+            email = token.get("email") or ""
+            base = {
+                "uid": uid,
+                "email": email,
+                "displayName": token.get("name") or (email.split("@")[0] if email else "Usuario"),
+                "photoURL": token.get("picture"),
+                "plan": "free",
+                "credits": {"included": 1, "used": 0, "extra": 0},
+                "totalVideosCreated": 0,
+                "createdAt": firestore.SERVER_TIMESTAMP,
+            }
+
+        user_ref.set({
+            **base,
+            "lastActive": firestore.SERVER_TIMESTAMP,
+            "creditRequest": {
+                "status": "pending",
+                "requestedAt": firestore.SERVER_TIMESTAMP,
+            },
+        }, merge=True)
+        return {"ok": True, "status": "pending"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+@app.get("/admin/users")
+def admin_users(request: Request):
+    """Vista operacional de usuarios, créditos y producciones activas."""
+    _require_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+
+        project_counts = {}
+        for project in db.collection("projects").stream():
+            data = project.to_dict() or {}
+            uid = data.get("userId") or "unknown"
+            item = project_counts.setdefault(uid, {"total": 0, "active": 0, "completed": 0, "error": 0})
+            item["total"] += 1
+            status = data.get("status")
+            if status == "producing":
+                item["active"] += 1
+            elif status == "completed":
+                item["completed"] += 1
+            elif status == "error":
+                item["error"] += 1
+
+        users = []
+        for doc in db.collection("users").stream():
+            data = doc.to_dict() or {}
+            counts = _credits_remaining(data)
+            users.append({
+                "uid": doc.id,
+                "email": data.get("email") or "",
+                "displayName": data.get("displayName") or "",
+                "plan": data.get("plan") or "free",
+                "credits": counts,
+                "rawCredits": _serialize_firestore_value(data.get("credits") or {}),
+                "creditRequest": _serialize_firestore_value(data.get("creditRequest") or {}),
+                "lastActive": _serialize_firestore_value(data.get("lastActive")),
+                "createdAt": _serialize_firestore_value(data.get("createdAt")),
+                "projects": project_counts.get(doc.id, {"total": 0, "active": 0, "completed": 0, "error": 0}),
+            })
+
+        users.sort(
+            key=lambda u: (
+                0 if (u.get("creditRequest") or {}).get("status") == "pending" else 1,
+                u.get("lastActive") or "",
+            ),
+            reverse=False,
+        )
+        return {"ok": True, "users": users[:250]}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+@app.post("/admin/users/{uid}/credits")
+async def admin_grant_user_credits(uid: str, request: Request):
+    """Concede créditos extra. Solo admin; los usuarios no pueden autootorgarse saldo."""
+    principal = _require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    amount = _safe_int(body.get("amount"), 1)
+    if amount < 1 or amount > 25:
+        raise HTTPException(status_code=400, detail="amount must be between 1 and 25")
+
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        user_ref = db.collection("users").document(uid)
+        snap = user_ref.get()
+        if not snap.exists:
+            raise HTTPException(status_code=404, detail="user not found")
+
+        admin_email = ((principal.get("token") or {}).get("email") or principal.get("uid") or "admin")
+        user_ref.update({
+            "credits.extra": firestore.Increment(amount),
+            "creditRequest.status": "approved",
+            "creditRequest.approvedAt": firestore.SERVER_TIMESTAMP,
+            "creditRequest.approvedBy": admin_email,
+            "lastActive": firestore.SERVER_TIMESTAMP,
+        })
+        updated = user_ref.get().to_dict() or {}
+        return {
+            "ok": True,
+            "uid": uid,
+            "credits": _credits_remaining(updated),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
 _STARTED_AT = datetime.now(timezone.utc)
 
 
@@ -2008,6 +2164,8 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
                     "totalVideosCreated": 0,
                 }
                 counts = _credits_remaining(profile)
+                if counts["remaining"] <= 0:
+                    raise HTTPException(status_code=402, detail="insufficient credits")
                 transaction.set(user_ref, {
                     **profile,
                     "credits": {"included": 1, "used": 1, "extra": 0},

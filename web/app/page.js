@@ -42,8 +42,8 @@ const PRICING_PLANS = [
     t: "Free",
     p: "€0",
     sub: "/mes",
-    f: ["3 documentales/mes", "Resolución 720p", "Marca de agua Content Factory"],
-    cta: "Empezar",
+    f: ["Acceso por invitación", "Demo guiada del flujo completo", "Créditos activados manualmente"],
+    cta: "Solicitar acceso",
     highlight: false,
     badge: "free",
   },
@@ -290,7 +290,7 @@ export default function Home() {
             }}
           >
             Investigación, guion, voz, imágenes y montaje — todo en una sola
-            sesión. Tres documentales gratis al mes. Sin tarjeta.
+            sesión. Acceso privado para creadores seleccionados. Sin tarjeta.
           </p>
           <div
             style={{
@@ -306,14 +306,15 @@ export default function Home() {
               onClick={goLogin}
               style={{ padding: "14px 28px", fontSize: 16 }}
             >
-              Crear mi primer documental{" "}
+              Solicitar acceso{" "}
               <Icon name="arrowRight" size={18} />
             </button>
             <button
               className="cf-btn cf-btn--ghost"
+              onClick={goLogin}
               style={{ padding: "14px 28px", fontSize: 16 }}
             >
-              <Icon name="play" size={14} /> Ver demo (1:42)
+              <Icon name="play" size={14} /> Ver demo privada
             </button>
           </div>
         </div>
