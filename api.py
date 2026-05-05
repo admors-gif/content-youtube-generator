@@ -1298,6 +1298,14 @@ def _thumbnail_hook_lines(hook: str) -> list[str]:
     return lines[:3] or ["MIRA ESTO"]
 
 
+def _thumbnail_format_badge(agent_id: str | None = None) -> str | None:
+    if agent_id == "agent_autohipnosis":
+        return "MEDITACIÓN GUIADA"
+    if agent_id == "agent_podcast_general":
+        return "PODCAST"
+    return None
+
+
 def _thumbnail_hook_plans(title: str, agent_id: str | None = None) -> list[dict]:
     """
     Three deterministic YouTube-thumbnail concepts. Hooks stay short because
@@ -1377,7 +1385,17 @@ def _thumbnail_hook_plans(title: str, agent_id: str | None = None) -> list[dict]
 
 def _build_premium_thumbnail_prompt(title: str, plan: dict, agent_id: str | None = None) -> str:
     clean_title = " ".join((title or "").split()) or "este documental"
-    headline = " / ".join(_thumbnail_hook_lines(plan.get("hook", "")))
+    headline_lines = _thumbnail_hook_lines(plan.get("hook", ""))
+    headline_instructions = "\n".join(
+        f"  Line {idx}: \"{line}\""
+        for idx, line in enumerate(headline_lines, 1)
+    )
+    format_badge = _thumbnail_format_badge(agent_id)
+    badge_instruction = (
+        f"Do not render the format badge text \"{format_badge}\"; it will be added later as a separate overlay.\n"
+        if format_badge
+        else ""
+    )
     format_hint = (
         "podcast thumbnail"
         if agent_id == "agent_podcast_general"
@@ -1394,7 +1412,10 @@ def _build_premium_thumbnail_prompt(title: str, plan: dict, agent_id: str | None
     return (
         "Create a finished, high-conversion YouTube "
         f"{format_hint}, 16:9 landscape, topic: \"{clean_title}\".\n"
-        f"Main headline text to render exactly, large and crisp: \"{headline}\".\n"
+        "Main headline text to render exactly, large and crisp, on separate lines:\n"
+        f"{headline_instructions}\n"
+        "Do not render the words 'Line', line numbers, slashes, pipes, quotes, or separators.\n"
+        f"{badge_instruction}"
         f"Core concept: {plan['concept']}.\n"
         f"{safety_hint}"
         "Composition requirements:\n"
@@ -1484,18 +1505,72 @@ def _cover_resize_image(img, target_w: int = 1280, target_h: int = 720):
     return img.crop((left, top, left + target_w, top + target_h))
 
 
-def _finalize_generated_thumbnail(raw_image: Path, output_path: Path) -> bool:
+def _fit_generated_thumbnail_canvas(img, target_w: int = 1280, target_h: int = 720):
+    from PIL import Image, ImageFilter
+
+    background = _cover_resize_image(img.copy(), target_w, target_h)
+    background = background.filter(ImageFilter.GaussianBlur(16))
+
+    src_w, src_h = img.size
+    scale = min(target_w / src_w, target_h / src_h)
+    new_w = max(1, int(src_w * scale))
+    new_h = max(1, int(src_h * scale))
+    fitted = img.resize((new_w, new_h), Image.LANCZOS)
+    x = (target_w - new_w) // 2
+    y = (target_h - new_h) // 2
+    background.paste(fitted, (x, y))
+    return background
+
+
+def _draw_thumbnail_badge(draw, badge: str, target_w: int, theme: dict | None = None):
+    if not badge:
+        return
+    from PIL import ImageFont
+
+    th = {**THUMBNAIL_DEFAULT_THEME, **(theme or {})}
+    badge_text = badge.strip().upper()[:22]
+    badge_font = None
+    for fp in [th["font_path_fallback"], th["font_path_primary"]]:
+        try:
+            if os.path.exists(fp):
+                badge_font = ImageFont.truetype(fp, 34)
+                break
+        except Exception:
+            continue
+    if badge_font is None:
+        badge_font = ImageFont.load_default()
+
+    bbox = draw.textbbox((0, 0), badge_text, font=badge_font, stroke_width=2)
+    bw = bbox[2] - bbox[0] + 34
+    bh = bbox[3] - bbox[1] + 22
+    x0, y0 = target_w - bw - 36, 32
+    draw.rounded_rectangle((x0, y0, x0 + bw, y0 + bh), radius=12, fill=(0, 0, 0, 205))
+    draw.rounded_rectangle((x0, y0, x0 + bw, y0 + bh), radius=12, outline=(255, 214, 10, 230), width=3)
+    draw.text(
+        (x0 + 17, y0 + 9),
+        badge_text,
+        font=badge_font,
+        fill=(255, 255, 255),
+        stroke_width=2,
+        stroke_fill=(0, 0, 0),
+    )
+
+
+def _finalize_generated_thumbnail(raw_image: Path, output_path: Path, badge: str | None = None) -> bool:
     try:
-        from PIL import Image, ImageEnhance
+        from PIL import Image, ImageDraw, ImageEnhance
     except ImportError:
         print("   ❌ Pillow no disponible para finalizar thumbnails")
         return False
 
     try:
         img = Image.open(raw_image).convert("RGB")
-        img = _cover_resize_image(img, 1280, 720)
+        img = _fit_generated_thumbnail_canvas(img, 1280, 720)
         img = ImageEnhance.Contrast(img).enhance(1.04)
         img = ImageEnhance.Sharpness(img).enhance(1.05)
+        if badge:
+            draw = ImageDraw.Draw(img, "RGBA")
+            _draw_thumbnail_badge(draw, badge, 1280)
         img.save(str(output_path), "JPEG", quality=94, optimize=True)
         return output_path.exists() and output_path.stat().st_size > 0
     except Exception as e:
@@ -1618,13 +1693,7 @@ def _build_premium_thumbnails_for_project(video_dir: Path, project_id: str, titl
 
     thumbs_dir = video_dir / "thumbnails"
     thumbs_dir.mkdir(parents=True, exist_ok=True)
-    badge = (
-        "PODCAST"
-        if agent_id == "agent_podcast_general"
-        else "GUIADA"
-        if agent_id == "agent_autohipnosis"
-        else None
-    )
+    badge = _thumbnail_format_badge(agent_id)
     results = []
     for i, plan in enumerate(_thumbnail_hook_plans(title, agent_id=agent_id), 1):
         label = plan["label"]
@@ -1637,7 +1706,7 @@ def _build_premium_thumbnails_for_project(video_dir: Path, project_id: str, titl
         print(f"   🖼️ Diseñando miniatura premium {i}/3 ({variant})")
         if not _generate_premium_thumbnail_image(prompt, raw):
             continue
-        if not _finalize_generated_thumbnail(raw, out):
+        if not _finalize_generated_thumbnail(raw, out, badge=badge):
             continue
         upload = _upload_video_to_storage(out, f"{project_id}/thumbnails")
         if upload:
@@ -1648,6 +1717,7 @@ def _build_premium_thumbnails_for_project(video_dir: Path, project_id: str, titl
                 "source": "gpt-image",
                 "hook": plan["hook"],
                 "model": _thumbnail_model(),
+                "badge": badge,
                 "size_kb": round(out.stat().st_size / 1024, 1),
                 "gs_path": upload["gs_path"],
                 "signed_url": upload["signed_url"],
@@ -1657,7 +1727,8 @@ def _build_premium_thumbnails_for_project(video_dir: Path, project_id: str, titl
 
 
 def _render_thumbnail(source_image: Path, title_text: str, output_path: Path,
-                      variant: str = "center", theme: dict = None) -> bool:
+                      variant: str = "center", theme: dict = None,
+                      badge: str | None = None) -> bool:
     """
     Compone un thumbnail 1280x720 a partir de una imagen base (de las escenas
     ya generadas para el video) + texto grande superpuesto.
@@ -1765,6 +1836,9 @@ def _render_thumbnail(source_image: Path, title_text: str, output_path: Path,
         if variant == "corner":
             draw.rectangle([(0, 0), (12, target_h)], fill=th["accent_color"])
 
+        if badge:
+            _draw_thumbnail_badge(draw, badge, target_w, theme=th)
+
         img.save(str(output_path), "JPEG", quality=92, optimize=True)
         return output_path.exists() and output_path.stat().st_size > 0
     except Exception as e:
@@ -1801,13 +1875,14 @@ def _build_scene_thumbnails_for_project(video_dir: Path, project_id: str, title:
     thumbs_dir.mkdir(parents=True, exist_ok=True)
 
     results = []
+    badge = _thumbnail_format_badge(agent_id)
     for offset, (label, src, variant) in enumerate(picks, 0):
         i = start_index + offset
         plan = plans[min(i - 1, len(plans) - 1)]
         hook = plan.get("hook") or _pick_thumbnail_keywords(title, max_words=3)
         out = thumbs_dir / f"THUMB_{i:02d}_{label}_{variant}.jpg"
         print(f"   🖼️ Renderizando thumbnail fallback {i} ({label}, variant={variant})")
-        if not _render_thumbnail(src, hook, out, variant=variant):
+        if not _render_thumbnail(src, hook, out, variant=variant, badge=badge):
             continue
         upload = _upload_video_to_storage(out, f"{project_id}/thumbnails")
         if upload:
@@ -1817,6 +1892,7 @@ def _build_scene_thumbnails_for_project(video_dir: Path, project_id: str, title:
                 "variant": variant,
                 "source": "scene",
                 "hook": hook,
+                "badge": badge,
                 "size_kb": round(out.stat().st_size / 1024, 1),
                 "gs_path": upload["gs_path"],
                 "signed_url": upload["signed_url"],

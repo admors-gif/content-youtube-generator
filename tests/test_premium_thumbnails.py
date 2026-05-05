@@ -12,7 +12,10 @@ def test_attraction_thumbnail_plans_are_clickable_and_text_safe():
     assert len(plans) == 3
     assert plans[0]["hook"] == "TU CEREBRO\nYA ELIGIÓ"
     assert all(len(plan["hook"].splitlines()) <= 3 for plan in plans)
-    assert 'Main headline text to render exactly, large and crisp: "TU CEREBRO / YA ELIGIÓ"' in prompt
+    assert "Main headline text to render exactly, large and crisp, on separate lines" in prompt
+    assert 'Line 1: "TU CEREBRO"' in prompt
+    assert 'Line 2: "YA ELIGIÓ"' in prompt
+    assert "slashes" in prompt
     assert "The thumbnail must already include the headline text" in prompt
     assert "No visible hands or fingers" in prompt
     assert "TU CEREBRO" in prompt
@@ -45,9 +48,17 @@ def test_autohypnosis_thumbnail_plan_avoids_medical_claims_and_generated_text():
 
     assert plans[0]["hook"] == "REPROGRAMA\nTU MENTE"
     assert "guided self-hypnosis thumbnail" in prompt
-    assert 'Main headline text to render exactly, large and crisp: "REPROGRAMA / TU MENTE"' in prompt
+    assert 'Line 1: "REPROGRAMA"' in prompt
+    assert 'Line 2: "TU MENTE"' in prompt
+    assert 'Do not render the format badge text "MEDITACIÓN GUIADA"' in prompt
     assert "medical claims" in prompt
     assert "REPROGRAMA" in prompt
+
+
+def test_autohypnosis_badge_is_always_guided_meditation():
+    assert api._thumbnail_format_badge("agent_autohipnosis") == "MEDITACIÓN GUIADA"
+    assert api._thumbnail_format_badge("agent_podcast_general") == "PODCAST"
+    assert api._thumbnail_format_badge("agent_ciencia") is None
 
 
 def test_premium_thumbnail_renderer_outputs_valid_jpeg(tmp_path):
@@ -86,8 +97,17 @@ def test_generated_thumbnail_finalize_outputs_youtube_jpeg(tmp_path):
     draw.text((430, 460), "CONFÍA EN TI", fill=(255, 255, 255))
     img.save(raw)
 
-    ok = api._finalize_generated_thumbnail(Path(raw), Path(out))
+    ok = api._finalize_generated_thumbnail(Path(raw), Path(out), badge="MEDITACIÓN GUIADA")
 
     assert ok is True
     assert out.exists()
     assert Image.open(out).size == (1280, 720)
+
+
+def test_generated_thumbnail_canvas_preserves_full_portrait_safe_area():
+    from PIL import Image
+
+    img = Image.new("RGB", (1536, 1024), (12, 10, 30))
+    canvas = api._fit_generated_thumbnail_canvas(img)
+
+    assert canvas.size == (1280, 720)
