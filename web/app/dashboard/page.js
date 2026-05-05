@@ -346,6 +346,8 @@ export default function DashboardPage() {
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [requestingCredits, setRequestingCredits] = useState(false);
+  const [creditRequestSent, setCreditRequestSent] = useState(false);
 
   /* Delete con devolución condicional de crédito en backend */
   const handleDelete = async (e, project) => {
@@ -416,6 +418,28 @@ export default function DashboardPage() {
     total,
     remaining: creditsLeft,
   } = getCreditCounts(profile);
+  const creditRequestStatus = profile?.creditRequest?.status || "";
+  const activationPending =
+    creditsLeft <= 0 && (creditRequestStatus === "pending" || creditRequestSent);
+
+  const handleRequestCredits = async () => {
+    setRequestingCredits(true);
+    try {
+      const res = await fetch(`${getApiBase()}/credits/request`, {
+        method: "POST",
+        headers: await authHeaders(user, { "Content-Type": "application/json" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.detail || data.error || "No se pudo enviar la solicitud.");
+      }
+      setCreditRequestSent(true);
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setRequestingCredits(false);
+    }
+  };
 
   /* Métricas derivadas para el stat trio */
   const totalProjects = projects.length;
@@ -530,7 +554,7 @@ export default function DashboardPage() {
         style={{
           display: "flex",
           gap: "var(--s-4)",
-          marginBottom: "var(--s-7)",
+          marginBottom: creditsLeft <= 0 ? "var(--s-4)" : "var(--s-7)",
           flexWrap: "wrap",
         }}
       >
@@ -569,6 +593,59 @@ export default function DashboardPage() {
           />
         </div>
       </div>
+
+      {creditsLeft <= 0 && (
+        <div
+          className="cf-card cf-fade"
+          style={{
+            padding: "var(--s-5)",
+            marginBottom: "var(--s-7)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 16,
+            borderColor: activationPending ? "var(--ok)" : "var(--ember)",
+            background: activationPending
+              ? "linear-gradient(180deg, rgba(111,190,142,0.08), transparent 70%), var(--ink-1)"
+              : "linear-gradient(180deg, rgba(224,83,61,0.08), transparent 70%), var(--ink-1)",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div
+              className="cf-mono-sm"
+              style={{
+                color: activationPending ? "var(--ok)" : "var(--ember)",
+                marginBottom: 8,
+              }}
+            >
+              {activationPending ? "SOLICITUD ENVIADA" : "ACTIVACIÓN REQUERIDA"}
+            </div>
+            <h2 className="cf-h3" style={{ margin: "0 0 6px" }}>
+              {activationPending
+                ? "Tu cuenta está en revisión."
+                : "Tu cuenta está lista, falta activar créditos."}
+            </h2>
+            <p style={{ margin: 0, color: "var(--paper-dim)", lineHeight: 1.5 }}>
+              {activationPending
+                ? "Te avisaremos cuando el acceso quede aprobado. Mientras tanto puedes explorar el estudio."
+                : "Puedes explorar el dashboard sin costo. Para producir tu primer video, solicita activación."}
+            </p>
+          </div>
+          <button
+            className="cf-btn cf-btn--primary"
+            onClick={handleRequestCredits}
+            disabled={requestingCredits || activationPending}
+            style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 8 }}
+          >
+            <Icon name={activationPending ? "check" : "sparkles"} size={16} />
+            {activationPending
+              ? "Solicitud recibida"
+              : requestingCredits
+                ? "Enviando"
+                : "Solicitar activación"}
+          </button>
+        </div>
+      )}
 
       {/* Filter strip */}
       <div

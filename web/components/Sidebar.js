@@ -137,6 +137,7 @@ function PlanStrip({ profile }) {
   const plan = (profile?.plan || "free").toLowerCase();
   const meta = PLAN_LABELS[plan] || PLAN_LABELS.free;
   const { total, remaining } = getCreditCounts(profile);
+  const isActivationPending = remaining <= 0 && total <= 0;
   const pct =
     total > 0
       ? Math.min(100, Math.max(0, (remaining / total) * 100))
@@ -170,8 +171,22 @@ function PlanStrip({ profile }) {
           marginBottom: 6,
         }}
       >
-        CRÉDITOS · {remaining}/{total || "—"}
+        {isActivationPending
+          ? "ACTIVACIÓN PENDIENTE"
+          : `CRÉDITOS · ${remaining}/${total || "—"}`}
       </div>
+      {isActivationPending && (
+        <div
+          style={{
+            color: "var(--paper-dim)",
+            fontSize: 12,
+            lineHeight: 1.35,
+            marginBottom: 10,
+          }}
+        >
+          Solicita acceso antes de producir.
+        </div>
+      )}
       <div
         style={{
           height: 4,
@@ -200,7 +215,7 @@ function PlanStrip({ profile }) {
           textDecoration: "none",
         }}
       >
-        Mejorar plan
+        {isActivationPending ? "Solicitar activación" : "Mejorar plan"}
       </Link>
     </div>
   );
