@@ -11,6 +11,11 @@ import { db } from "@/lib/firebase";
 import { doc, onSnapshot } from "firebase/firestore";
 import { SYSTEM_AGENTS } from "@/lib/agents";
 import { authHeaders, getApiBase } from "@/lib/apiClient";
+import {
+  isLiveProgressStatus,
+  normalizeProgressPercent,
+  userDeliveryError,
+} from "@/lib/progress";
 
 import ProjectHeader from "@/components/project/ProjectHeader";
 import ProgressPanel from "@/components/project/ProgressPanel";
@@ -19,6 +24,7 @@ import ShortsGrid from "@/components/project/ShortsGrid";
 import ThumbnailsGrid from "@/components/project/ThumbnailsGrid";
 import ScriptTab from "@/components/project/ScriptTab";
 import ScenesTab from "@/components/project/ScenesTab";
+import Icon from "@/components/Icon";
 
 /**
  * Project Detail page (container).
@@ -81,6 +87,10 @@ export default function ProjectDetailsPage({ params }) {
     loading: false,
     error: null,
   });
+  const normalizedProgress = useMemo(
+    () => normalizeProgressPercent(project),
+    [project],
+  );
 
   const loadVideoPlayer = async () => {
     setVideoState({ url: null, loading: true, error: null });
@@ -100,11 +110,15 @@ export default function ProjectDetailsPage({ params }) {
         setVideoState({
           url: null,
           loading: false,
-          error: data.error || "URL no disponible",
+          error: userDeliveryError(data.error || "Entrega no disponible"),
         });
       }
     } catch (err) {
-      setVideoState({ url: null, loading: false, error: err.message });
+      setVideoState({
+        url: null,
+        loading: false,
+        error: userDeliveryError(err.message),
+      });
     }
   };
 
@@ -123,7 +137,7 @@ export default function ProjectDetailsPage({ params }) {
   // (b) startTime no está en deps. La alternativa con useRef genera otro lint
   // error ("read ref in render") al usarlo en getETA.
   useEffect(() => {
-    const percent = project?.progress?.percent || 0;
+    const percent = normalizedProgress;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setStartTime((prev) => {
       if (percent > 0 && percent < 100) return prev ?? Date.now();
@@ -131,7 +145,7 @@ export default function ProjectDetailsPage({ params }) {
         return prev === null ? prev : null;
       return prev;
     });
-  }, [project?.progress?.percent, project?.status]);
+  }, [normalizedProgress, project?.status]);
 
   // Mantiene 'now' actualizado cada segundo mientras hay producción activa
   useEffect(() => {
@@ -143,7 +157,7 @@ export default function ProjectDetailsPage({ params }) {
   // Smooth interpolation: setState dentro de setInterval (asíncrono),
   // no en body del effect → satisface la regla de React 19.
   useEffect(() => {
-    const realPercent = project?.progress?.percent || 0;
+    const realPercent = normalizedProgress;
     const interval = setInterval(() => {
       setDisplayPercent((prev) => {
         if (realPercent >= 100 || realPercent === 0) return realPercent;
@@ -153,7 +167,7 @@ export default function ProjectDetailsPage({ params }) {
       });
     }, 600);
     return () => clearInterval(interval);
-  }, [project?.progress?.percent]);
+  }, [normalizedProgress]);
 
   // ETA derivada — useMemo evita recálculos
   const eta = useMemo(() => {
@@ -321,10 +335,11 @@ export default function ProjectDetailsPage({ params }) {
   }
 
   const agent = SYSTEM_AGENTS.find((a) => a.agentId === project.agentId);
+  const isDeliveryRecoverable = Boolean(project.deliveryRecoverableFromDisk);
   const isProcessing =
-    project.progress?.percent > 0 &&
-    project.progress?.percent < 100 &&
-    project.status !== "error";
+    normalizedProgress > 0 &&
+    normalizedProgress < 100 &&
+    isLiveProgressStatus(project.status);
 
   // Manual approve handler — desactiva el auto-approve flag y ejecuta
   const handleSaveScript = async () => {
@@ -348,10 +363,10 @@ export default function ProjectDetailsPage({ params }) {
           : `${vpsBase}${data.url}`;
         window.open(finalUrl, "_blank", "noopener,noreferrer");
       } else {
-        alert(`No se pudo obtener el enlace: ${data.error || "desconocido"}`);
+        alert(userDeliveryError(data.error || "Entrega no disponible"));
       }
     } catch (err) {
-      alert(`Error al obtener el enlace: ${err.message}`);
+      alert(userDeliveryError(err.message));
     }
   };
 
@@ -363,7 +378,7 @@ export default function ProjectDetailsPage({ params }) {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        alert(`No se pudo preparar el material: ${data.error || res.statusText}`);
+        alert(userDeliveryError(data.error || res.statusText));
         return;
       }
       const blob = await res.blob();
@@ -376,7 +391,7 @@ export default function ProjectDetailsPage({ params }) {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      alert(`Error al descargar material: ${err.message}`);
+      alert(userDeliveryError(err.message));
     }
   };
 
@@ -394,6 +409,45 @@ export default function ProjectDetailsPage({ params }) {
         onDownloadAll={handleDownloadAll}
       />
 
+      {isDeliveryRecoverable && (
+        <div
+          className="cf-card cf-fade cf-fade--1"
+          style={{
+            marginBottom: "var(--s-6)",
+            padding: "var(--s-5)",
+            borderColor: "var(--warn)",
+            background: "rgba(225, 166, 84, 0.08)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 12,
+            }}
+          >
+            <Icon name="alert" size={18} style={{ color: "var(--warn)", flex: "none" }} />
+            <div>
+              <div
+                style={{
+                  font: "var(--t-mono-sm)",
+                  color: "var(--warn)",
+                  letterSpacing: "0.14em",
+                  textTransform: "uppercase",
+                  marginBottom: 6,
+                }}
+              >
+                ENTREGA EN PREPARACIÓN
+              </div>
+              <div style={{ color: "var(--paper-dim)", font: "var(--t-body)" }}>
+                El video fue creado correctamente. Estamos terminando de preparar
+                la entrega final; puedes intentar cargarlo desde el reproductor.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Live progress: solo cuando isProcessing */}
       {isProcessing && (
         <div
@@ -410,7 +464,7 @@ export default function ProjectDetailsPage({ params }) {
         </div>
       )}
 
-      {project.status === "completed" && (
+      {(project.status === "completed" || isDeliveryRecoverable) && (
         <VideoPlayer
           project={project}
           videoState={videoState}

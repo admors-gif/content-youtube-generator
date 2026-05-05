@@ -1,5 +1,6 @@
 "use client";
 import Icon from "@/components/Icon";
+import { sanitizeOperationalText } from "@/lib/progress";
 
 /**
  * ProgressPanel — panel separado de "Producción en vivo" (Fase 7.2).
@@ -24,7 +25,7 @@ const PHASE_DEFS = [
   { id: "images",   label: "Imágenes" },
   { id: "voice",    label: "Voz" },
   { id: "assembly", label: "Montaje" },
-  { id: "delivery", label: "Entrega" },
+  { id: "delivery", label: "Entrega final" },
 ];
 
 /**
@@ -40,7 +41,7 @@ const PHASE_DEFS = [
  * Convención: una phase está "ok" si ya pasamos por ella, "current" si es
  * la que está corriendo ahora, "pending" si aún no llegamos.
  */
-function getPhasesFromStatus(status, scenes) {
+function getPhasesFromStatus(status, scenes, percent = 0) {
   const totalScenes = scenes?.length || 0;
   const withImg = (scenes || []).filter((s) => s.imageUrl).length;
 
@@ -68,12 +69,30 @@ function getPhasesFromStatus(status, scenes) {
       states.research = "ok";
       states.script = "ok";
       break;
-    case "producing":
     case "prompting":
     case "imaging":
       states.research = "ok";
       states.script = "ok";
       states.images = "current";
+      break;
+    case "producing":
+      states.research = "ok";
+      states.script = "ok";
+      if (percent >= 94) {
+        states.images = "ok";
+        states.voice = "ok";
+        states.assembly = "ok";
+        states.delivery = "current";
+      } else if (percent >= 80) {
+        states.images = "ok";
+        states.voice = "ok";
+        states.assembly = "current";
+      } else if (percent >= 42) {
+        states.images = "ok";
+        states.voice = "current";
+      } else {
+        states.images = "current";
+      }
       break;
     case "voicing":
       states.research = "ok";
@@ -120,23 +139,6 @@ function getPhasesFromStatus(status, scenes) {
   }));
 }
 
-function sanitizeStepName(stepName = "") {
-  return stepName
-    .replace(/Subiendo\s+a\s+Storage/gi, "Preparando entrega")
-    .replace(/\bcon\s+FLUX\b/gi, "")
-    .replace(/\bFLUX\b/gi, "visuales")
-    .replace(/\bcon\s+ElevenLabs\b|\bcon\s+Eleven Labs\b/gi, "")
-    .replace(/\bElevenLabs\b|\bEleven Labs\b/gi, "voz")
-    .replace(/\bClaude(?:\s+(?:Opus|Sonnet|3\.5))?\b/gi, "el estudio")
-    .replace(/\bGPT[-\w.]*\b|\bOpenAI\b/gi, "el estudio")
-    .replace(/\bLuma(?:\s+AI)?\b/gi, "movimiento")
-    .replace(/\bWhisper\b/gi, "subtítulos")
-    .replace(/\bTavily\b|\bComfyUI?\b|\bFirebase\b|\bStorage\b|\bVPS\b|\bn8n\b|\bAPI\b/gi, "")
-    .replace(/\s{2,}/g, " ")
-    .replace(/\s+\.\.\./g, "...")
-    .trim();
-}
-
 export default function ProgressPanel({
   displayPercent,
   stepName,
@@ -144,9 +146,9 @@ export default function ProgressPanel({
   status,
   scenes,
 }) {
-  const phases = getPhasesFromStatus(status, scenes);
   const pct = Math.max(0, Math.min(100, Math.round(displayPercent || 0)));
-  const safeStepName = sanitizeStepName(stepName);
+  const phases = getPhasesFromStatus(status, scenes, pct);
+  const safeStepName = sanitizeOperationalText(stepName);
 
   return (
     <div className="cf-card" style={{ padding: "var(--s-5)" }}>

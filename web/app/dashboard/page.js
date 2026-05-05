@@ -19,6 +19,7 @@ import {
 import { formatRelativeTime, getStatusBucket } from "@/lib/format";
 import { authHeaders, getApiBase } from "@/lib/apiClient";
 import { getCreditCounts } from "@/lib/credits";
+import { isLiveProgressStatus, normalizeProgressPercent } from "@/lib/progress";
 
 /**
  * Dashboard Editorial — v2 design system.
@@ -48,10 +49,20 @@ function ProjectRow({ project, onOpen, onDelete, fadeClass }) {
   const color = getAgentColor(project.agentId);
   const mono = getMonogram(project.agentId);
 
-  const bucket = getStatusBucket(project.status);
+  const bucket = project.deliveryRecoverableFromDisk
+    ? { label: "ENTREGA PENDIENTE", cls: "cf-badge--warn", animate: false }
+    : getStatusBucket(project.status);
   const isCompleted = project.status === "completed";
-  const isFailed = project.status === "failed" || project.status === "error";
-  const inProgress = !isCompleted && !isFailed;
+  const isFailed =
+    (project.status === "failed" || project.status === "error") &&
+    !project.deliveryRecoverableFromDisk;
+  const progressPct = normalizeProgressPercent(project);
+  const inProgress =
+    !isCompleted &&
+    !isFailed &&
+    progressPct > 0 &&
+    progressPct < 100 &&
+    isLiveProgressStatus(project.status);
 
   const scenes =
     project.outputs?.scenes?.length ||
@@ -60,8 +71,6 @@ function ProjectRow({ project, onOpen, onDelete, fadeClass }) {
     0;
 
   const updated = formatRelativeTime(project.updatedAt || project.createdAt);
-  const progressPct = Math.max(0, Math.min(100, project.progress?.percent || 0));
-
   return (
     <div className={`cf-fade ${fadeClass}`}>
       <div
@@ -417,7 +426,9 @@ export default function DashboardPage() {
   const inProgressCount = useMemo(
     () =>
       projects.filter(
-        (p) => !["completed", "failed", "error"].includes(p.status),
+        (p) =>
+          p.deliveryRecoverableFromDisk ||
+          !["completed", "failed", "error"].includes(p.status),
       ).length,
     [projects],
   );
@@ -437,7 +448,9 @@ export default function DashboardPage() {
       // Filtro de status
       if (filter !== "all") {
         const isCompleted = p.status === "completed";
-        const isFailed = p.status === "failed" || p.status === "error";
+        const isFailed =
+          (p.status === "failed" || p.status === "error") &&
+          !p.deliveryRecoverableFromDisk;
         if (filter === "completed" && !isCompleted) return false;
         if (filter === "failed" && !isFailed) return false;
         if (filter === "in_progress" && (isCompleted || isFailed)) return false;

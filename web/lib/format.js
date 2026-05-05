@@ -58,14 +58,19 @@ export function getStatusBucket(status) {
     case "failed":
     case "error":
       return { label: "FALLÓ", cls: "cf-badge--bad", animate: false };
+    case "script_ready":
+      return { label: "LISTO PARA REVISAR", cls: "cf-badge--warn", animate: false };
     case "draft":
     case "scripting":
-    case "script_ready":
-      return { label: "GUIONIZANDO", cls: "cf-badge--warn", animate: true };
+    case "researching":
     case "prompting":
+      return { label: "GUIONIZANDO", cls: "cf-badge--warn", animate: true };
     case "imaging":
     case "voicing":
     case "assembling":
+    case "rendering":
+    case "subtitling":
+    case "publishing":
     case "producing":
       return { label: "PRODUCIENDO", cls: "cf-badge--creator", animate: true };
     default:

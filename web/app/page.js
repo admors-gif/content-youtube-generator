@@ -33,7 +33,7 @@ const PROCESS_STEPS = [
   {
     n: "04",
     t: "Producción y entrega",
-    d: "Voz ElevenLabs, imágenes, montaje. MP4 + shorts + thumbnails.",
+    d: "Voces de estudio, dirección visual y montaje. MP4 + shorts + thumbnails.",
   },
 ];
 

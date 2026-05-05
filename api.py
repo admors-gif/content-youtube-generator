@@ -2386,7 +2386,7 @@ async def recover_from_disk(project_id: str, request: Request):
         update_payload = {
             "status": "completed",
             "progress.percent": 100,
-            "progress.stepName": "🏆 Recuperado desde disco",
+            "progress.stepName": "Entrega recuperada correctamente",
             "videoPath": str(final_path),
             "videoFolder": safe_title,
             "hasSubtitles": has_subs,
@@ -2633,7 +2633,7 @@ def run_production(project_id):
         
         if existing_count >= len(scenes):
             print(f"   ✅ {existing_count}/{len(scenes)} imágenes ya existen — reutilizando")
-            update_progress(35, f"✅ {existing_count} visuales preparados", "imaging")
+            update_progress(35, f"{existing_count} visuales preparados", "imaging")
         else:
             update_progress(5, f"Creando {len(scenes)} visuales... ({existing_count} preparados)", "imaging")
             
@@ -2660,7 +2660,7 @@ def run_production(project_id):
                                         break
                                 doc_ref.update({"scenes": updated_scenes})
                                 pct = 5 + int((len(reported) / len(scenes)) * 30)
-                                update_progress(pct, f"🎨 Visual {len(reported)}/{len(scenes)} listo", "imaging")
+                                update_progress(pct, f"Visual {len(reported)}/{len(scenes)} listo", "imaging")
                             except Exception as e:
                                 print(f"   ⚠️ Monitor error: {e}")
             
@@ -2683,12 +2683,12 @@ def run_production(project_id):
                 print(f"STDERR: {stderr_tail}")
                 return
 
-            update_progress(35, "✅ Visuales base listos", "imaging")
+            update_progress(35, "Visuales base listos", "imaging")
         
         # ═══════════════════════════════════════════
         # PASO 2-4: Voz + movimiento + montaje (35% → 94%)
         # ═══════════════════════════════════════════
-        update_progress(42, "🎙️ Grabando voces...", "voicing")
+        update_progress(42, "Grabando voces...", "voicing")
         
         # Ejecutar factory.py completo (skip-images ya que las tenemos)
         # Monitorear progreso por pasos
@@ -2707,29 +2707,29 @@ def run_production(project_id):
                     audio_count = len(list(audio_dir.glob("narration_*.mp3"))) if audio_dir.exists() else 0
                     if audio_count > 0 and audio_count < len(scenes):
                         pct = 42 + int((audio_count / len(scenes)) * 18)
-                        update_progress(pct, f"🎙️ Voz {audio_count}/{len(scenes)}", "voicing")
+                        update_progress(pct, f"Voz {audio_count}/{len(scenes)}", "voicing")
                     elif audio_count >= len(scenes):
-                        update_progress(60, "🎙️ Voz completa", "voicing")
+                        update_progress(60, "Voz completa", "voicing")
                         # Motion/visual render progress (60% → 80%)
                         kb_count = len(list(kb_dir.glob("scene_*.mp4"))) if kb_dir.exists() else 0
                         if kb_count > 0 and kb_count < len(scenes):
                             pct = 60 + int((kb_count / len(scenes)) * 18)
-                            update_progress(pct, f"🎬 Movimiento {kb_count}/{len(scenes)}", "assembling")
+                            update_progress(pct, f"Movimiento {kb_count}/{len(scenes)}", "assembling")
                         elif kb_count >= len(scenes):
-                            update_progress(80, "🎬 Montando la película final", "assembling")
+                            update_progress(80, "Montando la película final", "assembling")
                             luma_count = len(list(luma_dir.glob("luma_*.mp4"))) if luma_dir.exists() else 0
                             if luma_count > 0:
-                                update_progress(82, f"🎥 Movimiento premium: {luma_count}", "assembling")
+                                update_progress(82, f"Movimiento premium: {luma_count}", "assembling")
                     if master_audio.exists() and master_audio.stat().st_size > 0:
-                        update_progress(62, "🎙️ Mezcla de audio lista", "assembling")
+                        update_progress(62, "Mezcla de audio lista", "assembling")
                     if master_visual.exists() and master_visual.stat().st_size > 0:
-                        update_progress(86, "🎞️ Render maestro en curso", "assembling")
+                        update_progress(86, "Montaje final en curso", "assembling")
                     valid_final, _has_subs, _invalid = _pick_valid_final_video(
                         Path(f"/app/output/videos/{safe_title}"),
                         min_duration_seconds=30,
                     )
                     if valid_final:
-                        update_progress(90, "🎞️ Película final ensamblada", "assembling")
+                        update_progress(90, "Película final ensamblada", "assembling")
                 except:
                     pass
         
@@ -2764,7 +2764,7 @@ def run_production(project_id):
         
         if not candidate_has_subs:
             # factory.py no generó subtítulos — intentar directamente
-            update_progress(92, "📝 Generando subtítulos...", "assembling")
+            update_progress(92, "Generando subtítulos...", "assembling")
             
             if final_candidate:
                 try:
@@ -2827,7 +2827,7 @@ def run_production(project_id):
         # Subir video final a Firebase Storage para entrega via CDN (sin pegar al VPS)
         storage_info = None
         if final_path:
-            update_progress(96, "☁️ Preparando entrega...", "publishing")
+            update_progress(96, "Preparando entrega...", "publishing")
             storage_info = _upload_video_to_storage(Path(final_path), project_id)
             if not storage_info:
                 doc_ref.update({
@@ -2863,7 +2863,7 @@ def run_production(project_id):
         shorts_results = []
         if final_path and storage_info:
             try:
-                update_progress(97, "✂️ Creando versiones cortas...", "publishing")
+                update_progress(97, "Creando versiones cortas...", "publishing")
                 shorts_results = build_shorts_for_project(video_dir, project_id)
                 print(f"   📱 Shorts generados: {len(shorts_results)}/3", flush=True)
             except Exception as shorts_err:
@@ -2878,7 +2878,7 @@ def run_production(project_id):
         thumbnails_results = []
         if storage_info:
             try:
-                update_progress(99, "🖼️ Diseñando miniaturas...", "publishing")
+                update_progress(99, "Diseñando miniaturas...", "publishing")
                 project_title = project.get("title", "")
                 thumbnails_results = build_thumbnails_for_project(video_dir, project_id, project_title)
                 print(f"   🖼️ Thumbnails generados: {len(thumbnails_results)}/3", flush=True)
@@ -2890,7 +2890,7 @@ def run_production(project_id):
                 except Exception:
                     pass
 
-        status_msg = "🏆 Tu video está listo" if not has_subs else "🏆 Tu video con subtítulos está listo"
+        status_msg = "Tu video está listo" if not has_subs else "Tu video con subtítulos está listo"
 
         update_payload = {
             "status": "completed",
@@ -2927,7 +2927,7 @@ def run_production(project_id):
             doc_ref.update({
                 "status": "error",
                 "progress.percent": 0,
-                "progress.stepName": "Timeout: producción excedió límite suave",
+                "progress.stepName": "La producción tardó más de lo esperado",
             })
         except Exception:
             pass

@@ -28,6 +28,7 @@ export default function ProjectHeader({
   const mono = getMonogram(project.agentId);
   const created = formatRelativeTime(project.createdAt);
   const isCompleted = project.status === "completed";
+  const canDownload = isCompleted || project.deliveryRecoverableFromDisk;
 
   return (
     <header className="cf-fade" style={{ marginBottom: "var(--s-6)" }}>
@@ -134,7 +135,7 @@ export default function ProjectHeader({
           </div>
         </div>
 
-        {isCompleted && (
+        {canDownload && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               onClick={onDownloadVideo}
