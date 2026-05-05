@@ -1,6 +1,8 @@
 /**
  * API Route Proxy — Download images ZIP from VPS over HTTPS
  */
+import * as Sentry from "@sentry/nextjs";
+
 export async function GET(request, { params }) {
   const { project } = await params;
   const vpsUrl = process.env.NEXT_PUBLIC_VPS_API_URL || "http://187.77.30.158:8085";
@@ -28,6 +30,10 @@ export async function GET(request, { params }) {
       },
     });
   } catch (error) {
+    Sentry.captureException(error, {
+      tags: { route: "download_images_proxy" },
+      extra: { project },
+    });
     console.error("Images download proxy error:", error);
     return new Response(JSON.stringify({ error: "Download failed" }), {
       status: 500,

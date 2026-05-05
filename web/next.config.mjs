@@ -1,3 +1,5 @@
+import { withSentryConfig } from "@sentry/nextjs";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactCompiler: true,
@@ -15,4 +17,21 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+const sentryOptions = {
+  silent: !process.env.CI,
+};
+
+if (process.env.SENTRY_ORG) {
+  sentryOptions.org = process.env.SENTRY_ORG;
+}
+
+if (process.env.SENTRY_PROJECT) {
+  sentryOptions.project = process.env.SENTRY_PROJECT;
+}
+
+if (process.env.SENTRY_AUTH_TOKEN) {
+  sentryOptions.authToken = process.env.SENTRY_AUTH_TOKEN;
+  sentryOptions.widenClientFileUpload = true;
+}
+
+export default withSentryConfig(nextConfig, sentryOptions);
