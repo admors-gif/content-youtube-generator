@@ -1299,6 +1299,28 @@ def _thumbnail_hook_plans(title: str, agent_id: str | None = None) -> list[dict]
     is_science = any(word in lower for word in ["ciencia", "cerebro", "psicologia", "psicología", "neuro"])
     keywords = _pick_thumbnail_keywords(clean_title, max_words=3)
 
+    if agent_id == "agent_autohipnosis":
+        return [
+            {
+                "label": "early",
+                "variant": "transformacion",
+                "hook": "REPROGRAMA\nTU MENTE",
+                "concept": "a serene person resting with eyes closed, surrounded by soft violet and gold light waves, calm bedroom or meditation space, subconscious transformation visual metaphor",
+            },
+            {
+                "label": "mid",
+                "variant": "profundo",
+                "hook": "DUERME\nY CAMBIA",
+                "concept": "peaceful night atmosphere, a calm silhouette under soft moonlight, gentle neural light patterns and floating affirmations represented as abstract glowing particles without readable text",
+            },
+            {
+                "label": "closing",
+                "variant": "identidad",
+                "hook": "CONFÍA\nEN TI",
+                "concept": "cinematic close portrait from shoulders up, relaxed confident expression, warm sunrise glow, subtle aura of inner strength, premium self-improvement thumbnail",
+            },
+        ]
+
     if is_attraction or is_science:
         return [
             {
@@ -1345,7 +1367,13 @@ def _thumbnail_hook_plans(title: str, agent_id: str | None = None) -> list[dict]
 
 def _build_premium_thumbnail_prompt(title: str, plan: dict, agent_id: str | None = None) -> str:
     clean_title = " ".join((title or "").split()) or "este documental"
-    format_hint = "podcast thumbnail" if agent_id == "agent_podcast_general" else "documentary thumbnail"
+    format_hint = (
+        "podcast thumbnail"
+        if agent_id == "agent_podcast_general"
+        else "guided self-hypnosis thumbnail"
+        if agent_id == "agent_autohipnosis"
+        else "documentary thumbnail"
+    )
     return (
         "Create a high-conversion YouTube "
         f"{format_hint} background image, 16:9 landscape, topic: \"{clean_title}\".\n"
@@ -1356,7 +1384,7 @@ def _build_premium_thumbnail_prompt(title: str, plan: dict, agent_id: str | None
         "- No visible hands or fingers; crop people at face/shoulders or keep hands fully outside the frame.\n"
         "- Faces must be realistic, expressive, premium, not uncanny.\n"
         "- Strong contrast, sharp focus, punchy blue/red/amber accents, mobile-readable composition.\n"
-        "- Avoid horror, gore, distorted bodies, extra limbs, malformed anatomy, and controversial shock imagery.\n"
+        "- Avoid horror, gore, distorted bodies, extra limbs, malformed anatomy, medical claims, and controversial shock imagery.\n"
         "Style: hyper-realistic cinematic poster, premium viral YouTube thumbnail, "
         "Netflix documentary meets intelligent clickbait, crisp details, 1280x720 safe framing."
     )
@@ -1540,7 +1568,13 @@ def _build_premium_thumbnails_for_project(video_dir: Path, project_id: str, titl
 
     thumbs_dir = video_dir / "thumbnails"
     thumbs_dir.mkdir(parents=True, exist_ok=True)
-    badge = "PODCAST" if agent_id == "agent_podcast_general" else None
+    badge = (
+        "PODCAST"
+        if agent_id == "agent_podcast_general"
+        else "GUIADA"
+        if agent_id == "agent_autohipnosis"
+        else None
+    )
     results = []
     for i, plan in enumerate(_thumbnail_hook_plans(title, agent_id=agent_id), 1):
         label = plan["label"]
@@ -1899,6 +1933,7 @@ _AGENT_CATALOG = """
 [agent_viajes] Viajes y Exploraciones — Shackleton, Everest, lugares peligrosos del mundo
 [agent_noticias_virales] Noticias Virales — eventos actuales que están en tendencia esta semana
 [agent_podcast_general] Este no es otro podcast más — conversación entre dos hosts (Mateo y Lucía) sobre cualquier tema, formato podcast multitema con dos voces alternando
+[agent_autohipnosis] Autohipnosis Guiada — wellness, relajación, visualización, afirmaciones positivas, desarrollo personal seguro
 """.strip()
 
 
@@ -3431,12 +3466,16 @@ def run_production(project_id):
         import re
         safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', title.replace(" ", "_"))
         
-        # Detectar formato podcast: si el proyecto fue generado con un agente
-        # de podcast, factory.py necesita format + podcast config + dialogue_blocks
-        # por escena para que generate_dual_narration alterne las voces.
+        # Detectar formatos especiales. Podcast necesita dialogue_blocks para
+        # dual TTS; autohipnosis necesita preservar su etiqueta de formato para
+        # visuales y filename.
         is_podcast_project = (
             project.get("format") == "podcast"
             or (agent_id or "").startswith("agent_podcast_")
+        )
+        is_autohypnosis_project = (
+            project.get("format") == "autohipnosis"
+            or agent_id == "agent_autohipnosis"
         )
 
         # Mapear scenes de Firestore al formato factory.py
@@ -3469,6 +3508,8 @@ def run_production(project_id):
                 "host_a": {"name": "Mateo", "voice": "Will"},
                 "host_b": {"name": "Lucía", "voice": "Lina"},
             })
+        elif is_autohypnosis_project:
+            temp_json["format"] = "autohipnosis"
         temp_path = f"/app/output/scripts/PRODUCE_{safe_title}.json"
         os.makedirs(os.path.dirname(temp_path), exist_ok=True)
         with open(temp_path, "w", encoding="utf-8") as f:

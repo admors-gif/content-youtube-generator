@@ -18,7 +18,7 @@
 import { SYSTEM_AGENTS } from "./agents";
 
 /**
- * Monogramas curados para los 28 agentes.
+ * Monogramas curados para los agentes.
  * Convención: 2 letras/símbolos seguros (compatibles con Fraunces).
  * Evitar caracteres exóticos (Φ, ψ, ⚔, †, Ω, ∞, ∴) por compatibilidad
  * cross-browser y filename safety.
@@ -52,6 +52,7 @@ export const MONOGRAM_BY_AGENT_ID = {
   agent_viajes:           "Vj",
   agent_noticias_virales: "Nv",
   agent_podcast_general:  "Pc",
+  agent_autohipnosis:     "Ah",
 };
 
 /**

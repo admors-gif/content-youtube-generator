@@ -425,4 +425,21 @@ export const SYSTEM_AGENTS = [
     ],
     color: "#14b8a6",
   },
+  {
+    agentId: "agent_autohipnosis",
+    name: "Autohipnosis Guiada",
+    emoji: "🌙",
+    description: "Sesiones de transformación personal con inducción suave, visualización y afirmaciones positivas. Wellness profundo, sin promesas médicas.",
+    category: "wellness",
+    promptFile: "agent_autohipnosis.md",
+    tier: "creator",
+    format: "autohipnosis",
+    defaultVoices: { narrator: "Lorenzo" },
+    exampleTopics: [
+      "Autoconfianza profunda antes de dormir",
+      "Disciplina tranquila para cumplir mis metas",
+      "Abundancia y seguridad interior"
+    ],
+    color: "#8B5CF6",
+  },
 ];

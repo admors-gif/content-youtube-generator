@@ -79,6 +79,10 @@ AGENT_VOICE_MAP = {
     "liderazgo": "Lorenzo",
     "emprendimiento": "Lorenzo",
     "desarrollo_personal": "Lorenzo",
+    "autohipnosis": "Lorenzo",
+    "hipnosis": "Lorenzo",
+    "wellness": "Lorenzo",
+    "afirmaciones": "Lorenzo",
     "negocios": "Lorenzo",
     "productividad": "Lorenzo",
     # ⚡ Alta energía → Diego

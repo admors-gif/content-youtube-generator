@@ -729,6 +729,39 @@ PODCAST_VISUAL_TEMPLATES = [
 ]
 
 
+AUTOHYPNOSIS_TARGET_VISUAL_SCENES = 12
+AUTOHYPNOSIS_MIN_VISUAL_SCENES = 8
+AUTOHYPNOSIS_MAX_VISUAL_SCENES = 14
+
+AUTOHYPNOSIS_VISUAL_TEMPLATES = [
+    (
+        "Breath field",
+        "A serene abstract field of slow breathing light related to {topic}, soft violet and midnight blue gradients, warm gold particles moving like calm inhales and exhales, minimal premium wellness composition, no readable text, cinematic, 4k",
+        ["breath", "calm", "abstract"],
+    ),
+    (
+        "Safe room",
+        "A quiet elegant room at night prepared for deep relaxation about {topic}, soft lamp glow, linen textures, closed curtains, a glass of water on a clean bedside table, peaceful cinematic wellness photography, no readable text, 4k",
+        ["room", "night", "safe"],
+    ),
+    (
+        "Inner landscape",
+        "A dreamlike inner landscape symbolizing {topic}, still lake reflecting a violet dawn, gentle mist, distant warm light, slow cinematic serenity, premium meditation visual, no people, no readable text, 8k",
+        ["landscape", "visualization", "peace"],
+    ),
+    (
+        "Identity mirror",
+        "A symbolic mirror scene for {topic}, soft golden light touching a clean mirror surface, blurred calm silhouette from behind only, hands outside frame, face not visible, elegant self-transformation mood, no readable text, 4k",
+        ["identity", "mirror", "change"],
+    ),
+    (
+        "Neural calm",
+        "Abstract neural pathways transforming into soft golden threads connected to {topic}, smooth organic shapes, slow flowing light, deep blue background, scientific but gentle wellness aesthetic, no readable text, no logos, 8k",
+        ["mind", "neural", "transformation"],
+    ),
+]
+
+
 def _parse_podcast_script(text: str) -> list:
     """
     Parsea un guión de podcast en formato:
@@ -914,6 +947,92 @@ def _build_podcast_visual_scenes(topic: str, grouped_scenes: list) -> list:
     return visual_scenes
 
 
+def _split_text_into_balanced_segments(text: str, target_segments: int) -> list:
+    """
+    Divide texto largo en segmentos balanceados preservando el orden y sin
+    perder palabras. Usado por formatos contemplativos donde una escena visual
+    puede sostener 60-120s de audio con Ken Burns.
+    """
+    clean = (text or "").strip()
+    if not clean:
+        return []
+
+    paragraphs = [p.strip() for p in _re.split(r"\n\s*\n+", clean) if p.strip()]
+    if len(paragraphs) < target_segments:
+        sentences = [
+            s.strip()
+            for s in _re.split(r"(?<=[.!?…])\s+", clean)
+            if s.strip()
+        ]
+        units = sentences if len(sentences) >= target_segments else paragraphs
+    else:
+        units = paragraphs
+
+    target_segments = max(1, min(target_segments, len(units)))
+    segments = []
+    for i in range(target_segments):
+        start = round(i * len(units) / target_segments)
+        end = round((i + 1) * len(units) / target_segments)
+        chunk_units = units[start:end]
+        if chunk_units:
+            segments.append("\n\n".join(chunk_units).strip())
+
+    return segments
+
+
+def _normalize_autohypnosis_delivery(script_text: str) -> str:
+    """
+    Mantiene texto limpio para TTS: sin tags entre corchetes que puedan leerse
+    literal, con pausas representadas por puntuacion natural.
+    """
+    text = (script_text or "").strip()
+    text = _re.sub(r"\[[^\]]+\]", "", text)
+    text = _re.sub(r"\s+\.\.\.", "...", text)
+    text = _re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _build_autohypnosis_visual_scenes(topic: str, script_text: str) -> list:
+    """
+    Visuales acotados para autohipnosis: pocas escenas, tranquilas, sin manos,
+    sin texto legible y sin imagineria clinica. La narracion se reparte completa
+    entre las escenas para que el audio no pierda contenido.
+    """
+    topic_clean = (topic or "personal transformation").strip()
+    topic_tags = _topic_tags(topic)
+    segments = _split_text_into_balanced_segments(
+        script_text,
+        target_segments=AUTOHYPNOSIS_TARGET_VISUAL_SCENES,
+    )
+    if len(segments) > AUTOHYPNOSIS_MAX_VISUAL_SCENES:
+        segments = _split_text_into_balanced_segments(
+            script_text,
+            target_segments=AUTOHYPNOSIS_MAX_VISUAL_SCENES,
+        )
+
+    safety_suffix = (
+        " No readable text, no logos, no medical setting, no hospital imagery, "
+        "hands outside frame, fingers not visible, peaceful and non-clinical."
+    )
+
+    visual_scenes = []
+    for i, segment in enumerate(segments):
+        category, template, base_tags = AUTOHYPNOSIS_VISUAL_TEMPLATES[i % len(AUTOHYPNOSIS_VISUAL_TEMPLATES)]
+        prompt = template.format(topic=topic_clean)
+        if safety_suffix.strip() not in prompt:
+            prompt = f"{prompt}{safety_suffix}"
+        visual_scenes.append({
+            "scene_number": i + 1,
+            "narration_text": segment,
+            "narration": segment,
+            "prompt": prompt,
+            "tags": (base_tags + topic_tags)[:5],
+            "visual_category": category,
+        })
+
+    return visual_scenes
+
+
 def generate_podcast_script(topic: str, agent_file: str = "agent_podcast_general.md", project_id: str = None) -> dict:
     """
     Genera un guión de podcast conversacional (2 hosts) usando Claude Sonnet.
@@ -1003,6 +1122,85 @@ Devuelve solo el guión, sin headers ni comentarios."""
     return result
 
 
+def generate_autohypnosis_script(topic: str, agent_file: str = "agent_autohipnosis.md", project_id: str = None) -> dict:
+    """
+    Genera una sesión de autohipnosis guiada. No usa investigación web por
+    defecto: este formato debe ser estable, seguro y basado en estructura
+    terapéutica general de wellness, no en datos noticiosos.
+    """
+    agent_name = agent_file.replace("agent_", "").replace(".md", "").replace("_", " ").title()
+    print(f"\n🌙 MOTOR 1 (AUTOHIPNOSIS): Generando sesión guiada para '{topic}'...")
+    print(f"   Modelo: {CLAUDE_MODEL_SCRIPT if claude_client else GPT_MODEL}")
+    print(f"   Agente: {agent_name} ({agent_file})")
+
+    agent_prompt = load_prompt(agent_file)
+    user_message = f"""Genera una sesión completa de autohipnosis guiada sobre el siguiente objetivo.
+
+OBJETIVO: {topic}
+
+Requisitos estrictos:
+- 11,000 a 14,000 caracteres
+- Español neutro de Latinoamérica
+- Texto plano de una sola voz, sin encabezados, sin bullets y sin markdown
+- Estructura completa: aviso seguro, inducción, profundización, visualización, afirmaciones, ensayo futuro, integración y salida
+- Afirmaciones positivas en presente, en segunda persona y/o primera persona cuando suene natural
+- No prometas curas, resultados garantizados ni tratamiento médico
+- No trabajes traumas, recuerdos reprimidos ni diagnósticos clínicos
+- Usa pausas con puntos suspensivos y frases respirables, no tags entre corchetes
+- Si el objetivo es sueño o descanso, termina con salida suave para dormir; si no, termina con retorno alerta y tranquilo
+
+Devuelve solo el guion final."""
+
+    if claude_client:
+        response = claude_client.messages.create(
+            model=CLAUDE_MODEL_SCRIPT,
+            max_tokens=14000,
+            system=agent_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        script_text = response.content[0].text
+        used_model = CLAUDE_MODEL_SCRIPT
+    else:
+        response = openai_client.chat.completions.create(
+            model=GPT_MODEL,
+            messages=[
+                {"role": "system", "content": agent_prompt},
+                {"role": "user", "content": user_message},
+            ],
+        )
+        script_text = response.choices[0].message.content
+        used_model = GPT_MODEL
+
+    script_text = _normalize_autohypnosis_delivery(script_text)
+    char_count = len(script_text)
+    word_count = len(script_text.split())
+    estimated_minutes = word_count / 115
+
+    result = {
+        "topic": topic,
+        "agent": agent_file,
+        "script": script_text,
+        "metadata": {
+            "model": used_model,
+            "agent_personality": agent_file,
+            "characters": char_count,
+            "words": word_count,
+            "estimated_duration_minutes": round(estimated_minutes, 1),
+            "format": "autohipnosis",
+            "generated_at": datetime.now().isoformat(),
+            "web_research": False,
+            "research_sources": 0,
+        },
+    }
+
+    print(f"\n   ✅ Sesión de autohipnosis generada!")
+    print(f"   📝 Caracteres: {char_count:,}")
+    print(f"   📊 Palabras: {word_count:,}")
+    print(f"   ⏱️  Duración estimada: {estimated_minutes:.1f} minutos")
+
+    return result
+
+
 # ============================================================
 # PIPELINE PRINCIPAL
 # ============================================================
@@ -1027,18 +1225,23 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
         update_progress(project_id, f"Error: {error_msg}", 0, {"status": "error"})
         return None
 
-    # Detectar formato podcast: agentes que arrancan con `agent_podcast_*`
-    # usan generación, parsing y prompts visuales especializados.
+    # Detectar formatos especiales: usan generación y visuales especializados
+    # para evitar exceso de escenas y conservar el estilo correcto.
     is_podcast = agent_file.startswith("agent_podcast_")
+    is_autohypnosis = agent_file == "agent_autohipnosis.md"
     if is_podcast:
         print("🎙️  Modo PODCAST detectado — pipeline conversacional con 2 voces")
+    if is_autohypnosis:
+        print("🌙 Modo AUTOHIPNOSIS detectado — sesión guiada con visuales contemplativos")
 
     try:
         update_progress(project_id, "Escribiendo la estructura narrativa...", 10, {"status": "scripting"})
 
-        # PASO 1: Generar guión (podcast usa generador especializado)
+        # PASO 1: Generar guión (formatos especiales usan generador propio)
         if is_podcast:
             result = generate_podcast_script(topic, agent_file, project_id)
+        elif is_autohypnosis:
+            result = generate_autohypnosis_script(topic, agent_file, project_id)
         else:
             result = generate_script(topic, agent_file)
         script = result["script"]
@@ -1047,8 +1250,11 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
 
         # PASO 2: Agregar etiquetas de emoción (tagger especializado para podcast
         # respeta densidades por speaker)
-        emotion_prompt_file = "emotion_tagger_podcast.md" if is_podcast else "emotion_tagger.md"
-        tagged_script = add_emotion_tags(script, prompt_file=emotion_prompt_file)
+        if is_autohypnosis:
+            tagged_script = _normalize_autohypnosis_delivery(script)
+        else:
+            emotion_prompt_file = "emotion_tagger_podcast.md" if is_podcast else "emotion_tagger.md"
+            tagged_script = add_emotion_tags(script, prompt_file=emotion_prompt_file)
 
         # Para podcast, parseamos el guión en bloques de diálogo y agrupamos
         # en escenas visuales antes del PASO 3.
@@ -1066,11 +1272,15 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
 
         update_progress(project_id, "Diseñando escenas visuales...", 60, {"status": "prompting"})
 
-        # PASO 3: Generar prompts de video (estética podcast vs documental)
+        # PASO 3: Generar prompts de video (estética por formato)
         if is_podcast:
             video_scenes = _build_podcast_visual_scenes(topic, podcast_scenes_grouped)
             print(f"   🎬 Podcast visual: {len(video_scenes)} escenas macro "
                   f"(target={PODCAST_TARGET_VISUAL_SCENES}, max={PODCAST_MAX_VISUAL_SCENES})")
+        elif is_autohypnosis:
+            video_scenes = _build_autohypnosis_visual_scenes(topic, tagged_script)
+            print(f"   🌙 Autohipnosis visual: {len(video_scenes)} escenas contemplativas "
+                  f"(target={AUTOHYPNOSIS_TARGET_VISUAL_SCENES}, max={AUTOHYPNOSIS_MAX_VISUAL_SCENES})")
         else:
             video_scenes = generate_video_prompts(script, prompt_file="video_prompt_generator.md")
 
@@ -1101,7 +1311,7 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
         full_result = {
             "topic": topic,
             "agent": agent_file,
-            "format": "podcast" if is_podcast else "narrativa",
+            "format": "podcast" if is_podcast else "autohipnosis" if is_autohypnosis else "narrativa",
             "script_plain": script,
             "script_tagged": tagged_script,
             "video_scenes": video_scenes,
@@ -1119,6 +1329,12 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
                 "host_b": {"name": "Lucía", "voice": "Lina"},
                 "total_blocks": len(podcast_blocks),
             }
+        if is_autohypnosis:
+            full_result["autohipnosis"] = {
+                "voice": "Lorenzo",
+                "safety": "wellness_only",
+                "visual_scene_target": AUTOHYPNOSIS_TARGET_VISUAL_SCENES,
+            }
 
         output_path = OUTPUT_DIR / f"FULL_{safe_name}_{timestamp}.json"
         with open(output_path, "w", encoding="utf-8") as f:
@@ -1128,8 +1344,8 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
         if project_id:
             try:
                 words = len(script.split())
-                # Podcast cuenta a 130 wpm (más lento), narrativa a 150 wpm
-                wpm = 130 if is_podcast else 150
+                # Podcast/autohipnosis son más pausados que narrativa.
+                wpm = 130 if is_podcast else 115 if is_autohypnosis else 150
                 firestore_payload = {
                     "status": "script_ready",
                     "script.plain": script,
@@ -1143,6 +1359,9 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
                 if is_podcast:
                     firestore_payload["format"] = "podcast"
                     firestore_payload["podcast"] = full_result["podcast"]
+                if is_autohypnosis:
+                    firestore_payload["format"] = "autohipnosis"
+                    firestore_payload["autohipnosis"] = full_result["autohipnosis"]
                 update_progress(project_id, "Guion listo para revisión", 100, firestore_payload)
                 print(f"✅ Firebase actualizado para proyecto {project_id}")
             except Exception as e:

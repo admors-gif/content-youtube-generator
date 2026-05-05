@@ -49,6 +49,13 @@ PODCAST_IMAGE_PROMPT_PREFIX = (
     "no logos, clean contemporary magazine photography, warm amber and deep teal palette."
 )
 
+AUTOHYPNOSIS_IMAGE_PROMPT_PREFIX = (
+    "Premium guided self-hypnosis visual, serene wellness atmosphere, soft violet, "
+    "midnight blue and warm gold palette, no readable text, no logos, peaceful "
+    "abstract or object-led composition, faces absent or calm and natural, hands "
+    "outside the frame, fingers not visible."
+)
+
 # Importar módulos propios
 sys.path.insert(0, str(Path(__file__).parent))
 from elevenlabs_tts import (
@@ -100,6 +107,8 @@ def _build_image_prompt(prompt: str, pipeline_format: str = "narrativa") -> str:
     prompt = (prompt or "").strip()
     if pipeline_format == "podcast":
         return f"{PODCAST_IMAGE_PROMPT_PREFIX} {prompt}".strip()
+    if pipeline_format == "autohipnosis":
+        return f"{AUTOHYPNOSIS_IMAGE_PROMPT_PREFIX} {prompt}".strip()
     return f"{GENERAL_IMAGE_PROMPT_PREFIX} {prompt}".strip()
 
 
@@ -787,14 +796,14 @@ if __name__ == "__main__":
         print("[!] No se encontraron escenas en el JSON")
         sys.exit(1)
 
-    # Si el formato es podcast, forzar modo narrativa: Luma no aplica para
-    # podcasts (sus visuales son atmosphere/divulgación, no clips realistas).
-    if data.get("format") == "podcast" and mode == "cinematico":
-        print("⚠️  Format=podcast detectado — overrideando mode 'cinematico' a 'narrativa' (Luma no aplica)")
+    # Algunos formatos usan visuales atmosféricos y largos; Luma no aporta
+    # suficiente valor frente a Ken Burns y encarece el resultado.
+    if data.get("format") in {"podcast", "autohipnosis"} and mode == "cinematico":
+        print(f"⚠️  Format={data.get('format')} detectado — overrideando mode 'cinematico' a 'narrativa'")
         mode = "narrativa"
 
     # Label visible en filename: refleja el formato real, no el modo interno del pipeline.
-    format_label = "podcast" if data.get("format") == "podcast" else mode
+    format_label = data.get("format") if data.get("format") in {"podcast", "autohipnosis"} else mode
 
     # Determinar título y agente
     # Usar topic para nombre de carpeta (consistente con VPS)

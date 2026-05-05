@@ -22,6 +22,24 @@ def test_generation_size_uses_exact_thumbnail_ratio_for_latest_image_model():
     assert api._thumbnail_generation_size("gpt-image-1") == "1536x1024"
 
 
+def test_autohypnosis_thumbnail_plan_avoids_medical_claims_and_generated_text():
+    plans = api._thumbnail_hook_plans(
+        "Autohipnosis para autoconfianza profunda",
+        agent_id="agent_autohipnosis",
+    )
+    prompt = api._build_premium_thumbnail_prompt(
+        "Autohipnosis para autoconfianza profunda",
+        plans[0],
+        agent_id="agent_autohipnosis",
+    )
+
+    assert plans[0]["hook"] == "REPROGRAMA\nTU MENTE"
+    assert "guided self-hypnosis thumbnail" in prompt
+    assert "No generated text" in prompt
+    assert "medical claims" in prompt
+    assert "REPROGRAMA" not in prompt
+
+
 def test_premium_thumbnail_renderer_outputs_valid_jpeg(tmp_path):
     from PIL import Image, ImageDraw
 
