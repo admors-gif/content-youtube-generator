@@ -12,6 +12,10 @@ from scripts.media_validation import (
     pick_valid_final_video as _pick_valid_final_video_impl,
     validate_media_file as _validate_media_file,
 )
+from scripts.sentry_observability import (
+    sanitize_sentry_event as _sanitize_sentry_event,
+    tag_sentry_project as _tag_sentry_project,
+)
 
 FIREBASE_STORAGE_BUCKET = os.environ.get(
     "FIREBASE_STORAGE_BUCKET",
@@ -27,22 +31,29 @@ if SENTRY_DSN:
         import sentry_sdk
         from sentry_sdk.integrations.fastapi import FastApiIntegration
         from sentry_sdk.integrations.logging import LoggingIntegration
+        sentry_integrations = [
+            FastApiIntegration(),
+            LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+        ]
+        try:
+            from sentry_sdk.integrations.celery import CeleryIntegration
+            sentry_integrations.append(CeleryIntegration())
+        except Exception:
+            pass
+
         sentry_sdk.init(
             dsn=SENTRY_DSN,
-            integrations=[
-                FastApiIntegration(),
-                LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
-            ],
+            integrations=sentry_integrations,
             traces_sample_rate=0.1,    # 10% de requests trackean performance
             profiles_sample_rate=0.0,   # Profiling desactivado (caro)
             environment=os.environ.get("ENV", "production"),
             release=os.environ.get("GIT_SHA", "unknown"),
             send_default_pii=False,     # No enviar IPs ni headers sensibles
+            before_send=_sanitize_sentry_event,
         )
         print(f"Sentry initialized (env={os.environ.get('ENV','production')})", flush=True)
     except Exception as e:
         print(f"Sentry init failed: {e}", flush=True)
-
 # 2) structlog: logs estructurados (JSON en prod, pretty en dev).
 #    Reemplaza print() con logger.info(event, **kwargs).
 try:
@@ -2484,6 +2495,7 @@ def run_script(topic, agent_file, project_id):
 
 def run_production(project_id):
     """Ejecuta el pipeline cinemático: FLUX → ElevenLabs → Luma → Ken Burns → Ensamblaje."""
+    _tag_sentry_project(project_id, pipeline="production")
     import firebase_admin
     from firebase_admin import credentials, firestore
     from pathlib import Path

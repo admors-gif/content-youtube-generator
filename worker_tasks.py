@@ -36,6 +36,14 @@ def produce_video(self, project_id: str):
         sentry_sdk.set_tag("project_id", project_id)
         sentry_sdk.set_tag("celery_task_id", self.request.id)
         sentry_sdk.set_tag("retry_count", self.request.retries)
+        sentry_sdk.set_context(
+            "content_factory_task",
+            {
+                "task_name": self.name,
+                "task_id": self.request.id,
+                "retry_count": self.request.retries,
+            },
+        )
     except Exception:
         pass
 
