@@ -703,12 +703,12 @@ PODCAST_MAX_VISUAL_SCENES = 15
 PODCAST_VISUAL_TEMPLATES = [
     (
         "Object macro",
-        "Editorial macro photography of a symbolic object related to {topic}, warm amber studio light, shallow depth of field, minimalist composition, no text, magazine cover quality, photorealistic, 4k",
+        "Editorial macro photography of a symbolic object related to {topic}, warm amber studio light, shallow depth of field, minimalist composition, object-only frame, clean surface, magazine cover quality, photorealistic, 4k",
         ["object", "warm", "editorial"],
     ),
     (
         "Atmospheric place",
-        "Empty contemporary studio corner suggesting a deep conversation about {topic}, warm practical lamps, deep teal shadows, calm cinematic atmosphere, no people facing camera, editorial style, 8k",
+        "Empty contemporary studio corner suggesting a deep conversation about {topic}, warm practical lamps, deep teal shadows, calm cinematic atmosphere, empty room with two chairs, editorial style, 8k",
         ["studio", "atmosphere", "conversation"],
     ),
     (
@@ -717,13 +717,13 @@ PODCAST_VISUAL_TEMPLATES = [
         ["abstract", "emotion", "data"],
     ),
     (
-        "Human detail anonymous",
-        "Anonymous human hands near a microphone and notebook, warm window light, intimate podcast mood, face not visible, thoughtful editorial photography about {topic}, magazine quality, 4k",
-        ["human", "podcast", "intimate"],
+        "Anonymous silhouette",
+        "Anonymous faceless silhouette seen from behind in a warm studio environment about {topic}, hands outside the frame, soft window light, thoughtful editorial photography, calm premium podcast mood, magazine quality, 4k",
+        ["silhouette", "podcast", "intimate"],
     ),
     (
         "Symbolic still life",
-        "Symbolic still life for {topic}: ceramic cup, open notebook, soft shadows, amber highlights, deep teal background, minimalist editorial composition, no readable text, photorealistic, 4k",
+        "Symbolic still life for {topic}: ceramic cup, closed notebook, soft shadows, amber highlights, deep teal background, minimalist editorial composition, clean blank surfaces, photorealistic, 4k",
         ["still-life", "symbolic", "warm"],
     ),
 ]
@@ -890,10 +890,16 @@ def _build_podcast_visual_scenes(topic: str, grouped_scenes: list) -> list:
     topic_clean = (topic or "the episode theme").strip()
     topic_tags = _topic_tags(topic)
     visual_scenes = []
+    safety_suffix = (
+        " Faces absent or fully obscured, hands outside frame, fingers not visible, "
+        "no readable text, no brand logos."
+    )
 
     for i, scene in enumerate(grouped_scenes):
         category, template, base_tags = PODCAST_VISUAL_TEMPLATES[i % len(PODCAST_VISUAL_TEMPLATES)]
         prompt = template.format(topic=topic_clean)
+        if safety_suffix.strip() not in prompt:
+            prompt = f"{prompt}{safety_suffix}"
         tags = (base_tags + topic_tags)[:5]
         visual_scenes.append({
             "scene_number": i + 1,

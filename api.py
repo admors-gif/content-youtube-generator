@@ -431,6 +431,71 @@ def _run_factory_subprocess(args, monitor_thread, stop_event, timeout=7200, log_
                     pass
 
 
+def _scene_number_from_payload(scene: dict) -> int:
+    try:
+        return int(scene.get("scene_number", scene.get("sceneNumber", 0)))
+    except Exception:
+        return 0
+
+
+def _valid_scene_image_numbers(images_dir: Path, min_bytes: int = 5000) -> set[int]:
+    import re
+    ready = set()
+    for img in images_dir.glob("scene_*.png"):
+        match = re.fullmatch(r"scene_(\d{4})\.png", img.name)
+        if match and img.stat().st_size >= min_bytes:
+            ready.add(int(match.group(1)))
+    return ready
+
+
+def _sync_scene_image_urls(doc_ref, scenes: list, safe_title: str, images_dir: Path) -> dict:
+    """
+    Final source-of-truth sync after visual generation.
+
+    The live monitor can miss a late file if the subprocess exits between
+    polling ticks. This pass reconciles disk -> Firestore by exact scene number
+    before the pipeline is allowed to move into voice/montage.
+    """
+    from firebase_admin import firestore
+
+    vps_base = os.environ.get("VPS_PUBLIC_URL", "http://100.99.207.113:8085").rstrip("/")
+    ready_numbers = _valid_scene_image_numbers(images_dir)
+
+    latest = doc_ref.get().to_dict() or {}
+    updated_scenes = latest.get("scenes") or scenes or []
+    expected_numbers = []
+    missing = []
+    ready = 0
+
+    for scene in updated_scenes:
+        num = _scene_number_from_payload(scene)
+        if not num:
+            continue
+        expected_numbers.append(num)
+        if num in ready_numbers:
+            scene["imageUrl"] = f"{vps_base}/images/{safe_title}/scene_{num:04d}.png"
+            scene["status"] = "ready"
+            ready += 1
+        else:
+            scene.pop("imageUrl", None)
+            scene["status"] = "missing_image"
+            missing.append(num)
+
+    doc_ref.update({
+        "scenes": updated_scenes,
+        "visuals.ready": ready,
+        "visuals.total": len(expected_numbers),
+        "visuals.missing": missing,
+        "visuals.updatedAt": firestore.SERVER_TIMESTAMP,
+    })
+
+    return {
+        "ready": ready,
+        "total": len(expected_numbers),
+        "missing": missing,
+    }
+
+
 # ── Idempotency lock para /produce y /retry ──────────────────────────────
 # Compare-and-swap atómico via Firestore transaction. Bloquea encolado
 # duplicado de jobs costosos para el mismo project_id (doble click rápido,
@@ -2551,6 +2616,7 @@ def run_production(project_id):
         if not project:
             print("❌ [PRODUCE] Project not found in Firebase")
             return
+        production_start = time.time()
 
         # Idempotencia: si Celery re-encola un job ya completado (ej. worker
         # muere después de escribir status=completed pero antes del ACK por
@@ -2573,6 +2639,10 @@ def run_production(project_id):
                 "continuando para reparar entrega.",
                 flush=True,
             )
+        doc_ref.update({
+            "productionStartedAt": firestore.SERVER_TIMESTAMP,
+            "productionStartedFromStatus": project.get("status"),
+        })
 
         title = project.get("title", "video_sin_titulo")
         scenes = project.get("scenes", [])
@@ -2640,12 +2710,18 @@ def run_production(project_id):
         # ═══════════════════════════════════════════
         
         # Detectar imágenes existentes para evitar regenerar
-        existing_images = sorted(images_dir.glob("scene_*.png"))
-        existing_count = len([f for f in existing_images if f.stat().st_size > 1000])
+        existing_numbers = _valid_scene_image_numbers(images_dir)
+        expected_numbers = {
+            _scene_number_from_payload(scene)
+            for scene in scenes
+            if _scene_number_from_payload(scene)
+        }
+        existing_count = len(existing_numbers.intersection(expected_numbers))
         
         if existing_count >= len(scenes):
             print(f"   ✅ {existing_count}/{len(scenes)} imágenes ya existen — reutilizando")
-            update_progress(35, f"{existing_count} visuales preparados", "imaging")
+            image_sync = _sync_scene_image_urls(doc_ref, scenes, safe_title, images_dir)
+            update_progress(35, f"{image_sync['ready']} visuales preparados", "imaging")
         else:
             update_progress(5, f"Creando {len(scenes)} visuales... ({existing_count} preparados)", "imaging")
             
@@ -2659,7 +2735,7 @@ def run_production(project_id):
                     time.sleep(8)
                     existing = sorted(images_dir.glob("scene_*.png"))
                     for img in existing:
-                        if img.name not in reported and img.stat().st_size > 1000:
+                        if img.name not in reported and img.name.count(".") == 1 and img.stat().st_size > 1000:
                             reported.add(img.name)
                             try:
                                 num = int(img.stem.split("_")[1])
@@ -2695,7 +2771,26 @@ def run_production(project_id):
                 print(f"STDERR: {stderr_tail}")
                 return
 
-            update_progress(35, "Visuales base listos", "imaging")
+            image_sync = _sync_scene_image_urls(doc_ref, scenes, safe_title, images_dir)
+            if image_sync["missing"]:
+                doc_ref.update({
+                    "status": "error",
+                    "progress.percent": 35,
+                    "progress.stepName": "Error: visuales incompletos",
+                    "visuals.recoveryRequired": True,
+                    "visuals.missing": image_sync["missing"],
+                })
+                try:
+                    import sentry_sdk
+                    sentry_sdk.capture_message(
+                        f"Image stage incomplete for {project_id}: {image_sync['missing']}",
+                        level="error",
+                    )
+                except Exception:
+                    pass
+                return
+
+            update_progress(35, f"{image_sync['ready']} visuales base listos", "imaging")
         
         # ═══════════════════════════════════════════
         # PASO 2-4: Voz + movimiento + montaje (35% → 94%)
@@ -2911,6 +3006,8 @@ def run_production(project_id):
             "videoPath": final_path,
             "videoFolder": safe_title,
             "hasSubtitles": has_subs,
+            "productionCompletedAt": firestore.SERVER_TIMESTAMP,
+            "productionDurationSeconds": round(time.time() - production_start, 1),
         }
         if storage_info:
             update_payload["videoStoragePath"] = storage_info["gs_path"]

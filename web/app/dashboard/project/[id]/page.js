@@ -161,6 +161,7 @@ export default function ProjectDetailsPage({ params }) {
     const interval = setInterval(() => {
       setDisplayPercent((prev) => {
         if (realPercent >= 100 || realPercent === 0) return realPercent;
+        if (realPercent < prev - 5) return realPercent;
         if (realPercent > prev + 5) return realPercent - 2;
         if (prev >= realPercent - 0.5) return prev;
         return prev + 0.3;

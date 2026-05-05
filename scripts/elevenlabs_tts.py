@@ -172,6 +172,34 @@ V3_AUDIO_TAGS = {
     "hesitates",
 }
 
+PODCAST_TTS_PROFILES = {
+    # Baseline validated by the 2026-05-05 real podcast test. Keep this as the
+    # rollback point unless the user explicitly opts into another profile.
+    "baseline_2026_05_05": {
+        "pause_between_blocks_ms": 280,
+        "voice_overrides": {},
+    },
+    # Experimental profile for later A/B tests. Not active by default.
+    "natural_v2": {
+        "pause_between_blocks_ms": 220,
+        "voice_overrides": {
+            "Will": {"stability": 0.42, "similarity_boost": 0.78},
+            "Lina": {"stability": 0.42, "similarity_boost": 0.78},
+        },
+    },
+}
+
+
+def _get_podcast_tts_profile() -> dict:
+    requested = os.getenv("PODCAST_TTS_PROFILE", "baseline_2026_05_05").strip()
+    return PODCAST_TTS_PROFILES.get(requested, PODCAST_TTS_PROFILES["baseline_2026_05_05"])
+
+
+def _apply_podcast_voice_profile(voice: str, settings: dict, profile: dict) -> dict:
+    merged = dict(settings)
+    merged.update((profile.get("voice_overrides") or {}).get(voice, {}))
+    return merged
+
 V3_TAG_ALIASES = {
     "risa": "laughs",
     "risas": "laughs",
@@ -478,7 +506,7 @@ def generate_dual_narration(
     output_dir: Path,
     voice_a: str = "Will",
     voice_b: str = "Lina",
-    pause_between_blocks_ms: int = 280,
+    pause_between_blocks_ms: int = None,
     skip_existing: bool = True,
     model: str = "eleven_v3",
 ) -> dict:
@@ -504,6 +532,10 @@ def generate_dual_narration(
         print(f"⚠️  voice_a == voice_b ({voice_a}) — degradando a single-voice narration")
         return generate_scene_narrations(scenes, output_dir, voice=voice_a, skip_existing=skip_existing)
 
+    podcast_profile = _get_podcast_tts_profile()
+    if pause_between_blocks_ms is None:
+        pause_between_blocks_ms = int(podcast_profile.get("pause_between_blocks_ms", 280))
+
     print("=" * 60)
     print(f"   ElevenLabs DUAL TTS — Podcast 2 voces")
     print("=" * 60)
@@ -513,8 +545,8 @@ def generate_dual_narration(
     print(f"   Pausa entre bloques: {pause_between_blocks_ms}ms")
     print("=" * 60)
 
-    settings_a = get_voice_settings(voice_a)
-    settings_b = get_voice_settings(voice_b)
+    settings_a = _apply_podcast_voice_profile(voice_a, get_voice_settings(voice_a), podcast_profile)
+    settings_b = _apply_podcast_voice_profile(voice_b, get_voice_settings(voice_b), podcast_profile)
 
     # Silencio pre-generado (lo reusamos en todas las escenas)
     silence_path = blocks_dir / f"_silence_{pause_between_blocks_ms}ms.mp3"

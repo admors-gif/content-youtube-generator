@@ -35,6 +35,19 @@ BASE_DIR = Path(__file__).parent.parent
 COMFYUI_API_KEY = os.getenv("COMFYUI_API_KEY")
 COMFYUI_BASE = "https://cloud.comfy.org/api"
 COMFYUI_HEADERS = {"X-API-Key": COMFYUI_API_KEY, "Content-Type": "application/json"}
+IMAGE_MIN_BYTES = 5000
+IMAGE_JOBS_FILENAME = "image_jobs.json"
+
+GENERAL_IMAGE_PROMPT_PREFIX = (
+    "Highly realistic cinematic film still, masterpiece, 8k resolution, "
+    "photorealistic lighting, refined editorial composition."
+)
+
+PODCAST_IMAGE_PROMPT_PREFIX = (
+    "Premium editorial podcast visual, object-led or abstract composition, "
+    "faces absent, hands outside the frame, fingers not visible, no readable text, "
+    "no logos, clean contemporary magazine photography, warm amber and deep teal palette."
+)
 
 # Importar módulos propios
 sys.path.insert(0, str(Path(__file__).parent))
@@ -51,15 +64,175 @@ from generate_subtitles import add_subtitles_to_video
 from media_validation import validate_media_file
 
 
+def _scene_number(scene):
+    try:
+        return int(scene.get("scene_number", scene.get("sceneNumber", 0)))
+    except Exception:
+        return 0
+
+
+def _image_jobs_path(images_dir: Path) -> Path:
+    return images_dir.parent / IMAGE_JOBS_FILENAME
+
+
+def _load_image_jobs(images_dir: Path) -> dict:
+    path = _image_jobs_path(images_dir)
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception as exc:
+        print(f"   [image-jobs] metadata unreadable: {exc}")
+    return {}
+
+
+def _save_image_jobs(images_dir: Path, jobs: dict) -> None:
+    path = _image_jobs_path(images_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(jobs, f, ensure_ascii=False, indent=2)
+
+
+def _build_image_prompt(prompt: str, pipeline_format: str = "narrativa") -> str:
+    prompt = (prompt or "").strip()
+    if pipeline_format == "podcast":
+        return f"{PODCAST_IMAGE_PROMPT_PREFIX} {prompt}".strip()
+    return f"{GENERAL_IMAGE_PROMPT_PREFIX} {prompt}".strip()
+
+
+def _normalize_image_output(img_info: dict, node_id: str = None) -> dict:
+    return {
+        "nodeId": node_id,
+        "filename": img_info.get("filename", ""),
+        "displayName": img_info.get("display_name", img_info.get("displayName", "")),
+        "subfolder": img_info.get("subfolder", ""),
+        "type": img_info.get("type", "output"),
+        "mediaType": img_info.get("mediaType", img_info.get("media_type", "images")),
+    }
+
+
+def _extract_image_outputs(job: dict) -> list:
+    outputs = []
+    seen = set()
+
+    preview = job.get("preview_output")
+    if isinstance(preview, dict) and preview.get("filename"):
+        item = _normalize_image_output(preview, preview.get("nodeId"))
+        key = (item["filename"], item["subfolder"], item["type"])
+        seen.add(key)
+        outputs.append(item)
+
+    for node_id, node_out in (job.get("outputs") or {}).items():
+        if not isinstance(node_out, dict):
+            continue
+        for img_info in node_out.get("images", []) or []:
+            if not isinstance(img_info, dict):
+                continue
+            item = _normalize_image_output(img_info, node_id)
+            key = (item["filename"], item["subfolder"], item["type"])
+            if item["filename"] and key not in seen:
+                seen.add(key)
+                outputs.append(item)
+
+    return outputs
+
+
+def _download_image_output(client, output_info: dict, img_path: Path) -> bool:
+    if not output_info.get("filename"):
+        return False
+    dl = client.get(
+        f"{COMFYUI_BASE}/view",
+        headers=COMFYUI_HEADERS,
+        params={
+            "filename": output_info.get("filename", ""),
+            "subfolder": output_info.get("subfolder", ""),
+            "type": output_info.get("type", "output"),
+        },
+    )
+    if dl.status_code == 200 and len(dl.content) > IMAGE_MIN_BYTES:
+        img_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(img_path, "wb") as f:
+            f.write(dl.content)
+        return True
+    return False
+
+
+def recover_missing_images_from_metadata(scenes, images_dir, client=None) -> int:
+    """Redownloads already-generated remote outputs. It never creates new jobs."""
+    jobs = _load_image_jobs(images_dir)
+    if not jobs:
+        return 0
+
+    owns_client = client is None
+    recovered = 0
+    if owns_client:
+        client = httpx.Client(timeout=60.0, follow_redirects=True)
+
+    try:
+        for scene in scenes:
+            num = _scene_number(scene)
+            if not num:
+                continue
+            img_path = images_dir / f"scene_{num:04d}.png"
+            if img_path.exists() and img_path.stat().st_size >= IMAGE_MIN_BYTES:
+                continue
+            record = jobs.get(str(num)) or {}
+            for output_info in record.get("outputs", []) or []:
+                try:
+                    if _download_image_output(client, output_info, img_path):
+                        record["status"] = "recovered"
+                        record["localPath"] = str(img_path)
+                        record["recoveredAt"] = datetime_now_iso()
+                        jobs[str(num)] = record
+                        recovered += 1
+                        print(f"   [recovery] Escena {num}: descargada desde output remoto")
+                        break
+                except Exception as exc:
+                    record["lastRecoveryError"] = str(exc)[:200]
+                    jobs[str(num)] = record
+    finally:
+        _save_image_jobs(images_dir, jobs)
+        if owns_client:
+            client.close()
+
+    return recovered
+
+
+def validate_image_assets(scenes, images_dir, min_bytes=IMAGE_MIN_BYTES) -> dict:
+    missing = []
+    invalid = []
+    ready = []
+    for scene in scenes:
+        num = _scene_number(scene)
+        if not num:
+            continue
+        img_path = images_dir / f"scene_{num:04d}.png"
+        if not img_path.exists():
+            missing.append(num)
+        elif img_path.stat().st_size < min_bytes:
+            invalid.append(num)
+        else:
+            ready.append(num)
+    return {"ready": ready, "missing": missing, "invalid": invalid}
+
+
+def datetime_now_iso():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
 # ============================================================
 # PASO 1: GENERAR IMÁGENES (FLUX via ComfyUI Cloud)
 # ============================================================
-def generate_flux_images(scenes, images_dir, workflow_path):
+def generate_flux_images(scenes, images_dir, workflow_path, pipeline_format="narrativa"):
     """Genera imágenes FLUX para todas las escenas via ComfyUI Cloud."""
     with open(workflow_path, "r", encoding="utf-8") as f:
         base_workflow = json.load(f)
     
-    stats = {"generated": 0, "skipped": 0, "failed": 0}
+    stats = {"generated": 0, "skipped": 0, "failed": 0, "recovered": 0, "missing": [], "invalid": []}
+    image_jobs = _load_image_jobs(images_dir)
     
     print("\n" + "=" * 60)
     print("   PASO 1: Generando Imágenes FLUX")
@@ -67,33 +240,55 @@ def generate_flux_images(scenes, images_dir, workflow_path):
     
     with httpx.Client(timeout=120.0, follow_redirects=True) as client:
         for i, scene in enumerate(scenes):
-            num = scene["scene_number"]
+            num = _scene_number(scene)
             prompt = scene["prompt"]
             img_path = images_dir / f"scene_{num:04d}.png"
             
             # Skip si ya existe
-            if img_path.exists() and img_path.stat().st_size > 5000:
+            if img_path.exists() and img_path.stat().st_size >= IMAGE_MIN_BYTES:
                 stats["skipped"] += 1
+                image_jobs.setdefault(str(num), {
+                    "sceneNumber": num,
+                    "status": "existing",
+                    "localPath": str(img_path),
+                    "updatedAt": datetime_now_iso(),
+                })
                 continue
             
             print(f"   [{i+1}/{len(scenes)}] Escena {num}: generando imagen...")
             
             # Preparar workflow
             nodes = copy.deepcopy(base_workflow)
-            nodes["200:195"]["inputs"]["text"] = f"Highly realistic cinematic film still, masterpiece, 8k resolution, anatomically perfect human proportions, natural facial features, correct number of fingers, photorealistic skin texture. {prompt}"
+            final_prompt = _build_image_prompt(prompt, pipeline_format=pipeline_format)
+            nodes["200:195"]["inputs"]["text"] = final_prompt
             nodes["200:197"]["inputs"]["seed"] = random.randint(100000000000000, 999999999999999)
             nodes["200:196"]["inputs"]["width"] = 1344
             nodes["200:196"]["inputs"]["height"] = 768
             nodes["9"]["inputs"]["filename_prefix"] = f"scene_{num:04d}"
+
+            image_jobs[str(num)] = {
+                "sceneNumber": num,
+                "status": "submitting",
+                "prompt": prompt,
+                "finalPrompt": final_prompt,
+                "filenamePrefix": f"scene_{num:04d}",
+                "submittedAt": datetime_now_iso(),
+                "outputs": [],
+            }
+            _save_image_jobs(images_dir, image_jobs)
             
             # Enviar a ComfyUI
             resp = client.post(f"{COMFYUI_BASE}/prompt", headers=COMFYUI_HEADERS, json={"prompt": nodes})
             if resp.status_code != 200:
                 stats["failed"] += 1
+                image_jobs[str(num)].update({"status": "submit_failed", "httpStatus": resp.status_code})
+                _save_image_jobs(images_dir, image_jobs)
                 print(f"   [{i+1}/{len(scenes)}] Escena {num}: HTTP {resp.status_code}")
                 continue
             
             prompt_id = resp.json()["prompt_id"]
+            image_jobs[str(num)].update({"status": "queued", "jobId": prompt_id})
+            _save_image_jobs(images_dir, image_jobs)
             
             # Poll hasta completar
             ok = False
@@ -107,23 +302,28 @@ def generate_flux_images(scenes, images_dir, workflow_path):
                     status = job.get("status", "unknown")
                     
                     if status == "completed":
-                        outputs = job.get("outputs", {})
-                        for node_id, node_out in outputs.items():
-                            if isinstance(node_out, dict) and "images" in node_out:
-                                for img_info in node_out["images"]:
-                                    fname = img_info.get("filename", "")
-                                    subfolder = img_info.get("subfolder", "")
-                                    dl = client.get(
-                                        f"{COMFYUI_BASE}/view", headers=COMFYUI_HEADERS,
-                                        params={"filename": fname, "subfolder": subfolder, "type": "output"}
-                                    )
-                                    if dl.status_code == 200 and len(dl.content) > 1000:
-                                        img_path.parent.mkdir(parents=True, exist_ok=True)
-                                        with open(img_path, "wb") as f:
-                                            f.write(dl.content)
-                                        ok = True
+                        image_outputs = _extract_image_outputs(job)
+                        image_jobs[str(num)].update({
+                            "status": "completed",
+                            "outputs": image_outputs,
+                            "completedAt": datetime_now_iso(),
+                        })
+                        _save_image_jobs(images_dir, image_jobs)
+                        for output_info in image_outputs:
+                            if _download_image_output(client, output_info, img_path):
+                                image_jobs[str(num)].update({
+                                    "status": "downloaded",
+                                    "localPath": str(img_path),
+                                    "downloadedAt": datetime_now_iso(),
+                                    "selectedOutput": output_info,
+                                })
+                                _save_image_jobs(images_dir, image_jobs)
+                                ok = True
+                                break
                         break
                     elif status in ("failed", "error"):
+                        image_jobs[str(num)].update({"status": status, "failedAt": datetime_now_iso()})
+                        _save_image_jobs(images_dir, image_jobs)
                         break
                 except:
                     pass
@@ -134,9 +334,21 @@ def generate_flux_images(scenes, images_dir, workflow_path):
                 print(f"   [{i+1}/{len(scenes)}] Escena {num}: OK ({kb}KB)")
             else:
                 stats["failed"] += 1
+                image_jobs[str(num)].update({"status": "failed", "failedAt": datetime_now_iso()})
+                _save_image_jobs(images_dir, image_jobs)
                 print(f"   [{i+1}/{len(scenes)}] Escena {num}: FALLO")
+        _save_image_jobs(images_dir, image_jobs)
     
+    recovered = recover_missing_images_from_metadata(scenes, images_dir)
+    stats["recovered"] += recovered
+    validation = validate_image_assets(scenes, images_dir)
+    stats["missing"] = validation["missing"]
+    stats["invalid"] = validation["invalid"]
     print(f"\n   Resumen FLUX: {stats['generated']} generadas, {stats['skipped']} existentes, {stats['failed']} fallidas")
+    if stats["recovered"]:
+        print(f"   Recovery remoto: {stats['recovered']} imágenes descargadas")
+    if stats["missing"] or stats["invalid"]:
+        print(f"   [!] Visuales incompletos — missing={stats['missing']} invalid={stats['invalid']}")
     return stats
 
 
@@ -182,7 +394,7 @@ def apply_ken_burns_all(scenes, images_dir, kenburns_dir, audio_dir, fallback_du
     """Aplica Ken Burns con duración sincronizada al audio de cada escena."""
     effects = ["breathe_in", "drift_right", "breathe_out", "drift_left", "drift_up", "drift_down"]
     fps = 30
-    stats = {"generated": 0, "skipped": 0}
+    stats = {"generated": 0, "skipped": 0, "missing": [], "failed": []}
     
     print("\n" + "=" * 60)
     print("   PASO 3: Ken Burns Effect (sincronizado con audio)")
@@ -201,7 +413,9 @@ def apply_ken_burns_all(scenes, images_dir, kenburns_dir, audio_dir, fallback_du
             stats["skipped"] += 1
             continue
         
-        if not img_path.exists():
+        if not img_path.exists() or img_path.stat().st_size < IMAGE_MIN_BYTES:
+            stats["missing"].append(num)
+            print(f"   [!] Escena {num}: imagen ausente o inválida")
             continue
         
         # Obtener duración del audio de esta escena
@@ -242,9 +456,12 @@ def apply_ken_burns_all(scenes, images_dir, kenburns_dir, audio_dir, fallback_du
             if (i + 1) % 10 == 0:
                 print(f"   [{i+1}/{len(scenes)}] Ken Burns procesados... ({duration:.1f}s/escena)")
         else:
+            stats["failed"].append(num)
             print(f"   [{i+1}/{len(scenes)}] Escena {num}: Ken Burns falló")
     
     print(f"   Resumen: {stats['generated']} generados, {stats['skipped']} existentes")
+    if stats["missing"] or stats["failed"]:
+        print(f"   [!] Movimiento incompleto — missing={stats['missing']} failed={stats['failed']}")
     return stats
 
 
@@ -393,6 +610,17 @@ def assemble_final_video(scenes, project_dir, mode, luma_indices=None, format_la
     
     if not visual_clips:
         print("   [!] No hay clips visuales")
+        return None
+
+    if len(visual_clips) != len(scenes):
+        expected = [_scene_number(scene) for scene in scenes]
+        present = []
+        for scene in scenes:
+            num = _scene_number(scene)
+            if (kenburns_dir / f"scene_{num:04d}.mp4").exists():
+                present.append(num)
+        missing = [num for num in expected if num and num not in present]
+        print(f"   [!] Visuales incompletos para montaje final — missing={missing}")
         return None
     
     print(f"   {len(visual_clips)} clips ({luma_count} Luma+KB composites)")
@@ -613,12 +841,30 @@ if __name__ == "__main__":
     # ════════════════════════════════════════════════════════
     if not skip_images and not images_only:
         workflow_path = BASE_DIR / "config" / "flux1_krea_dev_api.json"
-        flux_stats = generate_flux_images(scenes, images_dir, workflow_path)
+        flux_stats = generate_flux_images(
+            scenes,
+            images_dir,
+            workflow_path,
+            pipeline_format=data.get("format", "narrativa"),
+        )
     elif images_only:
         workflow_path = BASE_DIR / "config" / "flux1_krea_dev_api.json"
-        flux_stats = generate_flux_images(scenes, images_dir, workflow_path)
+        flux_stats = generate_flux_images(
+            scenes,
+            images_dir,
+            workflow_path,
+            pipeline_format=data.get("format", "narrativa"),
+        )
         print(f"\n   Modo --images-only: terminado.")
+        if flux_stats.get("missing") or flux_stats.get("invalid"):
+            print(f"   [!] --images-only incompleto: missing={flux_stats.get('missing')} invalid={flux_stats.get('invalid')}")
+            sys.exit(2)
         sys.exit(0)
+
+    image_validation = validate_image_assets(scenes, images_dir)
+    if image_validation["missing"] or image_validation["invalid"]:
+        print(f"   [!] Visuales incompletos antes de voz: missing={image_validation['missing']} invalid={image_validation['invalid']}")
+        sys.exit(2)
     
     # ════════════════════════════════════════════════════════
     # PASO 2: NARRACIÓN ELEVENLABS
@@ -649,6 +895,9 @@ if __name__ == "__main__":
     
     # Ken Burns para todas las escenas (ambos modos)
     kb_stats = apply_ken_burns_all(scenes, images_dir, kenburns_dir, audio_dir)
+    if kb_stats.get("missing") or kb_stats.get("failed"):
+        print(f"   [!] Movimiento incompleto: missing={kb_stats.get('missing')} failed={kb_stats.get('failed')}")
+        sys.exit(2)
     
     # Luma solo en modo cinemático
     if mode == "cinematico":
