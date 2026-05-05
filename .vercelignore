@@ -1,0 +1,13 @@
+.git
+.test-tmp
+.codex-test-tmp
+.browser-smoke
+node_modules
+web/node_modules
+web/.next
+output
+Backups
+.env
+.env.*
+*.pyc
+__pycache__
