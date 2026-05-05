@@ -51,10 +51,12 @@ PODCAST_IMAGE_PROMPT_PREFIX = (
 
 AUTOHYPNOSIS_IMAGE_PROMPT_PREFIX = (
     "Premium guided self-hypnosis visual, serene wellness atmosphere, soft violet, "
-    "midnight blue and warm gold palette, no readable text, no logos, peaceful "
-    "abstract or object-led composition, faces absent or calm and natural, hands "
-    "outside the frame, fingers not visible."
+    "midnight blue and warm gold palette, peaceful abstract or object-led "
+    "composition, slow cinematic calm, non-clinical premium meditation aesthetic."
 )
+
+AUTOHYPNOSIS_MUSIC_DIR = BASE_DIR / "assets" / "audio" / "autohipnosis"
+AUTOHYPNOSIS_DEFAULT_MUSIC_VOLUME_DB = -28.0
 
 # Importar módulos propios
 sys.path.insert(0, str(Path(__file__).parent))
@@ -110,6 +112,82 @@ def _build_image_prompt(prompt: str, pipeline_format: str = "narrativa") -> str:
     if pipeline_format == "autohipnosis":
         return f"{AUTOHYPNOSIS_IMAGE_PROMPT_PREFIX} {prompt}".strip()
     return f"{GENERAL_IMAGE_PROMPT_PREFIX} {prompt}".strip()
+
+
+def _safe_audio_asset_path(filename: str | None) -> Path | None:
+    """Resolve future curated audio beds without allowing path traversal."""
+    if not filename:
+        return None
+    candidate = AUTOHYPNOSIS_MUSIC_DIR / Path(filename).name
+    try:
+        resolved = candidate.resolve()
+        base = AUTOHYPNOSIS_MUSIC_DIR.resolve()
+        if base not in resolved.parents and resolved != base:
+            return None
+    except Exception:
+        return None
+    return resolved if resolved.exists() and resolved.is_file() else None
+
+
+def _get_autohypnosis_music_config(data: dict) -> dict:
+    if data.get("format") != "autohipnosis":
+        return {"enabled": False}
+    cfg = ((data.get("autohipnosis") or {}).get("background_music") or {})
+    if not cfg.get("enabled"):
+        return {"enabled": False}
+    asset = _safe_audio_asset_path(cfg.get("asset"))
+    if not asset:
+        print("   [music] Autohipnosis background music configured but asset is missing; continuing voice-only.")
+        return {"enabled": False}
+    try:
+        volume_db = float(cfg.get("volume_db", AUTOHYPNOSIS_DEFAULT_MUSIC_VOLUME_DB))
+    except Exception:
+        volume_db = AUTOHYPNOSIS_DEFAULT_MUSIC_VOLUME_DB
+    volume_db = max(-42.0, min(-18.0, volume_db))
+    return {"enabled": True, "asset": asset, "volume_db": volume_db}
+
+
+def _mix_background_music(master_audio: Path, project_dir: Path, music_cfg: dict) -> Path:
+    """
+    Optional future hook for curated autohypnosis beds. It is disabled unless a
+    vetted local asset is configured in the generation JSON, so current videos
+    remain unchanged until the music library is ready.
+    """
+    if not music_cfg.get("enabled"):
+        return master_audio
+
+    music_path = music_cfg.get("asset")
+    duration = get_audio_duration(master_audio)
+    if not music_path or duration <= 0:
+        return master_audio
+
+    mixed_audio = project_dir / "master_audio_with_music.mp3"
+    linear_volume = 10 ** (float(music_cfg.get("volume_db", AUTOHYPNOSIS_DEFAULT_MUSIC_VOLUME_DB)) / 20)
+    fade_out_start = max(0.0, duration - 8.0)
+    filter_complex = (
+        f"[1:a]volume={linear_volume:.5f},"
+        f"atrim=0:{duration:.3f},asetpts=PTS-STARTPTS,"
+        f"afade=t=in:st=0:d=4,afade=t=out:st={fade_out_start:.3f}:d=8[bed];"
+        "[0:a][bed]amix=inputs=2:duration=first:dropout_transition=3,"
+        "alimiter=limit=0.95[a]"
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(master_audio),
+        "-stream_loop", "-1",
+        "-i", str(music_path),
+        "-filter_complex", filter_complex,
+        "-map", "[a]",
+        "-c:a", "libmp3lame", "-b:a", "192k",
+        str(mixed_audio),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode == 0 and mixed_audio.exists() and mixed_audio.stat().st_size > 10000:
+        print(f"   [music] Cama sonora mezclada: {music_path.name}")
+        return mixed_audio
+
+    print(f"   [music] Mezcla de cama sonora falló; continuando voice-only: {result.stderr[:200]}")
+    return master_audio
 
 
 def _normalize_image_output(img_info: dict, node_id: str = None) -> dict:
@@ -516,7 +594,14 @@ def generate_luma_clips(scenes, images_dir, luma_dir, max_luma=15):
 # ============================================================
 # PASO 4: ENSAMBLAR VIDEO FINAL (sync perfecto)
 # ============================================================
-def assemble_final_video(scenes, project_dir, mode, luma_indices=None, format_label=None):
+def assemble_final_video(
+    scenes,
+    project_dir,
+    mode,
+    luma_indices=None,
+    format_label=None,
+    music_config=None,
+):
     """
     Ensamblaje con sync perfecto:
     1. Crear master audio (concatenar todas las narraciones)
@@ -556,7 +641,9 @@ def assemble_final_video(scenes, project_dir, mode, luma_indices=None, format_la
         "-i", str(audio_list), "-c", "copy", str(master_audio)
     ], capture_output=True, text=True)
     audio_list.unlink(missing_ok=True)
-    
+
+    master_audio = _mix_background_music(master_audio, project_dir, music_config or {})
+
     master_audio_dur = get_audio_duration(master_audio)
     print(f"   Master audio: {master_audio_dur:.1f}s ({master_audio_dur/60:.1f} min)")
     
@@ -919,7 +1006,14 @@ if __name__ == "__main__":
     # ════════════════════════════════════════════════════════
     final_video = None
     if not skip_assembly:
-        final_video = assemble_final_video(scenes, project_dir, mode, luma_indices, format_label=format_label)
+        final_video = assemble_final_video(
+            scenes,
+            project_dir,
+            mode,
+            luma_indices,
+            format_label=format_label,
+            music_config=_get_autohypnosis_music_config(data),
+        )
     
     # ════════════════════════════════════════════════════════
     # PASO 5: SUBTÍTULOS (Whisper + ASS + FFmpeg)

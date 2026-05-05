@@ -102,7 +102,7 @@ Si no: contar de 1 a 5 para volver despierto, tranquilo y claro.
 
 OUTPUT REQUIREMENTS
 
-- 11,000 a 14,000 caracteres.
+- Respeta la duracion y extension objetivo que reciba el user prompt.
 - Texto plano, una sola voz.
 - Sin encabezados, sin bullets, sin markdown.
 - Sin tags entre corchetes.

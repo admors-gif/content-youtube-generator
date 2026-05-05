@@ -732,6 +732,12 @@ PODCAST_VISUAL_TEMPLATES = [
 AUTOHYPNOSIS_TARGET_VISUAL_SCENES = 12
 AUTOHYPNOSIS_MIN_VISUAL_SCENES = 8
 AUTOHYPNOSIS_MAX_VISUAL_SCENES = 14
+AUTOHYPNOSIS_ESTIMATED_WPM = 155
+AUTOHYPNOSIS_DURATION_PROFILES = {
+    "short": {"label": "corta", "target_minutes": 8, "characters": "6,500 a 8,000"},
+    "standard": {"label": "estandar", "target_minutes": 15, "characters": "10,500 a 13,000"},
+    "deep": {"label": "profunda", "target_minutes": 25, "characters": "17,000 a 21,000"},
+}
 
 AUTOHYPNOSIS_VISUAL_TEMPLATES = [
     (
@@ -992,6 +998,35 @@ def _normalize_autohypnosis_delivery(script_text: str) -> str:
     return text.strip()
 
 
+def _append_unique_prompt_clauses(prompt: str, clauses: list[str]) -> str:
+    """Adds safety clauses once, avoiding duplicated prompt instructions."""
+    clean = " ".join((prompt or "").split())
+    lower = clean.lower()
+    for clause in clauses:
+        normalized = " ".join((clause or "").split()).strip()
+        if normalized and normalized.lower() not in lower:
+            clean = f"{clean}, {normalized}"
+            lower = clean.lower()
+    return clean.strip()
+
+
+def _autohypnosis_duration_profile(topic: str, requested_profile: str | None = None) -> dict:
+    """
+    Selects a duration profile without adding UI fields yet. Future UI presets can
+    pass short/standard/deep; for now, titles mentioning long-form sessions opt in.
+    """
+    key = (requested_profile or "").strip().lower()
+    if key in AUTOHYPNOSIS_DURATION_PROFILES:
+        return AUTOHYPNOSIS_DURATION_PROFILES[key]
+
+    lower = (topic or "").lower()
+    if any(token in lower for token in ["3 horas", "tres horas", "180 min", "180 minutos"]):
+        return AUTOHYPNOSIS_DURATION_PROFILES["deep"]
+    if any(token in lower for token in ["8 min", "8 minutos", "corta", "rapida", "rápida"]):
+        return AUTOHYPNOSIS_DURATION_PROFILES["short"]
+    return AUTOHYPNOSIS_DURATION_PROFILES["standard"]
+
+
 def _build_autohypnosis_visual_scenes(topic: str, script_text: str) -> list:
     """
     Visuales acotados para autohipnosis: pocas escenas, tranquilas, sin manos,
@@ -1010,17 +1045,23 @@ def _build_autohypnosis_visual_scenes(topic: str, script_text: str) -> list:
             target_segments=AUTOHYPNOSIS_MAX_VISUAL_SCENES,
         )
 
-    safety_suffix = (
-        " No readable text, no logos, no medical setting, no hospital imagery, "
-        "hands outside frame, fingers not visible, peaceful and non-clinical."
-    )
+    safety_clauses = [
+        "no readable text",
+        "no logos",
+        "no medical setting",
+        "no hospital imagery",
+        "hands outside frame",
+        "fingers not visible",
+        "peaceful and non-clinical",
+    ]
 
     visual_scenes = []
     for i, segment in enumerate(segments):
         category, template, base_tags = AUTOHYPNOSIS_VISUAL_TEMPLATES[i % len(AUTOHYPNOSIS_VISUAL_TEMPLATES)]
-        prompt = template.format(topic=topic_clean)
-        if safety_suffix.strip() not in prompt:
-            prompt = f"{prompt}{safety_suffix}"
+        prompt = _append_unique_prompt_clauses(
+            template.format(topic=topic_clean),
+            safety_clauses,
+        )
         visual_scenes.append({
             "scene_number": i + 1,
             "narration_text": segment,
@@ -1122,7 +1163,12 @@ Devuelve solo el guión, sin headers ni comentarios."""
     return result
 
 
-def generate_autohypnosis_script(topic: str, agent_file: str = "agent_autohipnosis.md", project_id: str = None) -> dict:
+def generate_autohypnosis_script(
+    topic: str,
+    agent_file: str = "agent_autohipnosis.md",
+    project_id: str = None,
+    duration_profile: str | None = None,
+) -> dict:
     """
     Genera una sesión de autohipnosis guiada. No usa investigación web por
     defecto: este formato debe ser estable, seguro y basado en estructura
@@ -1134,12 +1180,14 @@ def generate_autohypnosis_script(topic: str, agent_file: str = "agent_autohipnos
     print(f"   Agente: {agent_name} ({agent_file})")
 
     agent_prompt = load_prompt(agent_file)
+    profile = _autohypnosis_duration_profile(topic, duration_profile)
     user_message = f"""Genera una sesión completa de autohipnosis guiada sobre el siguiente objetivo.
 
 OBJETIVO: {topic}
 
 Requisitos estrictos:
-- 11,000 a 14,000 caracteres
+- Duración objetivo: aproximadamente {profile['target_minutes']} minutos
+- Extensión objetivo: {profile['characters']} caracteres
 - Español neutro de Latinoamérica
 - Texto plano de una sola voz, sin encabezados, sin bullets y sin markdown
 - Estructura completa: aviso seguro, inducción, profundización, visualización, afirmaciones, ensayo futuro, integración y salida
@@ -1174,7 +1222,7 @@ Devuelve solo el guion final."""
     script_text = _normalize_autohypnosis_delivery(script_text)
     char_count = len(script_text)
     word_count = len(script_text.split())
-    estimated_minutes = word_count / 115
+    estimated_minutes = word_count / AUTOHYPNOSIS_ESTIMATED_WPM
 
     result = {
         "topic": topic,
@@ -1186,6 +1234,8 @@ Devuelve solo el guion final."""
             "characters": char_count,
             "words": word_count,
             "estimated_duration_minutes": round(estimated_minutes, 1),
+            "target_duration_minutes": profile["target_minutes"],
+            "duration_profile": profile["label"],
             "format": "autohipnosis",
             "generated_at": datetime.now().isoformat(),
             "web_research": False,
@@ -1334,6 +1384,14 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
                 "voice": "Lorenzo",
                 "safety": "wellness_only",
                 "visual_scene_target": AUTOHYPNOSIS_TARGET_VISUAL_SCENES,
+                "target_minutes": result["metadata"].get("target_duration_minutes"),
+                "duration_profile": result["metadata"].get("duration_profile"),
+                "background_music": {
+                    "enabled": False,
+                    "asset": None,
+                    "volume_db": -28,
+                    "status": "awaiting_curated_tracks",
+                },
             }
 
         output_path = OUTPUT_DIR / f"FULL_{safe_name}_{timestamp}.json"
@@ -1345,7 +1403,7 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
             try:
                 words = len(script.split())
                 # Podcast/autohipnosis son más pausados que narrativa.
-                wpm = 130 if is_podcast else 115 if is_autohypnosis else 150
+                wpm = 130 if is_podcast else AUTOHYPNOSIS_ESTIMATED_WPM if is_autohypnosis else 150
                 firestore_payload = {
                     "status": "script_ready",
                     "script.plain": script,

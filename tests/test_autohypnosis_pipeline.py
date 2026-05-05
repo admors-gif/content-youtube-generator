@@ -1,5 +1,8 @@
 from scripts.generate_content import (
     AUTOHYPNOSIS_MAX_VISUAL_SCENES,
+    AUTOHYPNOSIS_ESTIMATED_WPM,
+    _append_unique_prompt_clauses,
+    _autohypnosis_duration_profile,
     _build_autohypnosis_visual_scenes,
     _normalize_autohypnosis_delivery,
     _split_text_into_balanced_segments,
@@ -48,3 +51,20 @@ def test_autohypnosis_visual_scenes_are_capped_and_safe():
     assert all("no readable text" in prompt for prompt in prompts)
     assert all("hands outside frame" in prompt for prompt in prompts)
     assert all("no medical setting" in prompt for prompt in prompts)
+
+
+def test_autohypnosis_prompt_clauses_are_not_duplicated():
+    prompt = _append_unique_prompt_clauses(
+        "Calm visual, no readable text, cinematic",
+        ["no readable text", "no logos"],
+    ).lower()
+
+    assert prompt.count("no readable text") == 1
+    assert "no logos" in prompt
+
+
+def test_autohypnosis_duration_defaults_to_standard_profile():
+    profile = _autohypnosis_duration_profile("Autoconfianza profunda antes de dormir")
+
+    assert profile["target_minutes"] == 15
+    assert AUTOHYPNOSIS_ESTIMATED_WPM == 155

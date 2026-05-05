@@ -336,6 +336,7 @@ export default function ProjectDetailsPage({ params }) {
   }
 
   const agent = SYSTEM_AGENTS.find((a) => a.agentId === project.agentId);
+  const isAutohypnosis = project.format === "autohipnosis";
   const isDeliveryRecoverable = Boolean(project.deliveryRecoverableFromDisk);
   const isProcessing =
     normalizedProgress > 0 &&
@@ -397,8 +398,8 @@ export default function ProjectDetailsPage({ params }) {
   };
 
   const TABS = [
-    { id: "script", label: "Guión y voz" },
-    { id: "scenes", label: "Escenas" },
+    { id: "script", label: isAutohypnosis ? "Sesión y voz" : "Guión y voz" },
+    { id: "scenes", label: isAutohypnosis ? "Visuales" : "Escenas" },
   ];
 
   return (
@@ -461,6 +462,7 @@ export default function ProjectDetailsPage({ params }) {
             eta={eta}
             status={project.status}
             scenes={project.scenes}
+            format={project.format}
           />
         </div>
       )}

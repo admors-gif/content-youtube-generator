@@ -46,6 +46,18 @@ export default function ScriptTab({
     project.script?.approved && project.status !== "script_ready";
   const wordCount = project.script?.wordCount || 0;
   const minutes = project.script?.estimatedMinutes || 0;
+  const isAutohypnosis = project.format === "autohipnosis";
+  const loadingCopy = isAutohypnosis
+    ? {
+        eyebrow: "SESIÓN EN PREPARACIÓN",
+        title: "Diseñando una guía profunda",
+        body: "Estamos escribiendo una sesión segura, pausada y orientada a bienestar personal.",
+      }
+    : {
+        eyebrow: "INVESTIGACIÓN EN CURSO",
+        title: "El estudio está rodando",
+        body: "Estamos investigando el tema y escribiendo una narrativa cinematográfica. Suele tomar entre 1 y 2 minutos.",
+      };
 
   return (
     <div
@@ -221,7 +233,7 @@ export default function ScriptTab({
                   textTransform: "uppercase",
                 }}
               >
-                INVESTIGACIÓN EN CURSO
+                {loadingCopy.eyebrow}
               </div>
               <h4
                 style={{
@@ -234,7 +246,7 @@ export default function ScriptTab({
                   letterSpacing: "-0.02em",
                 }}
               >
-                El estudio está rodando
+                {loadingCopy.title}
               </h4>
               <p
                 style={{
@@ -245,8 +257,7 @@ export default function ScriptTab({
                   lineHeight: 1.5,
                 }}
               >
-                Estamos investigando el tema y escribiendo una narrativa
-                cinematográfica. Suele tomar entre 1 y 2 minutos.
+                {loadingCopy.body}
               </p>
             </div>
           )}
@@ -258,8 +269,9 @@ export default function ScriptTab({
           wordCount={wordCount}
           estimatedMinutes={minutes}
           approved={!!project.script?.approved}
+          format={project.format}
         />
-        {editedScript && <ViralityPanel text={editedScript} />}
+        {editedScript && <ViralityPanel text={editedScript} format={project.format} />}
       </div>
     </div>
   );

@@ -28,6 +28,19 @@ const PHASE_DEFS = [
   { id: "delivery", label: "Entrega final" },
 ];
 
+const AUTOHYPNOSIS_PHASE_DEFS = [
+  { id: "research", label: "Preparación" },
+  { id: "script",   label: "Sesión guiada" },
+  { id: "images",   label: "Visuales" },
+  { id: "voice",    label: "Voz" },
+  { id: "assembly", label: "Montaje" },
+  { id: "delivery", label: "Entrega final" },
+];
+
+function phaseDefsForFormat(format) {
+  return format === "autohipnosis" ? AUTOHYPNOSIS_PHASE_DEFS : PHASE_DEFS;
+}
+
 /**
  * Mapea status legacy del backend a phases visuales.
  *
@@ -41,7 +54,8 @@ const PHASE_DEFS = [
  * Convención: una phase está "ok" si ya pasamos por ella, "current" si es
  * la que está corriendo ahora, "pending" si aún no llegamos.
  */
-function getPhasesFromStatus(status, scenes, percent = 0) {
+function getPhasesFromStatus(status, scenes, percent = 0, format = "") {
+  const phaseDefs = phaseDefsForFormat(format);
   const totalScenes = scenes?.length || 0;
   const withImg = (scenes || []).filter((s) => s.imageUrl).length;
 
@@ -132,7 +146,7 @@ function getPhasesFromStatus(status, scenes, percent = 0) {
       break;
   }
 
-  return PHASE_DEFS.map((p) => ({
+  return phaseDefs.map((p) => ({
     ...p,
     state: states[p.id],
     sub: p.id === "images" ? imagesSub : null,
@@ -145,9 +159,10 @@ export default function ProgressPanel({
   eta,
   status,
   scenes,
+  format,
 }) {
   const pct = Math.max(0, Math.min(100, Math.round(displayPercent || 0)));
-  const phases = getPhasesFromStatus(status, scenes, pct);
+  const phases = getPhasesFromStatus(status, scenes, pct, format);
   const safeStepName = sanitizeOperationalText(stepName);
 
   return (

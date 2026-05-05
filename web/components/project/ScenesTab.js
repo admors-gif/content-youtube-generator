@@ -17,7 +17,19 @@ export default function ScenesTab({ project }) {
   const scenes = project.scenes || [];
   const totalScenes = scenes.length;
   const withImage = scenes.filter((s) => s.imageUrl).length;
-  const isProducing = project.status === "producing";
+  const isProducing = [
+    "producing",
+    "imaging",
+    "voicing",
+    "assembling",
+    "rendering",
+    "subtitling",
+    "publishing",
+  ].includes(project.status);
+  const isAutohypnosis = project.format === "autohipnosis";
+  const itemLabel = isAutohypnosis
+    ? `visual${totalScenes === 1 ? "" : "es"}`
+    : `escena${totalScenes === 1 ? "" : "s"}`;
 
   if (totalScenes === 0) {
     return (
@@ -55,7 +67,7 @@ export default function ScenesTab({ project }) {
             textTransform: "uppercase",
           }}
         >
-          DIRIGIENDO ESCENAS
+          {isAutohypnosis ? "DISEÑANDO VISUALES" : "DIRIGIENDO ESCENAS"}
         </div>
         <h3
           style={{
@@ -68,7 +80,7 @@ export default function ScenesTab({ project }) {
             letterSpacing: "-0.02em",
           }}
         >
-          Storyboard en preparación
+          {isAutohypnosis ? "Visuales en preparación" : "Storyboard en preparación"}
         </h3>
         <p
           style={{
@@ -78,8 +90,9 @@ export default function ScenesTab({ project }) {
             lineHeight: 1.5,
           }}
         >
-          El director de fotografía está dividiendo tu guión en prompts
-          visuales cada 5 segundos.
+          {isAutohypnosis
+            ? "Estamos preparando visuales lentos y calmados para sostener la sesión."
+            : "El director de fotografía está dividiendo tu guión en prompts visuales cada 5 segundos."}
         </p>
       </div>
     );
@@ -106,7 +119,7 @@ export default function ScenesTab({ project }) {
               textTransform: "uppercase",
             }}
           >
-            STORYBOARD
+            {isAutohypnosis ? "VISUALES" : "STORYBOARD"}
           </div>
           <div
             style={{
@@ -117,7 +130,7 @@ export default function ScenesTab({ project }) {
               fontWeight: 600,
             }}
           >
-            {totalScenes} escena{totalScenes === 1 ? "" : "s"}
+            {totalScenes} {itemLabel}
             <span
               style={{
                 color: "var(--paper-dim)",

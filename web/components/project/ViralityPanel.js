@@ -73,11 +73,75 @@ function getVerdict(overall) {
   return { label: "REVISAR", color: "var(--bad)" };
 }
 
-export default function ViralityPanel({ text }) {
-  const score = computeViralityScore(text);
+function clampScore(value) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function countMatches(text, words) {
+  const lower = (text || "").toLowerCase();
+  return words.reduce((total, word) => total + (lower.match(new RegExp(`\\b${word}\\b`, "g")) || []).length, 0);
+}
+
+function computeWellnessScore(text) {
+  const clean = String(text || "");
+  if (!clean.trim()) return null;
+
+  const words = clean.split(/\s+/).filter(Boolean);
+  const paragraphs = clean.split(/\n\s*\n+/).filter((p) => p.trim());
+  const calmTerms = countMatches(clean, [
+    "calma",
+    "tranquilo",
+    "tranquila",
+    "respira",
+    "descansa",
+    "suave",
+    "seguro",
+    "segura",
+    "paz",
+  ]);
+  const affirmationTerms = countMatches(clean, [
+    "puedes",
+    "confías",
+    "confio",
+    "confío",
+    "mereces",
+    "permito",
+    "elijo",
+    "soy",
+    "estoy",
+  ]);
+  const safetyTerms = countMatches(clean, ["seguro", "segura", "pausar", "detenerte", "bienestar"]);
+  const clinicalRisk = countMatches(clean, ["cura", "curar", "diagnóstico", "diagnostico", "trauma"]);
+  const ellipses = (clean.match(/\.{3}|…/g) || []).length;
+  const avgParagraphWords = words.length / Math.max(1, paragraphs.length);
+
+  const calm = clampScore(45 + calmTerms * 6 + ellipses * 2 - clinicalRisk * 12);
+  const clarity = clampScore(95 - Math.abs(avgParagraphWords - 95) * 0.35 - clinicalRisk * 10);
+  const depth = clampScore(45 + affirmationTerms * 4 + Math.min(paragraphs.length, 14) * 2);
+  const rhythm = clampScore(55 + Math.min(ellipses, 18) * 2 + (avgParagraphWords > 45 && avgParagraphWords < 140 ? 18 : 0));
+  const safety = clampScore(70 + safetyTerms * 8 - clinicalRisk * 18);
+  const overall = clampScore((calm + clarity + depth + rhythm + safety) / 5);
+
+  return { overall, calm, clarity, depth, rhythm, safety };
+}
+
+function getWellnessVerdict(overall) {
+  if (overall >= 82) return { label: "PROFUNDO", color: "var(--ok)" };
+  if (overall >= 65) return { label: "SERENO", color: "var(--ok)" };
+  if (overall >= 45) return { label: "AJUSTAR", color: "var(--warn)" };
+  return { label: "REVISAR", color: "var(--bad)" };
+}
+
+export default function ViralityPanel({ text, format }) {
+  const isAutohypnosis = format === "autohipnosis";
+  const score = isAutohypnosis
+    ? computeWellnessScore(text)
+    : computeViralityScore(text);
   if (!score) return null;
 
-  const verdict = getVerdict(score.overall);
+  const verdict = isAutohypnosis
+    ? getWellnessVerdict(score.overall)
+    : getVerdict(score.overall);
   const conicDeg = score.overall * 3.6;
 
   return (
@@ -91,7 +155,7 @@ export default function ViralityPanel({ text }) {
           marginBottom: 14,
         }}
       >
-        ÍNDICE DE VIRALIDAD
+        {isAutohypnosis ? "ÍNDICE DE CALMA" : "ÍNDICE DE VIRALIDAD"}
       </div>
 
       <div
@@ -152,18 +216,31 @@ export default function ViralityPanel({ text }) {
               marginTop: 2,
             }}
           >
-            {score.hooks} hook{score.hooks === 1 ? "" : "s"} detectado
-            {score.hooks === 1 ? "" : "s"}
+            {isAutohypnosis
+              ? "sesión guiada"
+              : `${score.hooks} hook${score.hooks === 1 ? "" : "s"} detectado${score.hooks === 1 ? "" : "s"}`}
           </div>
         </div>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <ScoreBar label="Hooks" value={score.hookScore} />
-        <ScoreBar label="Emoción" value={score.emotionScore} />
-        <ScoreBar label="Ritmo" value={score.pacingScore} />
-        <ScoreBar label="Estructura" value={score.structureScore} />
-        <ScoreBar label="Retención" value={score.retentionScore} />
+        {isAutohypnosis ? (
+          <>
+            <ScoreBar label="Calma" value={score.calm} />
+            <ScoreBar label="Claridad" value={score.clarity} />
+            <ScoreBar label="Profundidad" value={score.depth} />
+            <ScoreBar label="Ritmo" value={score.rhythm} />
+            <ScoreBar label="Seguridad" value={score.safety} />
+          </>
+        ) : (
+          <>
+            <ScoreBar label="Hooks" value={score.hookScore} />
+            <ScoreBar label="Emoción" value={score.emotionScore} />
+            <ScoreBar label="Ritmo" value={score.pacingScore} />
+            <ScoreBar label="Estructura" value={score.structureScore} />
+            <ScoreBar label="Retención" value={score.retentionScore} />
+          </>
+        )}
       </div>
     </div>
   );

@@ -9,11 +9,12 @@ export default function StatsPanel({
   wordCount = 0,
   estimatedMinutes = 0,
   approved = false,
+  format = "",
 }) {
   const rows = [
     { label: "PALABRAS", value: wordCount.toLocaleString("es") },
     {
-      label: "DURACIÓN ESTIMADA",
+      label: format === "autohipnosis" ? "SESIÓN ESTIMADA" : "DURACIÓN ESTIMADA",
       value: estimatedMinutes ? `${estimatedMinutes} min` : "—",
     },
     {
