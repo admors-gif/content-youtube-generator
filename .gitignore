@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 .test-tmp/
 .codex-tmp/
+codex_tmp_*/
 output/pytest-tmp/
 output/clips/*
 output/audio/*

@@ -1506,20 +1506,25 @@ def _cover_resize_image(img, target_w: int = 1280, target_h: int = 720):
 
 
 def _fit_generated_thumbnail_canvas(img, target_w: int = 1280, target_h: int = 720):
-    from PIL import Image, ImageFilter
-
-    background = _cover_resize_image(img.copy(), target_w, target_h)
-    background = background.filter(ImageFilter.GaussianBlur(16))
+    from PIL import Image
 
     src_w, src_h = img.size
-    scale = min(target_w / src_w, target_h / src_h)
+    target_ratio = target_w / target_h
+    src_ratio = src_w / src_h
+    scale = max(target_w / src_w, target_h / src_h)
     new_w = max(1, int(src_w * scale))
     new_h = max(1, int(src_h * scale))
-    fitted = img.resize((new_w, new_h), Image.LANCZOS)
+    resized = img.resize((new_w, new_h), Image.LANCZOS)
     x = (target_w - new_w) // 2
-    y = (target_h - new_h) // 2
-    background.paste(fitted, (x, y))
-    return background
+    if src_ratio < target_ratio:
+        # GPT Image often places thumbnail headlines near the top on 3:2 renders.
+        # Preserve that copy and crop the quieter lower area instead of letterboxing.
+        y = 0
+    else:
+        y = (target_h - new_h) // 2
+    canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+    canvas.paste(resized, (x, y))
+    return canvas.crop((0, 0, target_w, target_h))
 
 
 def _draw_thumbnail_badge(draw, badge: str, target_w: int, theme: dict | None = None):
