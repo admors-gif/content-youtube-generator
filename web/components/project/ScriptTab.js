@@ -70,7 +70,7 @@ export default function ScriptTab({
     >
       <div>
         <ModerationAlert moderation={project.moderation} />
-        <FactCheckPanel factCheck={project.factCheck} />
+        <FactCheckPanel factCheck={project.factCheck} format={project.format} />
 
         <div className="cf-card" style={{ padding: "var(--s-5)" }}>
           <div

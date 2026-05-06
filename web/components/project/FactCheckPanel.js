@@ -7,11 +7,61 @@ import Icon from "@/components/Icon";
  * cf-card con eyebrow VERIFICACIÓN DE DATOS + 3 chips contadores
  * (alta/media/baja) + lista de claims con border-left según confidence.
  */
-export default function FactCheckPanel({ factCheck }) {
+function isNoClaimsPlaceholder(claim) {
+  const text = `${claim?.claim || ""} ${claim?.verdict || ""}`.toLowerCase();
+  return (
+    text.includes("no se proporcionaron claims") ||
+    text.includes("sin evidencia ni claims") ||
+    text.includes("no factual claims")
+  );
+}
+
+export default function FactCheckPanel({ factCheck, format }) {
   if (!factCheck?.claims || factCheck.claims.length === 0) return null;
+  const isWellness = ["autohipnosis", "meditacion_larga"].includes(format);
+  const claims = factCheck.claims || [];
+
+  if (isWellness && claims.every(isNoClaimsPlaceholder)) {
+    return (
+      <div
+        className="cf-card"
+        style={{
+          marginBottom: "var(--s-4)",
+          padding: "var(--s-4) var(--s-5)",
+          borderColor: "rgba(107, 201, 142, 0.45)",
+          background: "rgba(107, 201, 142, 0.06)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Icon name="check" size={16} style={{ color: "var(--ok)" }} />
+          <div
+            style={{
+              font: "var(--t-mono-sm)",
+              color: "var(--ok)",
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+            }}
+          >
+            SESIÓN SIN CLAIMS FACTUALES
+          </div>
+        </div>
+        <div
+          style={{
+            font: "var(--t-caption)",
+            color: "var(--paper-dim)",
+            marginTop: 8,
+          }}
+        >
+          Este formato es de bienestar guiado; no necesita verificación factual
+          salvo que el guion incluya datos médicos, científicos o promesas
+          específicas.
+        </div>
+      </div>
+    );
+  }
 
   const summary = factCheck.summary || { total: 0, high: 0, medium: 0, low: 0 };
-  const lowOrMedium = (factCheck.claims || []).filter(
+  const lowOrMedium = claims.filter(
     (c) => (c.confidence || "").toLowerCase() !== "alta",
   );
 

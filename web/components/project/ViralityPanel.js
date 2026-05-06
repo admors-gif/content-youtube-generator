@@ -88,38 +88,69 @@ function computeWellnessScore(text) {
 
   const words = clean.split(/\s+/).filter(Boolean);
   const paragraphs = clean.split(/\n\s*\n+/).filter((p) => p.trim());
+  const sentences = clean.split(/[.!?…]+/).filter((s) => s.trim());
   const calmTerms = countMatches(clean, [
     "calma",
+    "calmar",
     "tranquilo",
     "tranquila",
+    "tranquilidad",
     "respira",
+    "respiración",
+    "respiracion",
     "descansa",
+    "descanso",
+    "duerme",
+    "dormir",
     "suave",
     "seguro",
     "segura",
+    "suelta",
+    "soltar",
     "paz",
   ]);
   const affirmationTerms = countMatches(clean, [
     "puedes",
+    "puedo",
     "confías",
     "confio",
     "confío",
+    "confianza",
     "mereces",
+    "merezco",
     "permito",
+    "permites",
     "elijo",
+    "eliges",
     "soy",
     "estoy",
+    "aprendo",
+    "reconozco",
   ]);
-  const safetyTerms = countMatches(clean, ["seguro", "segura", "pausar", "detenerte", "bienestar"]);
+  const safetyTerms = countMatches(clean, [
+    "seguro",
+    "segura",
+    "pausar",
+    "detenerte",
+    "abrir los ojos",
+    "control",
+    "libertad",
+    "bienestar",
+    "no es tratamiento",
+  ]);
   const clinicalRisk = countMatches(clean, ["cura", "curar", "diagnóstico", "diagnostico", "trauma"]);
   const ellipses = (clean.match(/\.{3}|…/g) || []).length;
-  const avgParagraphWords = words.length / Math.max(1, paragraphs.length);
+  const avgSentenceWords = words.length / Math.max(1, sentences.length);
+  const paragraphCount = Math.max(1, paragraphs.length);
+  const pauseDensity = ellipses / Math.max(1, words.length / 100);
 
-  const calm = clampScore(45 + calmTerms * 6 + ellipses * 2 - clinicalRisk * 12);
-  const clarity = clampScore(95 - Math.abs(avgParagraphWords - 95) * 0.35 - clinicalRisk * 10);
-  const depth = clampScore(45 + affirmationTerms * 4 + Math.min(paragraphs.length, 14) * 2);
-  const rhythm = clampScore(55 + Math.min(ellipses, 18) * 2 + (avgParagraphWords > 45 && avgParagraphWords < 140 ? 18 : 0));
-  const safety = clampScore(70 + safetyTerms * 8 - clinicalRisk * 18);
+  const calm = clampScore(50 + calmTerms * 5 + Math.min(ellipses, 28) * 1.6 - clinicalRisk * 14);
+  const clarity = clampScore(
+    88 - Math.abs(avgSentenceWords - 18) * 1.2 + (words.length >= 700 ? 8 : 0) - clinicalRisk * 10,
+  );
+  const depth = clampScore(48 + affirmationTerms * 3.5 + Math.min(paragraphCount, 12) * 2);
+  const rhythm = clampScore(58 + Math.min(pauseDensity, 4) * 9 + (avgSentenceWords >= 10 && avgSentenceWords <= 28 ? 18 : 0));
+  const safety = clampScore(72 + safetyTerms * 7 - clinicalRisk * 20);
   const overall = clampScore((calm + clarity + depth + rhythm + safety) / 5);
 
   return { overall, calm, clarity, depth, rhythm, safety };
@@ -133,13 +164,14 @@ function getWellnessVerdict(overall) {
 }
 
 export default function ViralityPanel({ text, format }) {
-  const isAutohypnosis = format === "autohipnosis";
-  const score = isAutohypnosis
+  const isWellness = ["autohipnosis", "meditacion_larga"].includes(format);
+  const isLongMeditation = format === "meditacion_larga";
+  const score = isWellness
     ? computeWellnessScore(text)
     : computeViralityScore(text);
   if (!score) return null;
 
-  const verdict = isAutohypnosis
+  const verdict = isWellness
     ? getWellnessVerdict(score.overall)
     : getVerdict(score.overall);
   const conicDeg = score.overall * 3.6;
@@ -155,7 +187,11 @@ export default function ViralityPanel({ text, format }) {
           marginBottom: 14,
         }}
       >
-        {isAutohypnosis ? "ÍNDICE DE CALMA" : "ÍNDICE DE VIRALIDAD"}
+        {isWellness
+          ? isLongMeditation
+            ? "ÍNDICE DE DESCANSO"
+            : "ÍNDICE DE CALMA"
+          : "ÍNDICE DE VIRALIDAD"}
       </div>
 
       <div
@@ -216,19 +252,21 @@ export default function ViralityPanel({ text, format }) {
               marginTop: 2,
             }}
           >
-            {isAutohypnosis
-              ? "sesión guiada"
+            {isWellness
+              ? isLongMeditation
+                ? "sesión larga"
+                : "sesión guiada"
               : `${score.hooks} hook${score.hooks === 1 ? "" : "s"} detectado${score.hooks === 1 ? "" : "s"}`}
           </div>
         </div>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {isAutohypnosis ? (
+        {isWellness ? (
           <>
             <ScoreBar label="Calma" value={score.calm} />
             <ScoreBar label="Claridad" value={score.clarity} />
-            <ScoreBar label="Profundidad" value={score.depth} />
+            <ScoreBar label={isLongMeditation ? "Afirmaciones" : "Profundidad"} value={score.depth} />
             <ScoreBar label="Ritmo" value={score.rhythm} />
             <ScoreBar label="Seguridad" value={score.safety} />
           </>
