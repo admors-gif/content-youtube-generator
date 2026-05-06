@@ -1,9 +1,9 @@
 """
 Content Factory - Pipeline de Generación de Contenido
-Motor 1 (Guión): GPT-5.5 — narrativa creativa de alto nivel
-Motor 2 (Prompts Visuales): Claude Opus — descripción cinematográfica superior
-Motor 1.5 (Emociones): GPT-5.5
-Motor SEO: GPT-5.5
+Motor 1 (Guion): Claude Sonnet primario, OpenAI fallback
+Motor 2 (Prompts Visuales): Claude Opus primario, OpenAI fallback
+Motor 1.5 (Emociones): Claude Sonnet primario, OpenAI fallback
+Motor SEO: Claude Sonnet primario, OpenAI fallback
 """
 import os
 import sys
@@ -47,16 +47,34 @@ with open(CONFIG_PATH, "r", encoding="utf-8") as f:
 # ============================================================
 # CLIENTES IA
 # ============================================================
+AI_MODELS = config.get("models", {})
+
+
+def _configured_model(key: str, default: str, provider_prefix: str | None = None) -> str:
+    value = str(AI_MODELS.get(key, "") or "").strip()
+    if provider_prefix and value and not value.startswith(provider_prefix):
+        return default
+    return value or default
+
+
+def _configured_openai_fallback(default: str = "gpt-5.5") -> str:
+    for key in ("openai_fallback", "script_generation_fallback", "script_generation"):
+        value = str(AI_MODELS.get(key, "") or "").strip()
+        if value.startswith("gpt-"):
+            return value
+    return default
+
+
 _openai_key = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAI(api_key=_openai_key) if _openai_key else None
 if not openai_client:
-    print("⚠️ OPENAI_API_KEY no configurada — Motor OpenAI deshabilitado (usando Claude como fallback)")
-GPT_MODEL = config["models"]["script_generation"]
+    print("⚠️ OPENAI_API_KEY no configurada — fallback OpenAI deshabilitado")
+GPT_MODEL = _configured_openai_fallback()
 
 # Anthropic (Claude)
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
-CLAUDE_MODEL_SCRIPT = "claude-sonnet-4-6"
+CLAUDE_MODEL_SCRIPT = _configured_model("script_generation", "claude-sonnet-4-6", "claude-")
 
 # Tavily (Web Research)
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
@@ -70,7 +88,7 @@ if TAVILY_API_KEY:
         print("⚠️ tavily-python no instalado — investigación web deshabilitada")
 else:
     print("⚠️ TAVILY_API_KEY no configurada — guiones sin investigación web")
-CLAUDE_MODEL_PROMPTS = "claude-opus-4-7"
+CLAUDE_MODEL_PROMPTS = _configured_model("video_prompts", "claude-opus-4-7", "claude-")
 
 # ============================================================
 # FIREBASE ADMIN INIT
@@ -198,11 +216,11 @@ def research_topic(topic: str, project_id: str = None) -> str:
 
 
 # ============================================================
-# MOTOR 1: GUIÓN NARRATIVO (GPT-5.5)
+# MOTOR 1: GUIÓN NARRATIVO
 # ============================================================
 def generate_script(topic: str, agent_file: str = "agent_erotico_historico.md", project_id: str = None) -> dict:
     """
-    Genera un guión narrativo completo usando GPT-5.5.
+    Genera un guión narrativo completo.
     Incluye investigación web via Tavily cuando está disponible.
     
     Args:
@@ -215,7 +233,7 @@ def generate_script(topic: str, agent_file: str = "agent_erotico_historico.md", 
     """
     agent_name = agent_file.replace("agent_", "").replace(".md", "").replace("_", " ").title()
     print(f"\n🧠 MOTOR 1: Generando guión para '{topic}'...")
-    print(f"   Modelo: {GPT_MODEL}")
+    print(f"   Modelo: {CLAUDE_MODEL_SCRIPT if claude_client else GPT_MODEL}")
     print(f"   Agente: {agent_name} ({agent_file})")
     
     # ── Paso 0: Investigación Web ──
@@ -233,7 +251,7 @@ NO copies el texto directamente — reformula con tu estilo cinematográfico.
     # Cargar el prompt del AI Agent seleccionado
     agent_prompt = load_prompt(agent_file)
     
-    # Llamada a IA (Priorizando Claude Sonnet por tokens de OpenAI agotados)
+    # Llamada a IA: motor primario configurado con fallback OpenAI.
     if claude_client:
         response = claude_client.messages.create(
             model=CLAUDE_MODEL_SCRIPT,
@@ -312,13 +330,13 @@ Requisitos:
 
 
 # ============================================================
-# MOTOR 1.5: ETIQUETAS DE EMOCIÓN (GPT-5.5)
+# MOTOR 1.5: ETIQUETAS DE EMOCIÓN
 # ============================================================
 def add_emotion_tags(script_text: str, prompt_file: str = "emotion_tagger.md") -> str:
     """
     Máquina 1.5: Agrega etiquetas de emoción al guión para TTS.
     Divide por párrafos para manejar scripts largos.
-    Incluye retry para respuestas vacías de GPT-5.5.
+    Incluye retry para respuestas vacías del proveedor configurado.
 
     `prompt_file` permite usar un tagger especializado (ej. emotion_tagger_podcast.md
     para diálogos con dos hosts y reglas de densidad por speaker).
@@ -394,12 +412,11 @@ def add_emotion_tags(script_text: str, prompt_file: str = "emotion_tagger.md") -
 
 
 # ============================================================
-# MOTOR 2: PROMPTS VISUALES (CLAUDE OPUS — con fallback GPT-5.5)
+# MOTOR 2: PROMPTS VISUALES
 # ============================================================
 def generate_video_prompts_claude(chunk: str, scene_counter: int, prompt_file: str = "video_prompt_generator.md") -> list:
     """
-    Genera prompts de video usando Claude Opus.
-    Claude es superior en descripción visual y cinematográfica.
+    Genera prompts de video usando el motor visual configurado.
 
     `prompt_file` permite usar un generador especializado (ej.
     video_prompt_generator_podcast.md para estética de divulgación).
@@ -472,7 +489,7 @@ def generate_video_prompts_claude(chunk: str, scene_counter: int, prompt_file: s
 
 def generate_video_prompts_gpt(chunk: str, scene_counter: int, prompt_file: str = "video_prompt_generator.md") -> list:
     """
-    Genera prompts de video usando GPT-5.5 (fallback).
+    Genera prompts de video usando el fallback OpenAI configurado.
 
     `prompt_file` igual que en la versión Claude, permite estética alterna.
     """
@@ -551,7 +568,7 @@ def generate_video_prompts_gpt(chunk: str, scene_counter: int, prompt_file: str 
 def generate_video_prompts(script_text: str, prompt_file: str = "video_prompt_generator.md") -> list:
     """
     Motor 2: Genera prompts de video cinematográficos.
-    Usa Claude Opus como motor principal, GPT-5.5 como fallback.
+    Usa el motor visual primario configurado y fallback OpenAI.
     Divide el guión en chunks por párrafos para evitar límites de tokens.
 
     `prompt_file` permite cambiar la estética visual (ej.
@@ -559,7 +576,7 @@ def generate_video_prompts(script_text: str, prompt_file: str = "video_prompt_ge
     en lugar de cinematográfica dramática).
     """
     use_claude = claude_client is not None
-    engine_name = f"Claude Opus ({CLAUDE_MODEL_PROMPTS})" if use_claude else f"GPT-5.5 ({GPT_MODEL})"
+    engine_name = "motor visual primario" if use_claude else "fallback visual"
 
     print(f"\n🎬 MOTOR 2: Generando prompts de video ({prompt_file})...")
     print(f"   Motor visual: {engine_name}")
@@ -592,7 +609,7 @@ def generate_video_prompts(script_text: str, prompt_file: str = "video_prompt_ge
         if use_claude:
             chunk_scenes = generate_video_prompts_claude(chunk, scene_counter, prompt_file=prompt_file)
             if chunk_scenes is None:
-                print(f"   ⚠️  Claude falló en chunk {i+1}, usando GPT-5.5 como fallback...")
+                print(f"   ⚠️  Motor visual primario falló en chunk {i+1}, usando fallback...")
                 if openai_client:
                     chunk_scenes = generate_video_prompts_gpt(chunk, scene_counter, prompt_file=prompt_file)
         else:
@@ -639,7 +656,7 @@ def generate_video_prompts(script_text: str, prompt_file: str = "video_prompt_ge
 
 
 # ============================================================
-# MOTOR SEO (GPT-5.5)
+# MOTOR SEO
 # ============================================================
 def generate_seo_metadata(topic: str, script_summary: str) -> dict:
     """
@@ -745,26 +762,26 @@ LONG_MEDITATION_DURATION_PROFILES = {
     "30m": {
         "label": "30 min",
         "target_minutes": 30,
-        "speech_minutes": 8,
-        "characters": "5,500 a 7,500",
-        "visual_scenes": 6,
-        "affirmation_spacing_minutes": 3,
+        "speech_minutes": 12,
+        "characters": "8,500 a 10,500",
+        "visual_scenes": 12,
+        "affirmation_spacing_minutes": 1.5,
     },
     "60m": {
         "label": "1 h",
         "target_minutes": 60,
-        "speech_minutes": 12,
-        "characters": "8,500 a 11,500",
-        "visual_scenes": 8,
-        "affirmation_spacing_minutes": 5,
+        "speech_minutes": 20,
+        "characters": "14,000 a 17,000",
+        "visual_scenes": 18,
+        "affirmation_spacing_minutes": 2.5,
     },
     "180m": {
         "label": "3 h",
         "target_minutes": 180,
-        "speech_minutes": 18,
-        "characters": "12,000 a 16,000",
-        "visual_scenes": 10,
-        "affirmation_spacing_minutes": 10,
+        "speech_minutes": 36,
+        "characters": "25,000 a 31,000",
+        "visual_scenes": 30,
+        "affirmation_spacing_minutes": 5,
     },
 }
 
@@ -1231,7 +1248,7 @@ def _build_long_meditation_visual_scenes(topic: str, script_text: str, profile: 
 
 def generate_podcast_script(topic: str, agent_file: str = "agent_podcast_general.md", project_id: str = None) -> dict:
     """
-    Genera un guión de podcast conversacional (2 hosts) usando Claude Sonnet.
+    Genera un guión de podcast conversacional (2 hosts) usando el motor de guion configurado.
     Análogo a generate_script() pero apuntando al prompt podcast y con
     requisitos distintos (14-18K caracteres, formato MATEO:/LUCÍA:).
     """
@@ -1432,7 +1449,7 @@ Perfil de produccion:
 - Duracion final del video: {profile['target_minutes']} minutos
 - Duracion hablada objetivo: aproximadamente {profile['speech_minutes']} minutos
 - Extension hablada objetivo: {profile['characters']} caracteres
-- Afirmaciones espaciadas: disenar bloques que funcionen con pausas de aproximadamente {profile['affirmation_spacing_minutes']} minutos entre intervenciones
+- Cadencia hablada: disenar intervenciones breves y regulares cada {profile['affirmation_spacing_minutes']} minutos aproximadamente
 - Visuales finales: {profile['visual_scenes']} escenas casi estaticas
 
 Requisitos estrictos:
@@ -1442,7 +1459,8 @@ Requisitos estrictos:
 - No uses tags entre corchetes
 - Usa puntos suspensivos para respiracion y pausas naturales
 - No prometas curas, resultados garantizados ni tratamiento medico
-- El guion debe sostener una experiencia larga: menos palabras, mas profundidad, afirmaciones memorables y silencios naturales
+- El guion debe sostener una experiencia larga sin sentirse detenido: presencia regular, pausas meditativas y afirmaciones memorables
+- Evita huecos conceptuales enormes; el oyente debe sentir acompanamiento continuo aunque haya momentos de silencio
 - Si el objetivo menciona dormir, noche o descanso, termina permitiendo seguir descansando; si no, termina con una integracion tranquila
 
 Devuelve solo el guion hablado final."""
@@ -1691,7 +1709,7 @@ def run_full_pipeline(
                 "background_music": {
                     "enabled": True,
                     "asset": None,
-                    "volume_db": -30,
+                    "volume_db": -24,
                     "status": "procedural_ambient_until_curated_tracks",
                     "procedural_fallback": True,
                 },
@@ -1826,7 +1844,7 @@ Ejemplos de uso:
     parser.add_argument(
         "--force-gpt",
         action="store_true",
-        help="Forzar uso de GPT-5.5 para Motor 2 (en lugar de Claude)"
+        help="Forzar uso del fallback OpenAI para Motor 2"
     )
     
     return parser.parse_args()
@@ -1853,7 +1871,7 @@ if __name__ == "__main__":
     # Forzar GPT si se pidió
     if args.force_gpt:
         claude_client = None
-        print("⚠️  Modo --force-gpt: Motor 2 usará GPT-5.5 en lugar de Claude Opus")
+        print("⚠️  Modo --force-gpt: Motor 2 usará fallback OpenAI")
     
     # Ejecutar pipeline
     run_full_pipeline(args.topic, args.agent, args.project_id)

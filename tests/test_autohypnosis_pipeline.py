@@ -80,6 +80,16 @@ def test_long_meditation_duration_profiles_normalize_aliases():
     assert _long_meditation_duration_profile("3 horas")["target_minutes"] == 180
 
 
+def test_long_meditation_profiles_keep_voice_present_without_exploding_scenes():
+    short = _long_meditation_duration_profile("30m")
+    long = _long_meditation_duration_profile("3h")
+
+    assert short["speech_minutes"] >= 12
+    assert short["visual_scenes"] >= 12
+    assert long["affirmation_spacing_minutes"] <= 5
+    assert long["visual_scenes"] <= 30
+
+
 def test_long_meditation_duration_distribution_has_no_drift():
     durations = _distribute_duration_seconds(180 * 60, 10)
 

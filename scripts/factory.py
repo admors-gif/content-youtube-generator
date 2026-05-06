@@ -59,7 +59,7 @@ AUTOHYPNOSIS_MUSIC_DIR = BASE_DIR / "assets" / "audio" / "autohipnosis"
 AUTOHYPNOSIS_DEFAULT_MUSIC_VOLUME_DB = -28.0
 LONG_MEDITATION_FORMAT = "meditacion_larga"
 WELLNESS_FORMATS = {"autohipnosis", LONG_MEDITATION_FORMAT}
-LONG_MEDITATION_DEFAULT_MUSIC_VOLUME_DB = -30.0
+LONG_MEDITATION_DEFAULT_MUSIC_VOLUME_DB = -24.0
 LONG_MEDITATION_STATIC_FPS = 6
 
 # Importar módulos propios
@@ -152,7 +152,7 @@ def _get_autohypnosis_music_config(data: dict) -> dict:
                 volume_db = float(cfg.get("volume_db", LONG_MEDITATION_DEFAULT_MUSIC_VOLUME_DB))
             except Exception:
                 volume_db = LONG_MEDITATION_DEFAULT_MUSIC_VOLUME_DB
-            volume_db = max(-42.0, min(-18.0, volume_db))
+            volume_db = max(-36.0, min(-16.0, volume_db))
             return {
                 "enabled": True,
                 "procedural": True,
@@ -164,7 +164,7 @@ def _get_autohypnosis_music_config(data: dict) -> dict:
         volume_db = float(cfg.get("volume_db", AUTOHYPNOSIS_DEFAULT_MUSIC_VOLUME_DB))
     except Exception:
         volume_db = AUTOHYPNOSIS_DEFAULT_MUSIC_VOLUME_DB
-    volume_db = max(-42.0, min(-18.0, volume_db))
+    volume_db = max(-36.0, min(-16.0, volume_db))
     return {"enabled": True, "asset": asset, "volume_db": volume_db}
 
 
@@ -254,7 +254,8 @@ def _mix_background_music(master_audio: Path, project_dir: Path, music_cfg: dict
         "-c:a", "libmp3lame", "-b:a", "192k",
         str(mixed_audio),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    timeout = max(180, min(1800, int(duration * 0.20)))
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if result.returncode == 0 and mixed_audio.exists() and mixed_audio.stat().st_size > 10000:
         print(f"   [music] Cama sonora mezclada: {music_path.name}")
         return mixed_audio

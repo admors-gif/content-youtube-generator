@@ -1331,6 +1331,79 @@ def _thumbnail_format_badge(agent_id: str | None = None) -> str | None:
     return None
 
 
+def _title_has_any(lower_title: str, terms: list[str]) -> bool:
+    return any(term in lower_title for term in terms)
+
+
+def _wellness_thumbnail_hook_plans(clean_title: str, agent_id: str | None = None) -> list[dict]:
+    lower = clean_title.lower()
+    is_long = agent_id == "agent_meditacion_larga"
+    is_sleep = _title_has_any(lower, ["dormir", "duerme", "sueño", "sueno", "noche", "descanso", "descansar"])
+    is_confidence = _title_has_any(lower, ["confianza", "autoconfianza", "seguridad", "autoestima"])
+    is_anxiety = _title_has_any(lower, ["ansiedad", "estres", "estrés", "preocupacion", "preocupación", "calma"])
+    is_abundance = _title_has_any(lower, ["abundancia", "dinero", "prosperidad", "riqueza"])
+    is_discipline = _title_has_any(lower, ["disciplina", "enfoque", "habito", "hábito", "constancia"])
+
+    session_context = (
+        f"long-form sleep meditation poster for {clean_title}"
+        if is_long
+        else f"guided self-hypnosis poster for {clean_title}"
+    )
+
+    if is_sleep and is_confidence:
+        hooks = [
+            ("early", "confianza_sueno", "CONFÍA\nEN TI", "restful close portrait with eyes closed, safe nighttime glow, visual metaphor of inner confidence becoming calm before sleep"),
+            ("mid", "descanso_seguro", "DUERME\nSEGURO", "peaceful bedroom and moonlight, soft protective aura, deep rest without fear or tension"),
+            ("closing", "mente_en_calma", "CALMA\nTU MENTE", "serene night sky with warm gold particles, quiet transformation and self-trust while resting"),
+        ]
+    elif is_sleep:
+        hooks = [
+            ("early", "sueno_profundo", "DUERME\nPROFUNDO", "premium night bedroom or moonlit landscape, heavy peaceful rest, warm lamp glow and soft blue shadows"),
+            ("mid", "apaga_mente", "APAGA\nTU MENTE", "calm silhouette under stars, thought patterns dissolving into soft golden light, sleep-ready atmosphere"),
+            ("closing", "descanso_total", "DESCANSA\nAHORA", "minimal serene bed or lake scene, gentle breathing light, emotional relief and stillness"),
+        ]
+    elif is_confidence:
+        hooks = [
+            ("early", "confia_en_ti", "CONFÍA\nEN TI", "cinematic peaceful portrait from shoulders up, relaxed confidence, warm sunrise aura and premium personal growth energy"),
+            ("mid", "seguridad_interior", "SEGURIDAD\nINTERIOR", "symbolic inner light expanding from the chest area without medical imagery, elegant violet and gold atmosphere"),
+            ("closing", "vuelve_a_ti", "VUELVE\nA TI", "quiet mirror or dawn landscape, self-acceptance and grounded identity transformation"),
+        ]
+    elif is_anxiety:
+        hooks = [
+            ("early", "suelta_tension", "SUELTA\nTENSIÓN", "calm person breathing with eyes closed, stress represented as fading mist, safe and non-clinical wellness mood"),
+            ("mid", "calma_profunda", "CALMA\nPROFUNDA", "soft blue night ambience, nervous energy transforming into slow gold particles, peaceful breathing rhythm"),
+            ("closing", "respira_descansa", "RESPIRA\nY DESCANSA", "minimal meditation space, warm lamp, quiet body relaxation and relief"),
+        ]
+    elif is_abundance:
+        hooks = [
+            ("early", "mente_abierta", "MENTE\nABIERTA", "premium symbolic abundance visual with warm sunrise, clean path of light, calm opportunity and grounded clarity"),
+            ("mid", "abundancia_serena", "ABUNDANCIA\nSERENA", "elegant golden particles flowing through a peaceful landscape, no money pile, no luxury flex, grounded prosperity"),
+            ("closing", "recibe_con_calma", "RECIBE\nCON CALMA", "quiet open doorway with warm light, emotional openness and mature self-worth"),
+        ]
+    elif is_discipline:
+        hooks = [
+            ("early", "disciplina_serena", "DISCIPLINA\nSERENA", "calm focus visual, dawn desk or quiet path, disciplined identity without harsh motivation"),
+            ("mid", "enfoque_profundo", "ENFOQUE\nPROFUNDO", "minimal dark-blue concentration field with warm light center, steady attention and inner order"),
+            ("closing", "un_paso_mas", "UN PASO\nMÁS", "cinematic path at sunrise, grounded progress and calm determination"),
+        ]
+    else:
+        hooks = [
+            ("early", "calma_profunda", "CALMA\nPROFUNDA", "premium calm meditation poster, soft violet and gold light, safe inner transformation"),
+            ("mid", "respira_suelta", "RESPIRA\nY SUELTA", "slow breathing visual field, gentle particles and peaceful body relaxation"),
+            ("closing", "vuelve_a_ti", "VUELVE\nA TI", "quiet dawn landscape, grounded self-connection and emotional clarity"),
+        ]
+
+    return [
+        {
+            "label": label,
+            "variant": variant,
+            "hook": hook,
+            "concept": f"{session_context}: {concept}",
+        }
+        for label, variant, hook, concept in hooks
+    ]
+
+
 def _thumbnail_hook_plans(title: str, agent_id: str | None = None) -> list[dict]:
     """
     Three deterministic YouTube-thumbnail concepts. Hooks stay short because
@@ -1343,26 +1416,7 @@ def _thumbnail_hook_plans(title: str, agent_id: str | None = None) -> list[dict]
     keywords = _pick_thumbnail_keywords(clean_title, max_words=3)
 
     if agent_id in {"agent_autohipnosis", "agent_meditacion_larga"}:
-        return [
-            {
-                "label": "early",
-                "variant": "transformacion",
-                "hook": "REPROGRAMA\nTU MENTE",
-                "concept": "a serene person resting with eyes closed, surrounded by soft violet and gold light waves, calm bedroom or meditation space, subconscious transformation visual metaphor",
-            },
-            {
-                "label": "mid",
-                "variant": "profundo",
-                "hook": "DUERME\nY CAMBIA",
-                "concept": "peaceful night atmosphere, a calm silhouette under soft moonlight, gentle neural light patterns and floating affirmations represented as abstract glowing particles without readable text",
-            },
-            {
-                "label": "closing",
-                "variant": "identidad",
-                "hook": "CONFÍA\nEN TI",
-                "concept": "cinematic close portrait from shoulders up, relaxed confident expression, warm sunrise glow, subtle aura of inner strength, premium self-improvement thumbnail",
-            },
-        ]
+        return _wellness_thumbnail_hook_plans(clean_title, agent_id=agent_id)
 
     if is_attraction or is_science:
         return [
@@ -1442,12 +1496,14 @@ def _build_premium_thumbnail_prompt(title: str, plan: dict, agent_id: str | None
         "Do not render the words 'Line', line numbers, slashes, pipes, quotes, or separators.\n"
         f"{badge_instruction}"
         f"Core concept: {plan['concept']}.\n"
+        f"Variant direction: {plan.get('variant', 'primary')}. Make this concept visually specific to the topic; avoid generic wellness stock-image layouts.\n"
         f"{safety_hint}"
         "Composition requirements:\n"
         "- The thumbnail must already include the headline text as part of the generated image.\n"
         "- Spell the Spanish headline exactly; no extra words, subtitles, quotes, pseudo-text, logos, or watermarks.\n"
         "- Make the headline huge, bold, high-contrast, and readable on a phone screen.\n"
         "- Keep the headline and main subject fully inside the central 16:9 safe area; the image may be center-cropped from 1536x1024 to 1280x720.\n"
+        "- Reserve the top-right corner for a later format badge overlay; do not place the main headline or face there.\n"
         "- No visible hands or fingers; crop people at face/shoulders or keep hands fully outside the frame.\n"
         "- Faces must be realistic, expressive, premium, not uncanny.\n"
         "- Strong contrast, sharp focus, punchy but tasteful color accents, mobile-readable composition.\n"

@@ -11,12 +11,20 @@
         "timezone": "America/Mexico_City"
     },
     "models": {
-        "script_generation": "gpt-5.5",
-        "emotion_tagging": "gpt-5.5",
-        "video_prompts": "gpt-5.5",
-        "seo_optimization": "gpt-5.5",
-        "tts_engine": "gemini-3.1-flash-tts",
-        "video_generation": "ltx-2.3"
+        "script_generation": "claude-sonnet-4-6",
+        "script_generation_fallback": "gpt-5.5",
+        "emotion_tagging": "claude-sonnet-4-6",
+        "emotion_tagging_fallback": "gpt-5.5",
+        "video_prompts": "claude-opus-4-7",
+        "video_prompts_fallback": "gpt-5.5",
+        "seo_optimization": "claude-sonnet-4-6",
+        "seo_optimization_fallback": "gpt-5.5",
+        "openai_fallback": "gpt-5.5",
+        "tts_engine": "elevenlabs",
+        "image_generation": "flux1-krea-dev",
+        "motion_generation": "luma-ray-flash-2",
+        "subtitles": "whisper-1",
+        "thumbnail_generation": "gpt-image-1.5"
     },
     "tts_config": {
         "voice_name": "Kore",

@@ -63,7 +63,7 @@ def test_autohypnosis_music_resolves_only_curated_assets(tmp_path, monkeypatch):
 
     assert result["enabled"] is True
     assert result["asset"] == track.resolve()
-    assert result["volume_db"] == -18.0
+    assert result["volume_db"] == -16.0
 
 
 def test_long_meditation_music_uses_procedural_fallback_without_asset():

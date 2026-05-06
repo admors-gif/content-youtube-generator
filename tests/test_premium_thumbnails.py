@@ -46,13 +46,34 @@ def test_autohypnosis_thumbnail_plan_avoids_medical_claims_and_generated_text():
         agent_id="agent_autohipnosis",
     )
 
-    assert plans[0]["hook"] == "REPROGRAMA\nTU MENTE"
+    assert plans[0]["hook"] == "CONFÍA\nEN TI"
     assert "guided meditation thumbnail" in prompt
-    assert 'Line 1: "REPROGRAMA"' in prompt
-    assert 'Line 2: "TU MENTE"' in prompt
+    assert 'Line 1: "CONFÍA"' in prompt
+    assert 'Line 2: "EN TI"' in prompt
     assert 'Do not render the format badge text "MEDITACIÓN GUIADA"' in prompt
+    assert "Reserve the top-right corner" in prompt
     assert "medical claims" in prompt
-    assert "REPROGRAMA" in prompt
+    assert "CONFÍA" in prompt
+
+
+def test_wellness_thumbnail_plans_change_with_topic_intent():
+    confidence = api._thumbnail_hook_plans(
+        "Autohipnosis para autoconfianza profunda",
+        agent_id="agent_autohipnosis",
+    )
+    sleep = api._thumbnail_hook_plans(
+        "Meditación larga para dormir profundamente",
+        agent_id="agent_meditacion_larga",
+    )
+    abundance = api._thumbnail_hook_plans(
+        "Afirmaciones espaciadas para abundancia tranquila",
+        agent_id="agent_meditacion_larga",
+    )
+
+    assert confidence[0]["hook"] == "CONFÍA\nEN TI"
+    assert sleep[0]["hook"] == "DUERME\nPROFUNDO"
+    assert abundance[0]["hook"] == "MENTE\nABIERTA"
+    assert {p["variant"] for p in confidence} != {p["variant"] for p in sleep}
 
 
 def test_autohypnosis_badge_is_always_guided_meditation():
