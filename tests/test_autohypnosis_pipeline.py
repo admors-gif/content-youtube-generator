@@ -60,6 +60,24 @@ def test_autohypnosis_visual_scenes_are_capped_and_safe():
     assert all("no readable text" in prompt for prompt in prompts)
     assert all("hands outside frame" in prompt for prompt in prompts)
     assert all("no medical setting" in prompt for prompt in prompts)
+    assert all("session-specific visual direction" in prompt for prompt in prompts)
+
+
+def test_wellness_visual_prompts_vary_between_projects():
+    script = _sample_autohypnosis_script(24)
+
+    scenes_a = _build_autohypnosis_visual_scenes(
+        "autoconfianza profunda antes de dormir",
+        script,
+        project_id="project-a",
+    )
+    scenes_b = _build_autohypnosis_visual_scenes(
+        "autoconfianza profunda antes de dormir",
+        script,
+        project_id="project-b",
+    )
+
+    assert [scene["prompt"] for scene in scenes_a] != [scene["prompt"] for scene in scenes_b]
 
 
 def test_autohypnosis_prompt_clauses_are_not_duplicated():
@@ -107,7 +125,12 @@ def test_long_meditation_visual_scenes_preserve_script_and_target_duration():
     script = _sample_autohypnosis_script(30)
     profile = _long_meditation_duration_profile("3h")
 
-    scenes = _build_long_meditation_visual_scenes("dormir con confianza", script, profile)
+    scenes = _build_long_meditation_visual_scenes(
+        "dormir con confianza",
+        script,
+        profile,
+        project_id="long-project",
+    )
     joined = "\n\n".join(scene["narration_text"] for scene in scenes)
     prompts = [scene["prompt"].lower() for scene in scenes]
 

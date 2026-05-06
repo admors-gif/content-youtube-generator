@@ -19,6 +19,7 @@ if sys.platform == "win32":
 import json
 import argparse
 import unicodedata
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from openai import OpenAI
@@ -842,6 +843,28 @@ LONG_MEDITATION_VISUAL_TEMPLATES = [
     ),
 ]
 
+WELLNESS_VISUAL_SESSION_VARIANTS = [
+    "soft golden dawn haze with wide negative space",
+    "deep violet twilight atmosphere with subtle layered mist",
+    "warm candlelike glow reflected on abstract glass textures",
+    "moonlit blue serenity with sparse gold particles",
+    "quiet premium bedroom light with empty calm composition",
+    "slow breathing aurora gradients with no recognizable people",
+    "still water reflections with a distant warm horizon",
+    "minimal dark wellness studio corner with linen and soft shadows",
+    "floating translucent ribbons of light in a peaceful night field",
+    "soft forest path suggested by light only, no visible hands or faces",
+]
+
+WELLNESS_VISUAL_CAMERA_VARIANTS = [
+    "wide cinematic frame",
+    "macro detail without text",
+    "overhead calm composition",
+    "low contrast soft focus",
+    "symmetrical centered composition",
+    "asymmetric editorial composition",
+]
+
 WELLNESS_MUSIC_DIR = BASE_DIR / "assets" / "audio" / "autohipnosis"
 WELLNESS_MUSIC_MANIFEST = WELLNESS_MUSIC_DIR / "manifest.json"
 WELLNESS_MUSIC_DEFAULT_VOLUME_DB = {
@@ -1372,7 +1395,38 @@ def _distribute_duration_seconds(total_seconds: int, scene_count: int) -> list[i
     return durations
 
 
-def _build_autohypnosis_visual_scenes(topic: str, script_text: str) -> list:
+def _wellness_visual_variation_clause(
+    topic: str,
+    scene_index: int,
+    project_id: str | None = None,
+    personalization: dict | None = None,
+) -> str:
+    personalization = personalization or {}
+    seed = "|".join([
+        str(project_id or ""),
+        str(topic or ""),
+        str(personalization.get("purpose") or ""),
+    ])
+    digest = hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()
+    offset = int(digest[:8], 16) if digest else 0
+    variant = WELLNESS_VISUAL_SESSION_VARIANTS[
+        (offset + scene_index) % len(WELLNESS_VISUAL_SESSION_VARIANTS)
+    ]
+    camera = WELLNESS_VISUAL_CAMERA_VARIANTS[
+        ((offset // 7) + scene_index) % len(WELLNESS_VISUAL_CAMERA_VARIANTS)
+    ]
+    return (
+        f"session-specific visual direction: {variant}, {camera}, "
+        "distinct from previous sessions while preserving the same premium meditation identity"
+    )
+
+
+def _build_autohypnosis_visual_scenes(
+    topic: str,
+    script_text: str,
+    project_id: str | None = None,
+    personalization: dict | None = None,
+) -> list:
     """
     Visuales acotados para autohipnosis: pocas escenas, tranquilas, sin manos,
     sin texto legible y sin imagineria clinica. La narracion se reparte completa
@@ -1405,7 +1459,9 @@ def _build_autohypnosis_visual_scenes(topic: str, script_text: str) -> list:
         category, template, base_tags = AUTOHYPNOSIS_VISUAL_TEMPLATES[i % len(AUTOHYPNOSIS_VISUAL_TEMPLATES)]
         prompt = _append_unique_prompt_clauses(
             template.format(topic=topic_clean),
-            safety_clauses,
+            safety_clauses + [
+                _wellness_visual_variation_clause(topic_clean, i, project_id, personalization)
+            ],
         )
         visual_scenes.append({
             "scene_number": i + 1,
@@ -1419,7 +1475,13 @@ def _build_autohypnosis_visual_scenes(topic: str, script_text: str) -> list:
     return visual_scenes
 
 
-def _build_long_meditation_visual_scenes(topic: str, script_text: str, profile: dict) -> list:
+def _build_long_meditation_visual_scenes(
+    topic: str,
+    script_text: str,
+    profile: dict,
+    project_id: str | None = None,
+    personalization: dict | None = None,
+) -> list:
     """
     Long meditation uses few visual scenes and explicit target durations. The
     factory pads each scene audio to these durations, keeping TTS cost bounded.
@@ -1452,7 +1514,9 @@ def _build_long_meditation_visual_scenes(topic: str, script_text: str, profile: 
         category, template, base_tags = LONG_MEDITATION_VISUAL_TEMPLATES[i % len(LONG_MEDITATION_VISUAL_TEMPLATES)]
         prompt = _append_unique_prompt_clauses(
             template.format(topic=topic_clean),
-            safety_clauses,
+            safety_clauses + [
+                _wellness_visual_variation_clause(topic_clean, i, project_id, personalization)
+            ],
         )
         visual_scenes.append({
             "scene_number": i + 1,
@@ -1862,7 +1926,12 @@ def run_full_pipeline(
             print(f"   🎬 Podcast visual: {len(video_scenes)} escenas macro "
                   f"(target={PODCAST_TARGET_VISUAL_SCENES}, max={PODCAST_MAX_VISUAL_SCENES})")
         elif is_autohypnosis:
-            video_scenes = _build_autohypnosis_visual_scenes(topic, tagged_script)
+            video_scenes = _build_autohypnosis_visual_scenes(
+                topic,
+                tagged_script,
+                project_id=project_id,
+                personalization=personalization_options,
+            )
             print(f"   🌙 Autohipnosis visual: {len(video_scenes)} escenas contemplativas "
                   f"(target={AUTOHYPNOSIS_TARGET_VISUAL_SCENES}, max={AUTOHYPNOSIS_MAX_VISUAL_SCENES})")
         elif is_long_meditation:
@@ -1870,7 +1939,13 @@ def run_full_pipeline(
                 result["metadata"].get("duration_profile"),
                 topic,
             )
-            video_scenes = _build_long_meditation_visual_scenes(topic, tagged_script, long_profile)
+            video_scenes = _build_long_meditation_visual_scenes(
+                topic,
+                tagged_script,
+                long_profile,
+                project_id=project_id,
+                personalization=personalization_options,
+            )
             print(f"   🌌 Meditacion larga visual: {len(video_scenes)} escenas casi estaticas "
                   f"(final={long_profile['target_minutes']} min)")
         else:

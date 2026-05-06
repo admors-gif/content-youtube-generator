@@ -84,6 +84,35 @@ def _scene_number(scene):
         return 0
 
 
+def _legacy_title_slug(title: str) -> str:
+    slug = re.sub(r'[^a-zA-Z0-9_\-]', '_', str(title or "video_sin_titulo").replace(" ", "_"))
+    return slug.strip("_-") or "video_sin_titulo"
+
+
+def _safe_output_folder_name(name: str | None) -> str | None:
+    if not name:
+        return None
+    basename = Path(str(name)).name
+    slug = _legacy_title_slug(basename)
+    return slug or None
+
+
+def _project_output_slug(title: str, project_id: str | None = None) -> str:
+    title_slug = _legacy_title_slug(title)
+    if not project_id:
+        return title_slug
+    project_slug = _legacy_title_slug(project_id)
+    compact_title = title_slug[:90].rstrip("_-") or "video_sin_titulo"
+    return f"{compact_title}__{project_slug}"
+
+
+def _resolve_output_folder(data: dict) -> str:
+    explicit = _safe_output_folder_name(data.get("output_folder") or data.get("videoFolder"))
+    if explicit:
+        return explicit
+    return _project_output_slug(data.get("topic", "video_sin_titulo"), data.get("project_id"))
+
+
 def _image_jobs_path(images_dir: Path) -> Path:
     return images_dir.parent / IMAGE_JOBS_FILENAME
 
@@ -1107,7 +1136,7 @@ if __name__ == "__main__":
     # Usar topic para nombre de carpeta (consistente con VPS)
     raw_title = data.get("topic", "video_sin_titulo")
     seo_title = data.get("seo_metadata", {}).get("title", raw_title)
-    safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', raw_title.replace(" ", "_"))
+    safe_title = _resolve_output_folder(data)
     agent_name = data.get("agent", data.get("agent_name", ""))
     
     # Directorios del proyecto

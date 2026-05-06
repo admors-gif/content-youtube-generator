@@ -8,6 +8,7 @@ import json
 import logging
 import base64
 import urllib.request
+import re
 from datetime import timedelta, datetime, timezone
 from pathlib import Path
 from scripts.media_validation import (
@@ -676,13 +677,46 @@ def _scene_number_from_payload(scene: dict) -> int:
 
 
 def _valid_scene_image_numbers(images_dir: Path, min_bytes: int = 5000) -> set[int]:
-    import re
     ready = set()
     for img in images_dir.glob("scene_*.png"):
         match = re.fullmatch(r"scene_(\d{4})\.png", img.name)
         if match and img.stat().st_size >= min_bytes:
             ready.add(int(match.group(1)))
     return ready
+
+
+def _legacy_title_slug(title: str) -> str:
+    slug = re.sub(r'[^a-zA-Z0-9_\-]', '_', str(title or "video_sin_titulo").replace(" ", "_"))
+    return slug.strip("_-") or "video_sin_titulo"
+
+
+def _project_output_slug(title: str, project_id: str | None = None) -> str:
+    """
+    Disk output identity.
+
+    Legacy projects used title-only folders. New productions include project_id
+    so two videos with the same title cannot silently reuse the same images,
+    audio, motion files, or final video.
+    """
+    title_slug = _legacy_title_slug(title)
+    if not project_id:
+        return title_slug
+
+    project_slug = _legacy_title_slug(project_id)
+    compact_title = title_slug[:90].rstrip("_-") or "video_sin_titulo"
+    return f"{compact_title}__{project_slug}"
+
+
+def _candidate_video_folders(title: str, project_id: str, stored_folder: str | None = None) -> list[str]:
+    candidates = []
+    for folder in (
+        stored_folder,
+        _project_output_slug(title, project_id),
+        _legacy_title_slug(title),
+    ):
+        if folder and folder not in candidates:
+            candidates.append(folder)
+    return candidates
 
 
 def _sync_scene_image_urls(doc_ref, scenes: list, safe_title: str, images_dir: Path) -> dict:
@@ -3471,7 +3505,7 @@ async def recover_from_disk(project_id: str, request: Request):
     pero el subprocess de factory.py sigue corriendo y termina el video.
 
     Acción:
-      1. Lee el proyecto, calcula safe_title del title.
+      1. Lee el proyecto y busca el folder real de producción.
       2. Busca FINAL_SUB_*.mp4 (preferido) o FINAL_*.mp4 en disco.
       3. Sube a Firebase Storage (videos/{project_id}/{filename}).
       4. Actualiza Firestore con status=completed + videoUrl + videoFolder + etc.
@@ -3482,7 +3516,6 @@ async def recover_from_disk(project_id: str, request: Request):
     try:
         _ensure_firebase_initialized()
         from firebase_admin import firestore
-        import re
 
         db = firestore.client()
         doc_ref = db.collection("projects").document(project_id)
@@ -3495,12 +3528,24 @@ async def recover_from_disk(project_id: str, request: Request):
         if not title:
             return JSONResponse(status_code=400, content={"error": "project has no title"})
 
-        safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', title.replace(" ", "_"))
-        video_dir = Path(f"/app/output/videos/{safe_title}")
-        if not video_dir.is_dir():
+        folders_checked = _candidate_video_folders(
+            title,
+            project_id,
+            stored_folder=data.get("videoFolder"),
+        )
+        video_dir = None
+        safe_title = None
+        for folder in folders_checked:
+            candidate_dir = Path(f"/app/output/videos/{folder}")
+            if candidate_dir.is_dir():
+                video_dir = candidate_dir
+                safe_title = folder
+                break
+
+        if not video_dir or not safe_title:
             return JSONResponse(
                 status_code=404,
-                content={"error": f"folder {safe_title} not on disk"},
+                content={"error": "production folder not on disk", "folders_checked": folders_checked},
             )
 
         # Preferir versión con subtítulos
@@ -3765,9 +3810,11 @@ def run_production(project_id):
             update_progress(0, "Error: No hay escenas visuales", "error")
             return
         
-        # Crear JSON compatible con factory.py
-        import re
-        safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', title.replace(" ", "_"))
+        # Crear JSON compatible con factory.py.
+        # El folder incluye project_id para evitar cache cruzado entre videos
+        # con el mismo título; factory.py recibe el mismo output_folder.
+        safe_title = _project_output_slug(title, project_id)
+        doc_ref.update({"videoFolder": safe_title})
         
         # Detectar formatos especiales. Podcast necesita dialogue_blocks para
         # dual TTS; autohipnosis necesita preservar su etiqueta de formato para
@@ -3804,6 +3851,8 @@ def run_production(project_id):
 
         temp_json = {
             "topic": title,
+            "project_id": project_id,
+            "output_folder": safe_title,
             "agent": agent_id,
             "video_scenes": factory_scenes,
             "seo_metadata": project.get("seo_metadata", {"title": title}),

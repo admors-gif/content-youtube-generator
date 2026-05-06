@@ -151,6 +151,18 @@ def test_wellness_payload_rejects_overlong_personalization():
         raise AssertionError("overlong personalization should be rejected")
 
 
+def test_project_output_slug_prevents_title_cache_collision():
+    first = api._project_output_slug("Autoconfianza profunda antes de dormir", "p1")
+    second = api._project_output_slug("Autoconfianza profunda antes de dormir", "p2")
+
+    assert first != second
+    assert first.endswith("__p1")
+    assert second.endswith("__p2")
+    assert api._project_output_slug("Autoconfianza profunda antes de dormir") == (
+        "Autoconfianza_profunda_antes_de_dormir"
+    )
+
+
 def test_long_meditation_payload_rejects_invalid_duration_profile():
     try:
         api._validate_project_payload({

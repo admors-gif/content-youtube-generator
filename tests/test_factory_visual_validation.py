@@ -107,3 +107,35 @@ def test_long_meditation_target_duration_for_scene_prefers_explicit_value():
 
     assert factory._target_duration_for_scene(scene, fallback_duration=5) == 1800
     assert factory._target_duration_for_scene({}, fallback_duration=7) == 7
+
+
+def test_output_folder_uses_project_id_when_available():
+    folder_a = factory._resolve_output_folder({
+        "topic": "Autoconfianza profunda antes de dormir",
+        "project_id": "abc123",
+    })
+    folder_b = factory._resolve_output_folder({
+        "topic": "Autoconfianza profunda antes de dormir",
+        "project_id": "xyz789",
+    })
+
+    assert folder_a != folder_b
+    assert folder_a.endswith("__abc123")
+    assert folder_b.endswith("__xyz789")
+
+
+def test_output_folder_keeps_legacy_title_without_project_id():
+    folder = factory._resolve_output_folder({
+        "topic": "Autoconfianza profunda antes de dormir",
+    })
+
+    assert folder == "Autoconfianza_profunda_antes_de_dormir"
+
+
+def test_explicit_output_folder_cannot_escape_project_directory():
+    folder = factory._resolve_output_folder({
+        "topic": "Autoconfianza",
+        "output_folder": "../evil/final",
+    })
+
+    assert folder == "final"
