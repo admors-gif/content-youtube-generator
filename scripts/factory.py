@@ -210,6 +210,136 @@ def _apply_image_workflow_inputs(nodes: dict, spec: dict, prompt: str, scene_num
     return seed
 
 
+def _workflow_error_summary(job: dict) -> dict:
+    err = job.get("execution_error") if isinstance(job, dict) else None
+    if not isinstance(err, dict):
+        return {}
+    return {
+        "errorType": str(err.get("exception_type") or "")[:120],
+        "errorMessage": str(err.get("exception_message") or "")[:500],
+        "errorNode": str(err.get("node_id") or "")[:80],
+        "errorNodeType": str(err.get("node_type") or "")[:120],
+    }
+
+
+def _run_single_image_job(
+    client,
+    base_workflow: dict,
+    workflow_spec: dict,
+    prompt: str,
+    pipeline_format: str,
+    scene_number: int,
+    img_path: Path,
+    image_jobs: dict,
+    attempt_label: str = "primary",
+) -> bool:
+    nodes = copy.deepcopy(base_workflow)
+    final_prompt = _build_image_prompt(
+        prompt,
+        pipeline_format=pipeline_format,
+        provider=workflow_spec["provider"],
+    )
+    seed = _apply_image_workflow_inputs(nodes, workflow_spec, final_prompt, scene_number)
+
+    previous_record = image_jobs.get(str(scene_number), {})
+    record = previous_record if attempt_label != "primary" else {"sceneNumber": scene_number}
+    if attempt_label != "primary":
+        record.setdefault("fallbacks", []).append({
+            "fromProvider": previous_record.get("provider"),
+            "fromWorkflow": previous_record.get("workflow"),
+            "fromJobId": previous_record.get("jobId"),
+            "fromStatus": previous_record.get("status"),
+            "fromError": previous_record.get("errorMessage"),
+            "startedAt": datetime_now_iso(),
+        })
+
+    record.update({
+        "sceneNumber": scene_number,
+        "status": "submitting" if attempt_label == "primary" else f"{attempt_label}_submitting",
+        "provider": workflow_spec["provider"],
+        "workflow": workflow_spec["workflow"].name,
+        "attempt": attempt_label,
+        "prompt": prompt,
+        "finalPrompt": final_prompt,
+        "filenamePrefix": f"scene_{scene_number:04d}",
+        "seed": seed,
+        "submittedAt": datetime_now_iso(),
+        "outputs": [],
+    })
+    image_jobs[str(scene_number)] = record
+    _save_image_jobs(img_path.parent, image_jobs)
+
+    resp = client.post(f"{COMFYUI_BASE}/prompt", headers=COMFYUI_HEADERS, json={"prompt": nodes})
+    if resp.status_code != 200:
+        record.update({
+            "status": "submit_failed" if attempt_label == "primary" else f"{attempt_label}_submit_failed",
+            "httpStatus": resp.status_code,
+            "errorMessage": resp.text[:500],
+            "failedAt": datetime_now_iso(),
+        })
+        image_jobs[str(scene_number)] = record
+        _save_image_jobs(img_path.parent, image_jobs)
+        return False
+
+    prompt_id = resp.json()["prompt_id"]
+    record.update({"status": "queued" if attempt_label == "primary" else f"{attempt_label}_queued", "jobId": prompt_id})
+    image_jobs[str(scene_number)] = record
+    _save_image_jobs(img_path.parent, image_jobs)
+
+    for attempt in range(60):  # 5 min max
+        time.sleep(5)
+        try:
+            jr = client.get(f"{COMFYUI_BASE}/jobs/{prompt_id}", headers=COMFYUI_HEADERS)
+            if jr.status_code != 200:
+                continue
+            job = jr.json()
+            status = job.get("status", "unknown")
+
+            if status == "completed":
+                image_outputs = _extract_image_outputs(job)
+                record.update({
+                    "status": "completed",
+                    "outputs": image_outputs,
+                    "completedAt": datetime_now_iso(),
+                })
+                image_jobs[str(scene_number)] = record
+                _save_image_jobs(img_path.parent, image_jobs)
+                for output_info in image_outputs:
+                    if _download_image_output(client, output_info, img_path):
+                        record.update({
+                            "status": "downloaded",
+                            "localPath": str(img_path),
+                            "downloadedAt": datetime_now_iso(),
+                            "selectedOutput": output_info,
+                        })
+                        image_jobs[str(scene_number)] = record
+                        _save_image_jobs(img_path.parent, image_jobs)
+                        return True
+                return False
+            elif status in ("failed", "error"):
+                record.update({
+                    "status": status,
+                    "failedAt": datetime_now_iso(),
+                    **_workflow_error_summary(job),
+                })
+                image_jobs[str(scene_number)] = record
+                _save_image_jobs(img_path.parent, image_jobs)
+                return False
+        except Exception as exc:
+            record["lastPollError"] = str(exc)[:200]
+            image_jobs[str(scene_number)] = record
+            _save_image_jobs(img_path.parent, image_jobs)
+
+    record.update({
+        "status": "failed",
+        "failedAt": datetime_now_iso(),
+        "errorMessage": "Timed out waiting for Comfy job completion",
+    })
+    image_jobs[str(scene_number)] = record
+    _save_image_jobs(img_path.parent, image_jobs)
+    return False
+
+
 def _safe_audio_asset_path(filename: str | None) -> Path | None:
     """Resolve future curated audio beds without allowing path traversal."""
     if not filename:
@@ -483,14 +613,20 @@ def generate_comfy_images(scenes, images_dir, workflow_spec, pipeline_format="na
     """Genera imágenes para todas las escenas via ComfyUI Cloud."""
     with open(workflow_spec["workflow"], "r", encoding="utf-8") as f:
         base_workflow = json.load(f)
+    fallback_spec = _select_image_workflow("narrativa") if workflow_spec["provider"] != "flux" else None
+    fallback_workflow = None
+    if fallback_spec:
+        with open(fallback_spec["workflow"], "r", encoding="utf-8") as f:
+            fallback_workflow = json.load(f)
     
-    stats = {"generated": 0, "skipped": 0, "failed": 0, "recovered": 0, "missing": [], "invalid": []}
+    stats = {"generated": 0, "skipped": 0, "failed": 0, "fallback": 0, "recovered": 0, "missing": [], "invalid": []}
     image_jobs = _load_image_jobs(images_dir)
     
     print("\n" + "=" * 60)
     print(f"   PASO 1: Generando imágenes {workflow_spec['label']}")
     print("=" * 60)
     
+    primary_disabled_reason = None
     with httpx.Client(timeout=120.0, follow_redirects=True) as client:
         for i, scene in enumerate(scenes):
             num = _scene_number(scene)
@@ -509,88 +645,48 @@ def generate_comfy_images(scenes, images_dir, workflow_spec, pipeline_format="na
                 continue
             
             print(f"   [{i+1}/{len(scenes)}] Escena {num}: generando imagen...")
-            
-            # Preparar workflow
-            nodes = copy.deepcopy(base_workflow)
-            final_prompt = _build_image_prompt(
-                prompt,
-                pipeline_format=pipeline_format,
-                provider=workflow_spec["provider"],
-            )
-            seed = _apply_image_workflow_inputs(nodes, workflow_spec, final_prompt, num)
-
-            image_jobs[str(num)] = {
-                "sceneNumber": num,
-                "status": "submitting",
-                "provider": workflow_spec["provider"],
-                "workflow": workflow_spec["workflow"].name,
-                "prompt": prompt,
-                "finalPrompt": final_prompt,
-                "filenamePrefix": f"scene_{num:04d}",
-                "seed": seed,
-                "submittedAt": datetime_now_iso(),
-                "outputs": [],
-            }
-            _save_image_jobs(images_dir, image_jobs)
-            
-            # Enviar a ComfyUI
-            resp = client.post(f"{COMFYUI_BASE}/prompt", headers=COMFYUI_HEADERS, json={"prompt": nodes})
-            if resp.status_code != 200:
-                stats["failed"] += 1
-                image_jobs[str(num)].update({"status": "submit_failed", "httpStatus": resp.status_code})
-                _save_image_jobs(images_dir, image_jobs)
-                print(f"   [{i+1}/{len(scenes)}] Escena {num}: HTTP {resp.status_code}")
-                continue
-            
-            prompt_id = resp.json()["prompt_id"]
-            image_jobs[str(num)].update({"status": "queued", "jobId": prompt_id})
-            _save_image_jobs(images_dir, image_jobs)
-            
-            # Poll hasta completar
-            ok = False
-            for attempt in range(60):  # 5 min max
-                time.sleep(5)
-                try:
-                    jr = client.get(f"{COMFYUI_BASE}/jobs/{prompt_id}", headers=COMFYUI_HEADERS)
-                    if jr.status_code != 200:
-                        continue
-                    job = jr.json()
-                    status = job.get("status", "unknown")
-                    
-                    if status == "completed":
-                        image_outputs = _extract_image_outputs(job)
-                        image_jobs[str(num)].update({
-                            "status": "completed",
-                            "outputs": image_outputs,
-                            "completedAt": datetime_now_iso(),
-                        })
-                        _save_image_jobs(images_dir, image_jobs)
-                        for output_info in image_outputs:
-                            if _download_image_output(client, output_info, img_path):
-                                image_jobs[str(num)].update({
-                                    "status": "downloaded",
-                                    "localPath": str(img_path),
-                                    "downloadedAt": datetime_now_iso(),
-                                    "selectedOutput": output_info,
-                                })
-                                _save_image_jobs(images_dir, image_jobs)
-                                ok = True
-                                break
-                        break
-                    elif status in ("failed", "error"):
-                        image_jobs[str(num)].update({"status": status, "failedAt": datetime_now_iso()})
-                        _save_image_jobs(images_dir, image_jobs)
-                        break
-                except:
-                    pass
+            if primary_disabled_reason and fallback_spec and fallback_workflow:
+                print(f"   [{i+1}/{len(scenes)}] Escena {num}: saltando {workflow_spec['label']} ({primary_disabled_reason}), usando fallback FLUX/Krea...")
+                ok = False
+            else:
+                ok = _run_single_image_job(
+                    client,
+                    base_workflow,
+                    workflow_spec,
+                    prompt,
+                    pipeline_format,
+                    num,
+                    img_path,
+                    image_jobs,
+                    attempt_label="primary",
+                )
+            if not ok and fallback_spec and fallback_workflow:
+                record = image_jobs.get(str(num), {})
+                reason = primary_disabled_reason or record.get("errorMessage") or record.get("status") or "unknown"
+                if "unauthorized" in reason.lower():
+                    primary_disabled_reason = "unauthorized"
+                print(f"   [{i+1}/{len(scenes)}] Escena {num}: {workflow_spec['label']} falló ({reason[:80]}), usando fallback FLUX/Krea...")
+                ok = _run_single_image_job(
+                    client,
+                    fallback_workflow,
+                    fallback_spec,
+                    prompt,
+                    pipeline_format,
+                    num,
+                    img_path,
+                    image_jobs,
+                    attempt_label="fallback",
+                )
             
             if ok:
                 kb = img_path.stat().st_size // 1024
                 stats["generated"] += 1
+                if (image_jobs.get(str(num)) or {}).get("attempt") == "fallback":
+                    stats["fallback"] += 1
                 print(f"   [{i+1}/{len(scenes)}] Escena {num}: OK ({kb}KB)")
             else:
                 stats["failed"] += 1
-                image_jobs[str(num)].update({"status": "failed", "failedAt": datetime_now_iso()})
+                image_jobs.setdefault(str(num), {}).update({"status": "failed", "failedAt": datetime_now_iso()})
                 _save_image_jobs(images_dir, image_jobs)
                 print(f"   [{i+1}/{len(scenes)}] Escena {num}: FALLO")
         _save_image_jobs(images_dir, image_jobs)
@@ -601,6 +697,8 @@ def generate_comfy_images(scenes, images_dir, workflow_spec, pipeline_format="na
     stats["missing"] = validation["missing"]
     stats["invalid"] = validation["invalid"]
     print(f"\n   Resumen {workflow_spec['label']}: {stats['generated']} generadas, {stats['skipped']} existentes, {stats['failed']} fallidas")
+    if stats["fallback"]:
+        print(f"   Fallback FLUX/Krea: {stats['fallback']} imágenes")
     if stats["recovered"]:
         print(f"   Recovery remoto: {stats['recovered']} imágenes descargadas")
     if stats["missing"] or stats["invalid"]:

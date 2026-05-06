@@ -1,5 +1,19 @@
+import shutil
+from pathlib import Path
+
 from scripts import factory
 from scripts.factory import validate_image_assets
+
+
+class _FakeResponse:
+    def __init__(self, status_code=200, payload=None, text="", content=b""):
+        self.status_code = status_code
+        self._payload = payload or {}
+        self.text = text
+        self.content = content
+
+    def json(self):
+        return self._payload
 
 
 def test_validate_image_assets_requires_exact_scene_filenames(tmp_path):
@@ -157,3 +171,82 @@ def test_image_workflow_router_uses_seedream_for_short_premium_formats():
 
         assert workflow["provider"] == "seedream"
         assert workflow["workflow"].name == "seedream_5_lite_t2i_api.json"
+
+
+def test_seedream_auth_failure_falls_back_to_flux_once(monkeypatch):
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            self.seedream_posts = 0
+            self.flux_posts = 0
+
+        def __enter__(self):
+            calls["client"] = self
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def close(self):
+            return None
+
+        def post(self, url, headers=None, json=None):
+            prompt_graph = (json or {}).get("prompt", {})
+            if "25" in prompt_graph:
+                self.seedream_posts += 1
+                return _FakeResponse(payload={"prompt_id": f"seedream-{self.seedream_posts}"})
+            self.flux_posts += 1
+            return _FakeResponse(payload={"prompt_id": f"flux-{self.flux_posts}"})
+
+        def get(self, url, headers=None, params=None):
+            if "/jobs/seedream-" in url:
+                return _FakeResponse(payload={
+                    "status": "failed",
+                    "execution_error": {
+                        "exception_type": "Exception",
+                        "exception_message": "Unauthorized: Please login first to use this node.",
+                        "node_id": "25",
+                        "node_type": "ByteDanceSeedreamNode",
+                    },
+                })
+            if "/jobs/flux-" in url:
+                return _FakeResponse(payload={
+                    "status": "completed",
+                    "outputs": {
+                        "9": {
+                            "images": [{
+                                "filename": "scene.png",
+                                "subfolder": "",
+                                "type": "output",
+                            }],
+                        },
+                    },
+                })
+            if url.endswith("/view"):
+                return _FakeResponse(content=b"x" * (factory.IMAGE_MIN_BYTES + 1024))
+            return _FakeResponse(status_code=404)
+
+    calls = {}
+    monkeypatch.setattr(factory.time, "sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(factory.httpx, "Client", FakeClient)
+
+    images_dir = Path(".test-output") / "seedream-fallback" / "images"
+    shutil.rmtree(images_dir.parent, ignore_errors=True)
+    try:
+        scenes = [
+            {"scene_number": 1, "prompt": "object-only podcast scene"},
+            {"scene_number": 2, "prompt": "empty studio podcast scene"},
+        ]
+        stats = factory.generate_comfy_images(
+            scenes,
+            images_dir,
+            factory._select_image_workflow("podcast"),
+            pipeline_format="podcast",
+        )
+    finally:
+        shutil.rmtree(images_dir.parent, ignore_errors=True)
+
+    assert stats["generated"] == 2
+    assert stats["fallback"] == 2
+    assert stats["failed"] == 0
+    assert calls["client"].seedream_posts == 1
+    assert calls["client"].flux_posts == 2
