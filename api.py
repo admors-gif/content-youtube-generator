@@ -1497,6 +1497,66 @@ def _wellness_thumbnail_hook_plans(clean_title: str, agent_id: str | None = None
     ]
 
 
+def _is_esto_no_es_amor_topic(clean_title: str) -> bool:
+    lower = (clean_title or "").lower()
+    return any(
+        token in lower
+        for token in [
+            "esto no es amor",
+            "apego",
+            "dependencia",
+            "obsesion",
+            "obsesión",
+            "contacto cero",
+            "ruptura",
+            "dejar ir",
+            "amor propio",
+            "autoestima",
+            "herida",
+            "abandono",
+            "relacion toxica",
+            "relación tóxica",
+            "no soy suficiente",
+        ]
+    )
+
+
+def _esto_no_es_amor_thumbnail_hook_plans(clean_title: str) -> list[dict]:
+    return [
+        {
+            "label": "early",
+            "variant": "apego",
+            "hook": "NO ES AMOR\nES APEGO",
+            "concept": (
+                "object-led emotional relationship thumbnail: phone face down with a blank black screen, "
+                "a wilted flower, and two coffee cups separated by empty space on a dark bedside table; "
+                "warm amber light on one side and restrained teal shadow on the other"
+            ),
+            "avoid_people": True,
+        },
+        {
+            "label": "mid",
+            "variant": "patron",
+            "hook": "DEJA DE\nPERSEGUIR",
+            "concept": (
+                "empty room relationship metaphor: two chairs facing different directions, a loose red thread "
+                "resting between them, one warm lamp, clean negative space, intimate cinematic tension"
+            ),
+            "avoid_people": True,
+        },
+        {
+            "label": "closing",
+            "variant": "paz",
+            "hook": "ELIGE\nTU PAZ",
+            "concept": (
+                "quiet recovery still life: closed journal, single key, cup of tea near a morning window, "
+                "mirror reflecting only an empty room, calm warm light with cool shadows receding"
+            ),
+            "avoid_people": True,
+        },
+    ]
+
+
 def _thumbnail_hook_plans(title: str, agent_id: str | None = None) -> list[dict]:
     """
     Three deterministic YouTube-thumbnail concepts. Hooks stay short because
@@ -1510,6 +1570,9 @@ def _thumbnail_hook_plans(title: str, agent_id: str | None = None) -> list[dict]
 
     if agent_id in {"agent_autohipnosis", "agent_meditacion_larga"}:
         return _wellness_thumbnail_hook_plans(clean_title, agent_id=agent_id)
+
+    if agent_id == "agent_podcast_general" and _is_esto_no_es_amor_topic(clean_title):
+        return _esto_no_es_amor_thumbnail_hook_plans(clean_title)
 
     if is_attraction or is_science:
         return [
@@ -1581,6 +1644,22 @@ def _build_premium_thumbnail_prompt(title: str, plan: dict, agent_id: str | None
         if agent_id in {"agent_autohipnosis", "agent_meditacion_larga"}
         else ""
     )
+    avoid_people = bool(plan.get("avoid_people"))
+    if avoid_people:
+        safety_hint += (
+            "For this relationship-healing podcast channel, use object-led emotional metaphors only. "
+            "No people, no faces, no silhouettes, no bodies, no hands, no fingers, no microphones, "
+            "no speakers, no headphones, no audio gear, no podcast studio equipment. "
+            "Avoid generic brain-science or romance-stock imagery unless the title explicitly asks for it. "
+        )
+    people_rules = (
+        "- No people, no visible faces, no hands or fingers, no silhouettes, no bodies.\n"
+        if avoid_people
+        else (
+            "- No visible hands or fingers; crop people at face/shoulders or keep hands fully outside the frame.\n"
+            "- Faces must be realistic, expressive, premium, not uncanny.\n"
+        )
+    )
     return (
         "Create a finished, high-conversion YouTube "
         f"{format_hint}, 16:9 landscape, topic: \"{clean_title}\".\n"
@@ -1597,8 +1676,7 @@ def _build_premium_thumbnail_prompt(title: str, plan: dict, agent_id: str | None
         "- Make the headline huge, bold, high-contrast, and readable on a phone screen.\n"
         "- Keep the headline and main subject fully inside the central 16:9 safe area; the image may be center-cropped from 1536x1024 to 1280x720.\n"
         "- Reserve the top-right corner for a later format badge overlay; do not place the main headline or face there.\n"
-        "- No visible hands or fingers; crop people at face/shoulders or keep hands fully outside the frame.\n"
-        "- Faces must be realistic, expressive, premium, not uncanny.\n"
+        f"{people_rules}"
         "- Strong contrast, sharp focus, punchy but tasteful color accents, mobile-readable composition.\n"
         "- Clickbait must be safe and truthful: curiosity, transformation, mystery, or emotional payoff without deception.\n"
         "- Avoid horror, gore, distorted bodies, extra limbs, malformed anatomy, medical claims, and controversial shock imagery.\n"

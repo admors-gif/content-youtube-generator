@@ -720,31 +720,70 @@ PODCAST_SHOW_NAME = "Esto no es amor"
 PODCAST_TARGET_VISUAL_SCENES = 12
 PODCAST_MAX_VISUAL_SCENES = 15
 
+PODCAST_VISUAL_IDENTITY = (
+    "Relationship-healing visual identity: intimate emotional imagery, "
+    "warm amber practical light against restrained teal shadows, quiet editorial "
+    "still-life compositions, emotional but not melodramatic."
+)
+
+PODCAST_VISUAL_SAFETY_SUFFIX = (
+    " Object-led or empty-room composition, clean blank surfaces, "
+    "do not render the episode title, no readable text, no letters, no pseudo-text, "
+    "no brand logos, no watermarks, no people, no faces, no silhouettes, no hands, "
+    "no fingers, no arms, no microphones, no speakers, no headphones, no audio gear, "
+    "no podcast equipment, no studio equipment, no cameras, no laptops, no waveform graphics."
+)
+
 PODCAST_VISUAL_TEMPLATES = [
     (
-        "Object macro",
-        "Editorial macro photography of a symbolic object related to {topic}, warm amber studio light, shallow depth of field, minimalist composition, object-only frame, clean surface, magazine cover quality, photorealistic, 4k",
-        ["object", "warm", "editorial"],
+        "Phone distance",
+        "{identity} Photorealistic cinematic still: a phone face down on a bedside table, blank dark screen, a wilted flower beside it, two coffee cups separated by empty space, theme focus: {focus}, shallow depth of field, premium editorial composition, 16:9, 4k",
+        ["phone", "distance", "attachment"],
     ),
     (
-        "Atmospheric place",
-        "Empty contemporary studio corner suggesting a deep conversation about {topic}, warm practical lamps, deep teal shadows, calm cinematic atmosphere, empty room with two chairs, editorial style, 8k",
-        ["studio", "atmosphere", "conversation"],
+        "Two empty chairs",
+        "{identity} Empty apartment corner with two chairs facing different directions, a single warm floor lamp, deep teal shadows, large negative space between the chairs, theme focus: {focus}, calm cinematic atmosphere, editorial interior photography, 16:9, 4k",
+        ["empty-room", "distance", "chairs"],
     ),
     (
-        "Conceptual abstract",
-        "Abstract visualization of emotional patterns connected to {topic}, flowing amber and deep teal particles, organic data shapes, clean dark background, conceptual editorial style, cinematic, 8k",
-        ["abstract", "emotion", "data"],
+        "Loose red thread",
+        "{identity} A loose red thread stretched gently between two ceramic objects on a clean table, slight tension but not breaking, warm amber highlight and cool teal falloff, theme focus: {focus}, minimalist macro photography, premium magazine still life, 16:9, 4k",
+        ["red-thread", "tension", "still-life"],
     ),
     (
-        "Anonymous silhouette",
-        "Empty listening chair in a warm studio environment about {topic}, soft window light, thoughtful editorial photography, calm premium podcast mood, magazine quality, object-led frame, 4k",
-        ["studio", "podcast", "intimate"],
+        "Empty mirror",
+        "{identity} An empty mirror reflecting only a quiet room, a closed journal and a single key on the table below, soft window light, theme focus: {focus}, introspective editorial still, clean composition, 16:9, 4k",
+        ["mirror", "self-worth", "journal"],
     ),
     (
-        "Symbolic still life",
-        "Symbolic still life for {topic}: ceramic cup, closed notebook, soft shadows, amber highlights, deep teal background, minimalist editorial composition, clean blank surfaces, photorealistic, 4k",
-        ["still-life", "symbolic", "warm"],
+        "Door left ajar",
+        "{identity} Empty hallway with a bedroom door left slightly ajar, warm light spilling through the opening into cool teal shadow, a pair of shoes separated near the threshold, theme focus: {focus}, cinematic quiet tension, 16:9, 4k",
+        ["door", "threshold", "uncertainty"],
+    ),
+    (
+        "Unsent message",
+        "{identity} A phone with a completely blank black screen placed beside a torn envelope with no visible writing, one ceramic cup untouched, soft amber lamp glow, theme focus: {focus}, intimate editorial macro, 16:9, 4k",
+        ["phone", "silence", "message"],
+    ),
+    (
+        "Worn boundary line",
+        "{identity} A clean tabletop divided by a subtle line of light and shadow, a single flower on one side and a closed notebook on the other, theme focus: {focus}, elegant visual metaphor for boundaries, photorealistic, 16:9, 4k",
+        ["boundary", "flower", "notebook"],
+    ),
+    (
+        "Separated pillows",
+        "{identity} Quiet bed at night with two pillows separated by a strip of moonlight, bedside lamp off, soft amber reflection in the background, theme focus: {focus}, cinematic domestic stillness, editorial realism, 16:9, 4k",
+        ["bedroom", "distance", "night"],
+    ),
+    (
+        "Turned photograph",
+        "{identity} A photograph turned face down so no image or text is visible, a small bowl for keys, a closed journal, amber highlight on clean dark wood, theme focus: {focus}, restrained emotional still life, 16:9, 4k",
+        ["memory", "journal", "still-life"],
+    ),
+    (
+        "Return to self",
+        "{identity} A single cup of tea beside a closed notebook near a morning window, warm sunrise edge light, cool teal shadows receding, theme focus: {focus}, calm resolution, premium editorial still life, 16:9, 4k",
+        ["self-worth", "calm", "morning"],
     ),
 ]
 
@@ -1027,24 +1066,36 @@ def _topic_tags(topic: str) -> list:
     return tags[:2]
 
 
+def _podcast_visual_focus(topic: str) -> str:
+    normalized = unicodedata.normalize("NFKD", topic or "")
+    lower = normalized.encode("ascii", "ignore").decode("ascii").lower()
+    if any(token in lower for token in ["apego", "dependencia", "obsesion", "obsesion"]):
+        return "attachment mistaken for love, emotional dependency, and the moment of recognizing the pattern"
+    if any(token in lower for token in ["contacto cero", "ex ", "ex-", "ruptura", "dejar ir"]):
+        return "choosing distance after an unhealthy bond, silence, closure, and emotional withdrawal"
+    if any(token in lower for token in ["amor propio", "autoestima", "no soy suficiente", "suficiente"]):
+        return "recovering self-worth after confusing love with validation"
+    if any(token in lower for token in ["atraccion", "quimica", "enamoramiento", "pareja"]):
+        return "confusing attraction, longing, and emotional chemistry with real love"
+    if any(token in lower for token in ["limite", "limites", "boundaries"]):
+        return "setting emotional boundaries without cruelty or drama"
+    return "emotional relationship patterns, self-worth, clarity, and choosing peace"
+
+
 def _build_podcast_visual_scenes(topic: str, grouped_scenes: list) -> list:
     """
     Construye escenas visuales podcast de forma determinística y acotada.
     El objetivo es evitar que el generador documental produzca 100+ escenas.
     """
-    topic_clean = (topic or "the episode theme").strip()
     topic_tags = _topic_tags(topic)
+    focus = _podcast_visual_focus(topic)
     visual_scenes = []
-    safety_suffix = (
-        " Object-led or empty-room composition, clean blank surfaces, "
-        "no readable text, no brand logos."
-    )
 
     for i, scene in enumerate(grouped_scenes):
         category, template, base_tags = PODCAST_VISUAL_TEMPLATES[i % len(PODCAST_VISUAL_TEMPLATES)]
-        prompt = template.format(topic=topic_clean)
-        if safety_suffix.strip() not in prompt:
-            prompt = f"{prompt}{safety_suffix}"
+        prompt = template.format(identity=PODCAST_VISUAL_IDENTITY, focus=focus)
+        if PODCAST_VISUAL_SAFETY_SUFFIX.strip() not in prompt:
+            prompt = f"{prompt}{PODCAST_VISUAL_SAFETY_SUFFIX}"
         tags = (base_tags + topic_tags)[:5]
         visual_scenes.append({
             "scene_number": i + 1,

@@ -21,6 +21,29 @@ def test_attraction_thumbnail_plans_are_clickable_and_text_safe():
     assert "TU CEREBRO" in prompt
 
 
+def test_esto_no_es_amor_thumbnail_plans_are_object_led_and_channel_specific():
+    title = "Esto no es amor, es apego: aprende a reconocer la diferencia"
+
+    plans = api._thumbnail_hook_plans(title, agent_id="agent_podcast_general")
+    prompt = api._build_premium_thumbnail_prompt(title, plans[0], agent_id="agent_podcast_general")
+
+    assert len(plans) == 3
+    assert plans[0]["hook"] == "NO ES AMOR\nES APEGO"
+    assert plans[1]["hook"] == "DEJA DE\nPERSEGUIR"
+    assert plans[2]["hook"] == "ELIGE\nTU PAZ"
+    assert all(plan.get("avoid_people") is True for plan in plans)
+    assert all("microphone" not in plan["concept"] for plan in plans)
+    assert all("speaker" not in plan["concept"] for plan in plans)
+    assert all("headphone" not in plan["concept"] for plan in plans)
+    assert "phone face down" in prompt
+    assert "No people, no faces, no silhouettes" in prompt
+    assert "no microphones" in prompt
+    assert "no speakers" in prompt
+    assert "no headphones" in prompt
+    assert "Faces must be realistic" not in prompt
+    assert "cinematic podcast set with a microphone" not in prompt
+
+
 def test_generation_size_uses_landscape_size_for_latest_image_models():
     assert api._thumbnail_generation_size("gpt-image-1.5") == "1536x1024"
     assert api._thumbnail_generation_size("gpt-image-1") == "1536x1024"
