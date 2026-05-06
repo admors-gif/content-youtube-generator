@@ -441,6 +441,61 @@ def _assert_production_capacity(db):
     return capacity
 
 
+_WELLNESS_AGENT_IDS = {"agent_autohipnosis", "agent_meditacion_larga"}
+_PERSONALIZATION_LIMITS = {
+    "preferred_name": 40,
+    "purpose": 500,
+    "anchor_phrase": 180,
+}
+
+
+def _clean_personalization_text(value, *, max_chars: int, field_name: str) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail=f"invalid personalization.{field_name}")
+    clean = "".join(ch if (ch >= " " or ch in "\n\t") else " " for ch in value)
+    clean = " ".join(clean.split()).strip()
+    if len(clean) > max_chars:
+        raise HTTPException(status_code=400, detail=f"personalization.{field_name} too long")
+    return clean
+
+
+def _validate_personalization_payload(data: dict, *, agent_id: str) -> dict:
+    if agent_id not in _WELLNESS_AGENT_IDS:
+        return {}
+    raw = data.get("personalization") or data.get("wellnessPersonalization") or {}
+    if raw in (None, ""):
+        raw = {}
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="invalid personalization")
+
+    preferred_name = _clean_personalization_text(
+        raw.get("preferredName") or raw.get("preferred_name"),
+        max_chars=_PERSONALIZATION_LIMITS["preferred_name"],
+        field_name="preferredName",
+    )
+    purpose = _clean_personalization_text(
+        raw.get("purpose") or raw.get("personalPurpose") or raw.get("personal_purpose"),
+        max_chars=_PERSONALIZATION_LIMITS["purpose"],
+        field_name="purpose",
+    )
+    anchor_phrase = _clean_personalization_text(
+        raw.get("anchorPhrase") or raw.get("anchor_phrase"),
+        max_chars=_PERSONALIZATION_LIMITS["anchor_phrase"],
+        field_name="anchorPhrase",
+    )
+
+    payload = {
+        "preferred_name": preferred_name,
+        "purpose": purpose,
+        "anchor_phrase": anchor_phrase,
+    }
+    if not any(payload.values()):
+        return {}
+    return {**payload, "enabled": True}
+
+
 def _validate_project_payload(data: dict) -> dict:
     title = (data.get("title") or data.get("topic") or "").strip()
     agent_id = (data.get("agentId") or "").strip()
@@ -468,6 +523,9 @@ def _validate_project_payload(data: dict) -> dict:
     duration_profile = (data.get("durationProfile") or data.get("duration_profile") or "").strip().lower()
     allowed_duration_profiles = {"30m", "60m", "180m"}
     generation_options = {}
+    personalization = _validate_personalization_payload(data, agent_id=agent_id)
+    if personalization:
+        generation_options["personalization"] = personalization
     if agent_id == "agent_meditacion_larga":
         aliases = {
             "30": "30m",
@@ -489,6 +547,7 @@ def _validate_project_payload(data: dict) -> dict:
         "title": title,
         "agent_id": agent_id,
         "agent_file": agent_file,
+        "personalization": personalization,
         "generation_options": generation_options,
     }
 
@@ -2943,6 +3002,7 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
                 "creditsRemaining": max(0, counts["remaining"] - 1),
                 "agentId": payload["agent_id"],
                 "agentFile": payload["agent_file"],
+                "personalization": payload.get("personalization") or {},
                 "generationOptions": payload.get("generation_options") or {},
             }
 
@@ -3034,6 +3094,7 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
                 "output": {},
                 "seo": {},
                 "costs": {"creditCost": 1},
+                "personalization": payload.get("personalization") or {},
                 "generationOptions": payload.get("generation_options") or {},
                 "creditCharged": True,
                 "creditChargedAt": firestore.SERVER_TIMESTAMP,
@@ -3537,7 +3598,16 @@ def run_script(topic, agent_file, project_id, generation_options=None):
                 from firebase_admin import firestore
                 snap = firestore.client().collection("projects").document(project_id).get()
                 if snap.exists:
-                    generation_options = (snap.to_dict() or {}).get("generationOptions") or {}
+                    project_data = snap.to_dict() or {}
+                    generation_options = project_data.get("generationOptions") or {}
+                    if (
+                        project_data.get("personalization")
+                        and not generation_options.get("personalization")
+                    ):
+                        generation_options = {
+                            **generation_options,
+                            "personalization": project_data.get("personalization"),
+                        }
             except Exception as options_err:
                 print(f"   ⚠️ generationOptions lookup skipped: {options_err}", flush=True)
         # Import directo — sin subprocess, para que los errores aparezcan en logs

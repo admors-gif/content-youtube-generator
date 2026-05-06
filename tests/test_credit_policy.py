@@ -103,6 +103,54 @@ def test_long_meditation_payload_accepts_duration_profile():
     assert payload["generation_options"]["duration_profile"] == "180m"
 
 
+def test_wellness_payload_accepts_private_personalization():
+    payload = api._validate_project_payload({
+        "title": "Autoconfianza profunda",
+        "agentId": "agent_autohipnosis",
+        "agentFile": "agent_autohipnosis.md",
+        "personalization": {
+            "preferredName": "  Tomas  ",
+            "purpose": "Dormir con calma y confiar mas en mis decisiones.",
+            "anchorPhrase": "Estoy a salvo en mi propio ritmo",
+        },
+    })
+
+    personalization = payload["generation_options"]["personalization"]
+
+    assert personalization["enabled"] is True
+    assert personalization["preferred_name"] == "Tomas"
+    assert personalization["purpose"].startswith("Dormir con calma")
+    assert personalization["anchor_phrase"] == "Estoy a salvo en mi propio ritmo"
+    assert payload["personalization"] == personalization
+
+
+def test_documentary_payload_ignores_personalization_fields():
+    payload = api._validate_project_payload({
+        "title": "Historia de Roma",
+        "agentId": "agent_historico",
+        "agentFile": "agent_historico.md",
+        "personalization": {"preferredName": "Tomas"},
+    })
+
+    assert payload["personalization"] == {}
+    assert "personalization" not in payload["generation_options"]
+
+
+def test_wellness_payload_rejects_overlong_personalization():
+    try:
+        api._validate_project_payload({
+            "title": "Meditacion para dormir",
+            "agentId": "agent_meditacion_larga",
+            "agentFile": "agent_meditacion_larga.md",
+            "personalization": {"preferredName": "x" * 41},
+        })
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert exc.detail == "personalization.preferredName too long"
+    else:
+        raise AssertionError("overlong personalization should be rejected")
+
+
 def test_long_meditation_payload_rejects_invalid_duration_profile():
     try:
         api._validate_project_payload({

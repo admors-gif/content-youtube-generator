@@ -34,6 +34,33 @@ const TIER_FILTERS = [
   { id: "creator", label: "Creator" },
 ];
 
+const WELLNESS_FORMATS = new Set(["autohipnosis", "meditacion_larga"]);
+
+const PERSONALIZATION_LIMITS = {
+  preferredName: 40,
+  purpose: 500,
+  anchorPhrase: 180,
+};
+
+const EMPTY_PERSONALIZATION = {
+  preferredName: "",
+  purpose: "",
+  anchorPhrase: "",
+};
+
+function cleanPersonalizationText(value) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function buildPersonalizationPayload(personalization) {
+  const payload = {
+    preferredName: cleanPersonalizationText(personalization.preferredName),
+    purpose: cleanPersonalizationText(personalization.purpose),
+    anchorPhrase: cleanPersonalizationText(personalization.anchorPhrase),
+  };
+  return Object.values(payload).some(Boolean) ? payload : null;
+}
+
 /* ── AgentCard ──────────────────────────────────────────────────────────── */
 
 function AgentCard({ agent, selected, onSelect, recommendation }) {
@@ -188,6 +215,70 @@ function AgentCard({ agent, selected, onSelect, recommendation }) {
   );
 }
 
+function PersonalizationField({
+  icon,
+  label,
+  helper,
+  value,
+  maxLength,
+  rows = 1,
+  placeholder,
+  onChange,
+}) {
+  const InputComponent = rows > 1 ? "textarea" : "input";
+  return (
+    <label style={{ display: "block" }}>
+      <div
+        style={{
+          font: "var(--t-mono-sm)",
+          color: "var(--paper-mute)",
+          marginBottom: 8,
+          letterSpacing: "0.16em",
+          textTransform: "uppercase",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <Icon name={icon} size={14} /> {label}
+      </div>
+      <InputComponent
+        className="cf-input"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        maxLength={maxLength}
+        rows={rows > 1 ? rows : undefined}
+        placeholder={placeholder}
+        style={{
+          minHeight: rows > 1 ? 88 : undefined,
+          resize: rows > 1 ? "vertical" : undefined,
+        }}
+      />
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          marginTop: 6,
+          font: "var(--t-caption)",
+          color: "var(--paper-dim)",
+          lineHeight: 1.35,
+        }}
+      >
+        <span>{helper}</span>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            color: "var(--paper-mute)",
+          }}
+        >
+          {value.length}/{maxLength}
+        </span>
+      </div>
+    </label>
+  );
+}
+
 /* ── NewProjectPage ─────────────────────────────────────────────────────── */
 
 export default function NewProjectPage() {
@@ -212,12 +303,20 @@ export default function NewProjectPage() {
   /* Filtro de tier (visual del kit, no estaba en legacy pero coexiste) */
   const [tierFilter, setTierFilter] = useState("all");
   const [durationProfile, setDurationProfile] = useState("60m");
+  const [personalization, setPersonalization] = useState(EMPTY_PERSONALIZATION);
 
   const selectAgent = (agent) => {
     setSelectedAgent(agent);
     const defaultProfile = agent.durationProfiles?.find((p) => p.id === "60m")
       || agent.durationProfiles?.[0];
     if (defaultProfile) setDurationProfile(defaultProfile.id);
+  };
+
+  const updatePersonalization = (field, value) => {
+    setPersonalization((current) => ({
+      ...current,
+      [field]: value,
+    }));
   };
 
   /* PRESERVADO: fetchRecommendations */
@@ -258,6 +357,10 @@ export default function NewProjectPage() {
   }, {});
 
   const { remaining: creditsLeft } = getCreditCounts(profile);
+  const isWellnessSelected = WELLNESS_FORMATS.has(selectedAgent?.format);
+  const personalizationPayload = isWellnessSelected
+    ? buildPersonalizationPayload(personalization)
+    : null;
 
   const handleRequestCredits = async () => {
     setRequestingCredits(true);
@@ -296,6 +399,9 @@ export default function NewProjectPage() {
           agentFile: selectedAgent.promptFile,
           ...(selectedAgent.durationProfiles?.length
             ? { durationProfile }
+            : {}),
+          ...(personalizationPayload
+            ? { personalization: personalizationPayload }
             : {}),
         }),
       });
@@ -871,6 +977,95 @@ export default function NewProjectPage() {
               </div>
             )}
 
+            {isWellnessSelected && (
+              <section
+                style={{
+                  marginBottom: "var(--s-5)",
+                  paddingTop: "var(--s-5)",
+                  borderTop: "1px solid var(--rule-1)",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                    gap: 16,
+                    marginBottom: 14,
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        font: "var(--t-mono-sm)",
+                        color: "var(--ember)",
+                        marginBottom: 6,
+                        letterSpacing: "0.18em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      PERSONALIZACIÓN OPCIONAL
+                    </div>
+                    <div
+                      style={{
+                        font: "var(--t-caption)",
+                        color: "var(--paper-dim)",
+                        lineHeight: 1.45,
+                        maxWidth: 720,
+                      }}
+                    >
+                      Úsalo para una sesión privada. Para contenido público,
+                      deja el nombre vacío y escribe solo la intención.
+                    </div>
+                  </div>
+                  <Icon
+                    name="sparkles"
+                    size={18}
+                    style={{ color: selectedAgent.color || "var(--ember)" }}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    gap: 14,
+                    marginBottom: 14,
+                  }}
+                >
+                  <PersonalizationField
+                    icon="user"
+                    label="Nombre o apodo"
+                    value={personalization.preferredName}
+                    maxLength={PERSONALIZATION_LIMITS.preferredName}
+                    placeholder="Ej: Tomás, Tommy, Ana"
+                    helper="La voz lo usará con suavidad, no en cada frase."
+                    onChange={(value) => updatePersonalization("preferredName", value)}
+                  />
+                  <PersonalizationField
+                    icon="edit"
+                    label="Frase ancla"
+                    value={personalization.anchorPhrase}
+                    maxLength={PERSONALIZATION_LIMITS.anchorPhrase}
+                    placeholder="Ej: Estoy a salvo en mi propio ritmo"
+                    helper="Se integrará como una afirmación memorable."
+                    onChange={(value) => updatePersonalization("anchorPhrase", value)}
+                  />
+                </div>
+
+                <PersonalizationField
+                  icon="bookOpen"
+                  label="Propósito o contexto"
+                  value={personalization.purpose}
+                  maxLength={PERSONALIZATION_LIMITS.purpose}
+                  rows={3}
+                  placeholder="Ej: Quiero sentir calma antes de dormir y confiar más en mis decisiones."
+                  helper="No incluyas datos sensibles. Describe intención, momento o sensación buscada."
+                  onChange={(value) => updatePersonalization("purpose", value)}
+                />
+              </section>
+            )}
+
             {/* Suggestions chips */}
             {selectedAgent.exampleTopics?.length > 0 && (
               <div style={{ marginBottom: "var(--s-5)" }}>
@@ -979,7 +1174,7 @@ export default function NewProjectPage() {
                 </>
               ) : (
                 <>
-                  {selectedAgent.format === "meditacion_larga"
+                  {isWellnessSelected
                     ? "Crear sesión"
                     : "Crear documental"}{" "}
                   <Icon name="arrowRight" size={16} />
