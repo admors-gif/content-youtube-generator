@@ -2,6 +2,7 @@ from scripts.generate_content import (
     AUTOHYPNOSIS_MAX_VISUAL_SCENES,
     AUTOHYPNOSIS_ESTIMATED_WPM,
     LONG_MEDITATION_FORMAT,
+    WELLNESS_MUSIC_DIR,
     _append_unique_prompt_clauses,
     _autohypnosis_duration_profile,
     _build_autohypnosis_visual_scenes,
@@ -11,6 +12,8 @@ from scripts.generate_content import (
     _normalize_autohypnosis_delivery,
     _normalize_personalization_payload,
     _personalization_prompt_block,
+    _load_wellness_music_manifest,
+    _select_wellness_music_asset,
     _split_text_into_balanced_segments,
 )
 
@@ -146,3 +149,31 @@ def test_personalization_payload_trims_and_caps_private_fields():
     assert payload["enabled"] is True
     assert payload["preferred_name"] == "Tommy"
     assert len(payload["purpose"]) == 500
+
+
+def test_wellness_music_manifest_assets_are_available():
+    tracks = _load_wellness_music_manifest()
+
+    assert len(tracks) >= 10
+    assert all((WELLNESS_MUSIC_DIR / track["file"]).is_file() for track in tracks)
+
+
+def test_wellness_music_selection_matches_topic_intent():
+    sleep = _select_wellness_music_asset(
+        "Meditacion larga para dormir profundamente",
+        format_key=LONG_MEDITATION_FORMAT,
+    )
+    abundance = _select_wellness_music_asset(
+        "Meditacion tranquila",
+        format_key="autohipnosis",
+        personalization={"purpose": "Quiero sentir abundancia y seguridad con el dinero"},
+    )
+    default = _select_wellness_music_asset(
+        "Sesion suave sin tema especifico",
+        format_key="autohipnosis",
+    )
+
+    assert sleep["track_id"] == "deep_sleep"
+    assert sleep["asset"].endswith(".mp3")
+    assert abundance["track_id"] == "abundance"
+    assert default["track_id"] == "premium_silence"

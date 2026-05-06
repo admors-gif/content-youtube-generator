@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "description": "Curated instrumental audio beds for wellness formats. Files are normalized MP3 loops generated from commercially cleared source tracks.",
+  "tracks": [
+    {
+      "id": "deep_sleep",
+      "file": "blue_room_deep_sleep.mp3",
+      "label": "Blue Room Loop",
+      "intent": "sueño profundo",
+      "keywords": ["sueno", "sueño", "dormir", "duerme", "descanso", "noche", "insomnio", "relajacion nocturna", "sleep"],
+      "formats": ["autohipnosis", "meditacion_larga"],
+      "volume_db": {"autohipnosis": -22, "meditacion_larga": -18}
+    },
+    {
+      "id": "deep_breath",
+      "file": "breathing_drift_deep_breath.mp3",
+      "label": "Breathing Drift",
+      "intent": "respiración profunda",
+      "keywords": ["respiracion", "respiración", "respirar", "aliento", "pulmones", "calma corporal", "breath"],
+      "formats": ["autohipnosis", "meditacion_larga"],
+      "volume_db": {"autohipnosis": -23, "meditacion_larga": -19}
+    },
+    {
+      "id": "confidence",
+      "file": "golden_stillness_confidence.mp3",
+      "label": "Golden Stillness",
+      "intent": "autoconfianza",
+      "keywords": ["autoconfianza", "confianza", "seguridad", "valentia", "autoestima", "confiar", "confidence"],
+      "formats": ["autohipnosis", "meditacion_larga"],
+      "volume_db": {"autohipnosis": -22, "meditacion_larga": -18}
+    },
+    {
+      "id": "abundance",
+      "file": "golden_stillness_abundance.mp3",
+      "label": "Golden Stillness Loop",
+      "intent": "abundancia",
+      "keywords": ["abundancia", "prosperidad", "dinero", "merecimiento", "oportunidades", "expansion", "abundance"],
+      "formats": ["autohipnosis", "meditacion_larga"],
+      "volume_db": {"autohipnosis": -23, "meditacion_larga": -19}
+    },
+    {
+      "id": "discipline_focus",
+      "file": "moss_field_discipline_focus.mp3",
+      "label": "Moss Field Loop",
+      "intent": "disciplina y enfoque",
+      "keywords": ["disciplina", "enfoque", "constancia", "habitos", "habitos", "productividad", "metas", "focus", "disciplina tranquila"],
+      "formats": ["autohipnosis", "meditacion_larga"],
+      "volume_db": {"autohipnosis": -23, "meditacion_larga": -19}
+    },
+    {
+      "id": "self_love",
+      "file": "palm_breath_self_love.mp3",
+      "label": "Palm Breath Loop",
+      "intent": "amor propio",
+      "keywords": ["amor propio", "autoamor", "autoestima", "perdon", "compasion", "cuidarme", "self love"],
+      "formats": ["autohipnosis", "meditacion_larga"],
+      "volume_db": {"autohipnosis": -22, "meditacion_larga": -18}
+    },
+    {
+      "id": "cosmic_night",
+      "file": "starlit_drift_cosmic_night.mp3",
+      "label": "Starlit Drift Loop",
+      "intent": "noche cósmica",
+      "keywords": ["noche cosmica", "noche cósmica", "estrellas", "universo", "espacio", "cosmico", "cosmica", "visualizacion", "visualización"],
+      "formats": ["autohipnosis", "meditacion_larga"],
+      "volume_db": {"autohipnosis": -24, "meditacion_larga": -20}
+    },
+    {
+      "id": "inner_rain",
+      "file": "still_rain_inner_rain.mp3",
+      "label": "Still Rain Room",
+      "intent": "lluvia interior",
+      "keywords": ["lluvia", "soltar", "limpieza", "tristeza", "emocion", "emocional", "interior", "rain"],
+      "formats": ["autohipnosis", "meditacion_larga"],
+      "volume_db": {"autohipnosis": -24, "meditacion_larga": -20}
+    },
+    {
+      "id": "premium_silence",
+      "file": "still_water_premium_silence.mp3",
+      "label": "Still Water Loop",
+      "intent": "silencio premium",
+      "keywords": ["silencio", "quietud", "paz", "calma", "centro", "relajacion", "relajación", "meditacion", "meditación"],
+      "formats": ["autohipnosis", "meditacion_larga"],
+      "default": true,
+      "volume_db": {"autohipnosis": -23, "meditacion_larga": -19}
+    },
+    {
+      "id": "anxiety_calm",
+      "file": "tidal_exhale_anxiety_calm.mp3",
+      "label": "Tidal Exhale",
+      "intent": "ansiedad y calma",
+      "keywords": ["ansiedad", "estres", "estrés", "calma", "tranquilidad", "regularme", "tension", "tensión", "exhale"],
+      "formats": ["autohipnosis", "meditacion_larga"],
+      "volume_db": {"autohipnosis": -23, "meditacion_larga": -19}
+    }
+  ]
+}

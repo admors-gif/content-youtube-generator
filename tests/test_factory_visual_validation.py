@@ -66,6 +66,24 @@ def test_autohypnosis_music_resolves_only_curated_assets(tmp_path, monkeypatch):
     assert result["volume_db"] == -16.0
 
 
+def test_curated_wellness_music_asset_resolves_from_repo():
+    result = factory._get_autohypnosis_music_config({
+        "format": "autohipnosis",
+        "autohipnosis": {
+            "background_music": {
+                "enabled": True,
+                "asset": "blue_room_deep_sleep.mp3",
+                "volume_db": -22,
+            },
+        },
+    })
+
+    assert result["enabled"] is True
+    assert result["asset"].name == "blue_room_deep_sleep.mp3"
+    assert result["asset"].is_file()
+    assert result["volume_db"] == -22.0
+
+
 def test_long_meditation_music_uses_procedural_fallback_without_asset():
     result = factory._get_autohypnosis_music_config({
         "format": "meditacion_larga",

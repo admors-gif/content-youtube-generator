@@ -18,6 +18,7 @@ if sys.platform == "win32":
         pass
 import json
 import argparse
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from openai import OpenAI
@@ -841,6 +842,13 @@ LONG_MEDITATION_VISUAL_TEMPLATES = [
     ),
 ]
 
+WELLNESS_MUSIC_DIR = BASE_DIR / "assets" / "audio" / "autohipnosis"
+WELLNESS_MUSIC_MANIFEST = WELLNESS_MUSIC_DIR / "manifest.json"
+WELLNESS_MUSIC_DEFAULT_VOLUME_DB = {
+    "autohipnosis": -23.0,
+    LONG_MEDITATION_FORMAT: -19.0,
+}
+
 
 def _parse_podcast_script(text: str) -> list:
     """
@@ -1228,6 +1236,125 @@ def _personalization_metadata(payload: dict) -> dict:
     return {
         "enabled": bool(payload.get("enabled")),
         "fields": fields,
+    }
+
+
+def _normalize_match_text(value: str | None) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    without_accents = "".join(
+        ch for ch in normalized if not unicodedata.combining(ch)
+    )
+    return without_accents.lower()
+
+
+def _load_wellness_music_manifest() -> list[dict]:
+    if not WELLNESS_MUSIC_MANIFEST.exists():
+        return []
+    try:
+        with open(WELLNESS_MUSIC_MANIFEST, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        print(f"   [music] Manifest wellness ilegible: {exc}")
+        return []
+
+    tracks = data.get("tracks") if isinstance(data, dict) else None
+    if not isinstance(tracks, list):
+        return []
+
+    valid_tracks = []
+    for track in tracks:
+        if not isinstance(track, dict):
+            continue
+        filename = Path(str(track.get("file") or "")).name
+        if not filename:
+            continue
+        if not (WELLNESS_MUSIC_DIR / filename).is_file():
+            continue
+        valid_tracks.append({**track, "file": filename})
+    return valid_tracks
+
+
+def _wellness_music_volume(track: dict, format_key: str) -> float:
+    raw = track.get("volume_db")
+    if isinstance(raw, dict):
+        value = raw.get(format_key)
+    else:
+        value = raw
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return WELLNESS_MUSIC_DEFAULT_VOLUME_DB.get(format_key, -22.0)
+
+
+def _select_wellness_music_asset(
+    topic: str,
+    *,
+    format_key: str,
+    personalization: dict | None = None,
+) -> dict | None:
+    tracks = _load_wellness_music_manifest()
+    if not tracks:
+        return None
+
+    normalized_personalization = _normalize_personalization_payload(personalization)
+    search_text = _normalize_match_text(
+        " ".join([
+            topic or "",
+            normalized_personalization.get("purpose") or "",
+            normalized_personalization.get("anchor_phrase") or "",
+        ])
+    )
+
+    best_track = None
+    best_score = -1
+    default_track = None
+    for index, track in enumerate(tracks):
+        formats = track.get("formats") or []
+        if formats and format_key not in formats:
+            continue
+        if track.get("default") and default_track is None:
+            default_track = track
+
+        keywords = track.get("keywords") or []
+        score = 0
+        seen_keywords = set()
+        for keyword in keywords:
+            normalized_keyword = _normalize_match_text(keyword)
+            if not normalized_keyword or normalized_keyword in seen_keywords:
+                continue
+            seen_keywords.add(normalized_keyword)
+            generic_keyword = normalized_keyword in {
+                "meditacion",
+                "relajacion",
+                "calma",
+                "paz",
+                "centro",
+            }
+            if normalized_keyword and normalized_keyword in search_text:
+                if generic_keyword:
+                    score += 0.25
+                else:
+                    score += 2 if " " in normalized_keyword else 1
+        if track.get("id") == "deep_sleep" and format_key == LONG_MEDITATION_FORMAT:
+            if any(token in search_text for token in ["dormir", "duerme", "sueno", "descanso", "noche"]):
+                score += 2
+        if track.get("id") == "premium_silence":
+            score += 0.1
+
+        if score > best_score:
+            best_score = score
+            best_track = {**track, "_manifest_index": index}
+
+    selected = best_track if best_score > 0 else (default_track or best_track)
+    if not selected:
+        return None
+
+    return {
+        "asset": selected["file"],
+        "track_id": selected.get("id"),
+        "label": selected.get("label") or selected.get("id") or selected["file"],
+        "intent": selected.get("intent") or "",
+        "volume_db": _wellness_music_volume(selected, format_key),
     }
 
 
@@ -1792,6 +1919,19 @@ def run_full_pipeline(
                 "enabled": False,
                 "fields": [],
             }
+        wellness_music_selection = None
+        if is_autohypnosis:
+            wellness_music_selection = _select_wellness_music_asset(
+                topic,
+                format_key="autohipnosis",
+                personalization=personalization_options,
+            )
+        elif is_long_meditation:
+            wellness_music_selection = _select_wellness_music_asset(
+                topic,
+                format_key=LONG_MEDITATION_FORMAT,
+                personalization=personalization_options,
+            )
         if is_podcast:
             full_result["podcast"] = {
                 "show_name": "Este no es otro podcast más",
@@ -1807,10 +1947,13 @@ def run_full_pipeline(
                 "target_minutes": result["metadata"].get("target_duration_minutes"),
                 "duration_profile": result["metadata"].get("duration_profile"),
                 "background_music": {
-                    "enabled": False,
-                    "asset": None,
-                    "volume_db": -28,
-                    "status": "awaiting_curated_tracks",
+                    "enabled": bool(wellness_music_selection),
+                    "asset": wellness_music_selection.get("asset") if wellness_music_selection else None,
+                    "track_id": wellness_music_selection.get("track_id") if wellness_music_selection else None,
+                    "label": wellness_music_selection.get("label") if wellness_music_selection else None,
+                    "intent": wellness_music_selection.get("intent") if wellness_music_selection else None,
+                    "volume_db": wellness_music_selection.get("volume_db") if wellness_music_selection else -23,
+                    "status": "curated_library" if wellness_music_selection else "awaiting_curated_tracks",
                 },
             }
         if is_long_meditation:
@@ -1829,10 +1972,13 @@ def run_full_pipeline(
                 ).get("affirmation_spacing_minutes"),
                 "background_music": {
                     "enabled": True,
-                    "asset": None,
-                    "volume_db": -24,
-                    "status": "procedural_ambient_until_curated_tracks",
-                    "procedural_fallback": True,
+                    "asset": wellness_music_selection.get("asset") if wellness_music_selection else None,
+                    "track_id": wellness_music_selection.get("track_id") if wellness_music_selection else None,
+                    "label": wellness_music_selection.get("label") if wellness_music_selection else None,
+                    "intent": wellness_music_selection.get("intent") if wellness_music_selection else None,
+                    "volume_db": wellness_music_selection.get("volume_db") if wellness_music_selection else -24,
+                    "status": "curated_library" if wellness_music_selection else "procedural_ambient_until_curated_tracks",
+                    "procedural_fallback": not bool(wellness_music_selection),
                 },
                 "subtitles": {"enabled": False, "reason": "long_form_relaxation"},
                 "shorts": {"enabled": False, "reason": "long_form_relaxation"},

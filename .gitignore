@@ -22,6 +22,7 @@ node_modules/
 *.wav
 *.mp4
 *.mp3
+!assets/audio/autohipnosis/*.mp3
 
 # Security — NEVER commit credentials
 firebase-admin.json
