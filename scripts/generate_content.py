@@ -715,6 +715,7 @@ PODCAST_SPEAKER_NAMES = {
     "HOST_A": "A",
     "HOST_B": "B",
 }
+PODCAST_SHOW_NAME = "Esto no es amor"
 
 PODCAST_TARGET_VISUAL_SCENES = 12
 PODCAST_MAX_VISUAL_SCENES = 15
@@ -737,8 +738,8 @@ PODCAST_VISUAL_TEMPLATES = [
     ),
     (
         "Anonymous silhouette",
-        "Anonymous faceless silhouette seen from behind in a warm studio environment about {topic}, hands outside the frame, soft window light, thoughtful editorial photography, calm premium podcast mood, magazine quality, 4k",
-        ["silhouette", "podcast", "intimate"],
+        "Empty listening chair in a warm studio environment about {topic}, soft window light, thoughtful editorial photography, calm premium podcast mood, magazine quality, object-led frame, 4k",
+        ["studio", "podcast", "intimate"],
     ),
     (
         "Symbolic still life",
@@ -790,27 +791,27 @@ LONG_MEDITATION_DURATION_PROFILES = {
 AUTOHYPNOSIS_VISUAL_TEMPLATES = [
     (
         "Breath field",
-        "A serene abstract field of slow breathing light related to {topic}, soft violet and midnight blue gradients, warm gold particles moving like calm inhales and exhales, minimal premium wellness composition, no readable text, cinematic, 4k",
+        "A serene abstract field of slow breathing light, soft violet and midnight blue gradients, warm gold particles moving like calm inhales and exhales, minimal premium wellness composition, no readable text, cinematic, 4k",
         ["breath", "calm", "abstract"],
     ),
     (
         "Safe room",
-        "A quiet elegant room at night prepared for deep relaxation about {topic}, soft lamp glow, linen textures, closed curtains, a glass of water on a clean bedside table, peaceful cinematic wellness photography, no readable text, 4k",
+        "A quiet elegant room at night prepared for deep relaxation, soft lamp glow, linen textures, closed curtains, a glass of water on a clean bedside table, peaceful cinematic wellness photography, no readable text, 4k",
         ["room", "night", "safe"],
     ),
     (
         "Inner landscape",
-        "A dreamlike inner landscape symbolizing {topic}, still lake reflecting a violet dawn, gentle mist, distant warm light, slow cinematic serenity, premium meditation visual, no people, no readable text, 8k",
+        "A dreamlike inner landscape symbolizing calm self-trust before sleep, still lake reflecting a violet dawn, gentle mist, distant warm light, slow cinematic serenity, premium meditation visual, no people, no readable text, 8k",
         ["landscape", "visualization", "peace"],
     ),
     (
         "Identity mirror",
-        "A symbolic mirror scene for {topic}, soft golden light touching a clean mirror surface, blurred calm silhouette from behind only, hands outside frame, face not visible, elegant self-transformation mood, no readable text, 4k",
+        "A symbolic mirror scene, soft golden light touching a clean mirror surface, empty room reflection, elegant self-transformation mood, object-led composition, no readable text, 4k",
         ["identity", "mirror", "change"],
     ),
     (
         "Neural calm",
-        "Abstract neural pathways transforming into soft golden threads connected to {topic}, smooth organic shapes, slow flowing light, deep blue background, scientific but gentle wellness aesthetic, no readable text, no logos, 8k",
+        "Abstract neural pathways transforming into soft golden threads, smooth organic shapes, slow flowing light, deep blue background, scientific but gentle wellness aesthetic, no readable text, no logos, 8k",
         ["mind", "neural", "transformation"],
     ),
 ]
@@ -818,27 +819,27 @@ AUTOHYPNOSIS_VISUAL_TEMPLATES = [
 LONG_MEDITATION_VISUAL_TEMPLATES = [
     (
         "Night lake",
-        "A nearly still moonlit lake for a long guided meditation about {topic}, deep midnight blue water, soft silver reflection, distant warm horizon glow, calm premium sleep ambience, no people, no readable text, cinematic, 4k",
+        "A nearly still moonlit lake for a long guided meditation, deep midnight blue water, soft silver reflection, distant warm horizon glow, calm premium sleep ambience, no people, no readable text, cinematic, 4k",
         ["sleep", "lake", "stillness"],
     ),
     (
         "Breathing particles",
-        "Minimal abstract breathing field for {topic}, slow violet gradients, sparse warm gold particles, soft depth, meditative premium background, no readable text, no logos, cinematic, 4k",
+        "Minimal abstract breathing field, slow violet gradients, sparse warm gold particles, soft depth, meditative premium background, no readable text, no logos, cinematic, 4k",
         ["abstract", "breath", "calm"],
     ),
     (
         "Safe bedroom",
-        "Elegant quiet bedroom at night for a long relaxation session about {topic}, soft lamp glow, linen textures, closed curtains, peaceful empty room, no people, no readable text, premium wellness photography, 4k",
+        "Elegant quiet bedroom at night for a long relaxation session, soft lamp glow, linen textures, closed curtains, peaceful empty room, no people, no readable text, premium wellness photography, 4k",
         ["room", "night", "sleep"],
     ),
     (
         "Dawn identity",
-        "A soft dawn landscape symbolizing inner confidence and rest for {topic}, distant sun, gentle mist, still mountains, slow contemplative mood, no people, no readable text, cinematic, 8k",
+        "A soft dawn landscape symbolizing inner confidence and rest, distant sun, gentle mist, still mountains, slow contemplative mood, no people, no readable text, cinematic, 8k",
         ["dawn", "identity", "peace"],
     ),
     (
         "Warm light path",
-        "A slow glowing path of warm light through a calm dark forest for {topic}, peaceful atmosphere, no faces, no hands, no readable text, premium meditation visual, cinematic, 4k",
+        "A slow glowing path of warm light through a calm dark forest, peaceful atmosphere, empty landscape, no readable text, premium meditation visual, cinematic, 4k",
         ["path", "light", "safe"],
     ),
 ]
@@ -853,7 +854,7 @@ WELLNESS_VISUAL_SESSION_VARIANTS = [
     "still water reflections with a distant warm horizon",
     "minimal dark wellness studio corner with linen and soft shadows",
     "floating translucent ribbons of light in a peaceful night field",
-    "soft forest path suggested by light only, no visible hands or faces",
+    "soft forest path suggested by light only with empty landscape framing",
 ]
 
 WELLNESS_VISUAL_CAMERA_VARIANTS = [
@@ -1035,7 +1036,7 @@ def _build_podcast_visual_scenes(topic: str, grouped_scenes: list) -> list:
     topic_tags = _topic_tags(topic)
     visual_scenes = []
     safety_suffix = (
-        " Faces absent or fully obscured, hands outside frame, fingers not visible, "
+        " Object-led or empty-room composition, clean blank surfaces, "
         "no readable text, no brand logos."
     )
 
@@ -1449,8 +1450,8 @@ def _build_autohypnosis_visual_scenes(
         "no logos",
         "no medical setting",
         "no hospital imagery",
-        "hands outside frame",
-        "fingers not visible",
+        "object-led or environment-only composition",
+        "clean blank surfaces",
         "peaceful and non-clinical",
     ]
 
@@ -1502,9 +1503,8 @@ def _build_long_meditation_visual_scenes(
         "no logos",
         "no medical setting",
         "no hospital imagery",
-        "no faces facing camera",
-        "hands outside frame",
-        "fingers not visible",
+        "environment-only composition",
+        "clean blank surfaces",
         "almost static composition",
         "peaceful and non-clinical",
     ]
@@ -2009,7 +2009,7 @@ def run_full_pipeline(
             )
         if is_podcast:
             full_result["podcast"] = {
-                "show_name": "Este no es otro podcast más",
+                "show_name": PODCAST_SHOW_NAME,
                 "host_a": {"name": "Mateo", "voice": "Will"},
                 "host_b": {"name": "Lucía", "voice": "Lina"},
                 "total_blocks": len(podcast_blocks),

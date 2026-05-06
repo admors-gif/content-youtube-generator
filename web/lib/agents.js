@@ -410,7 +410,7 @@ export const SYSTEM_AGENTS = [
   },
   {
     agentId: "agent_podcast_general",
-    name: "Este no es otro podcast más",
+    name: "Esto no es amor",
     emoji: "🎙️",
     description: "Conversación entre Mateo y Lucía sobre cualquier tema. Diálogos humanos con sarcasmo medido y química real — no narración, charla.",
     category: "podcast",

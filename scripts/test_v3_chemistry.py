@@ -8,7 +8,7 @@ para Lucía (Will siempre como Mateo):
   test_chemistry_will_jessica.mp3   — Will (Mateo) + Jessica (Lucía)
 
 Conversación: 6 turnos alternados, ~1 min cada mp3, fragmento natural
-del estilo del podcast 'Este no es otro podcast más' sobre manipulación.
+del estilo del podcast 'Esto no es amor' sobre manipulación.
 
 Costo total: ~$0.20 USD
 """
@@ -41,7 +41,7 @@ CONVERSATION = [
     {"speaker": "lucia", "text": "Oye, una cosa. [curious] ¿Tú alguna vez terminaste una discusión pensando que habías hecho algo mal, pero sin poder explicar exactamente qué?"},
     {"speaker": "mateo", "text": "[exhales] Sí. Y eso en sí mismo ya es una respuesta."},
     {"speaker": "lucia", "text": "Exacto. Porque resulta que esa sensación tiene nombre, tiene mecanismos, y hay personas que la producen intencionalmente. [laughs softly] Y hoy vamos a hablar de eso."},
-    {"speaker": "mateo", "text": "Bienvenidos a Este no es otro podcast más. Soy Mateo, estoy con Lucía, y el tema de hoy es la manipulación. Específicamente, cinco señales de que alguien te está manipulando sin que tú lo estés notando."},
+    {"speaker": "mateo", "text": "Bienvenidos a Esto no es amor. Soy Mateo, estoy con Lucía, y el tema de hoy es la manipulación. Específicamente, cinco señales de que alguien te está manipulando sin que tú lo estés notando."},
     {"speaker": "lucia", "text": "Y lo importante aquí es que no estamos hablando de villanos de película. [sighs] Estamos hablando de personas comunes, en relaciones cotidianas."},
     {"speaker": "mateo", "text": "La primera señal es lo que en psicología llaman triangulación. Suena técnico, pero es algo muy común. Imagínate que en una discusión, alguien empieza a meter a un tercero que no estaba ahí."},
 ]

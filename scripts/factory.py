@@ -45,14 +45,20 @@ GENERAL_IMAGE_PROMPT_PREFIX = (
 
 PODCAST_IMAGE_PROMPT_PREFIX = (
     "Premium editorial podcast visual, object-led or abstract composition, "
-    "faces absent, hands outside the frame, fingers not visible, no readable text, "
-    "no logos, clean contemporary magazine photography, warm amber and deep teal palette."
+    "empty-room or still-life framing, clean blank surfaces, no readable text, no logos, "
+    "clean contemporary magazine photography, warm amber and deep teal palette."
 )
 
 AUTOHYPNOSIS_IMAGE_PROMPT_PREFIX = (
     "Premium guided self-hypnosis visual, serene wellness atmosphere, soft violet, "
     "midnight blue and warm gold palette, peaceful abstract or object-led "
     "composition, slow cinematic calm, non-clinical premium meditation aesthetic."
+)
+
+SEEDREAM_IMAGE_PROMPT_PREFIX = (
+    "Premium cinematic editorial still for a Spanish audio-video production, "
+    "environment-led or object-led composition, refined natural lighting, clean "
+    "blank surfaces, no readable text, no logos, no watermark, no captions."
 )
 
 AUTOHYPNOSIS_MUSIC_DIR = BASE_DIR / "assets" / "audio" / "autohipnosis"
@@ -138,13 +144,70 @@ def _save_image_jobs(images_dir: Path, jobs: dict) -> None:
         json.dump(jobs, f, ensure_ascii=False, indent=2)
 
 
-def _build_image_prompt(prompt: str, pipeline_format: str = "narrativa") -> str:
+def _build_image_prompt(prompt: str, pipeline_format: str = "narrativa", provider: str = "flux") -> str:
     prompt = (prompt or "").strip()
+    if provider == "seedream":
+        return f"{SEEDREAM_IMAGE_PROMPT_PREFIX} {prompt}".strip()
     if pipeline_format == "podcast":
         return f"{PODCAST_IMAGE_PROMPT_PREFIX} {prompt}".strip()
     if pipeline_format in WELLNESS_FORMATS:
         return f"{AUTOHYPNOSIS_IMAGE_PROMPT_PREFIX} {prompt}".strip()
     return f"{GENERAL_IMAGE_PROMPT_PREFIX} {prompt}".strip()
+
+
+def _select_image_workflow(pipeline_format: str) -> dict:
+    """Select the Comfy workflow without changing documentary/narrative output."""
+    if pipeline_format in {"podcast", *WELLNESS_FORMATS}:
+        return {
+            "provider": "seedream",
+            "label": "Seedream 5 Lite",
+            "workflow": BASE_DIR / "config" / "seedream_5_lite_t2i_api.json",
+            "prompt_node": "25",
+            "prompt_input": "prompt",
+            "seed_node": "25",
+            "seed_input": "seed",
+            "seed_max": 2147483647,
+            "size_node": "25",
+            "size_preset": "2560x1440 (16:9)",
+            "width": 2560,
+            "height": 1440,
+            "save_node": "26",
+        }
+    return {
+        "provider": "flux",
+        "label": "FLUX/Krea",
+        "workflow": BASE_DIR / "config" / "flux1_krea_dev_api.json",
+        "prompt_node": "200:195",
+        "prompt_input": "text",
+        "seed_node": "200:197",
+        "seed_input": "seed",
+        "seed_max": 999999999999999,
+        "size_node": "200:196",
+        "width": 1344,
+        "height": 768,
+        "save_node": "9",
+    }
+
+
+def _apply_image_workflow_inputs(nodes: dict, spec: dict, prompt: str, scene_number: int) -> int:
+    prompt_node = nodes[spec["prompt_node"]]["inputs"]
+    prompt_node[spec["prompt_input"]] = prompt
+
+    seed = random.randint(100000000, int(spec.get("seed_max") or 2147483647))
+    nodes[spec["seed_node"]]["inputs"][spec["seed_input"]] = seed
+
+    size_inputs = nodes.get(spec.get("size_node"), {}).get("inputs", {})
+    if spec.get("size_preset") and "size_preset" in size_inputs:
+        size_inputs["size_preset"] = spec["size_preset"]
+    if spec.get("width") and "width" in size_inputs:
+        size_inputs["width"] = spec["width"]
+    if spec.get("height") and "height" in size_inputs:
+        size_inputs["height"] = spec["height"]
+
+    save_inputs = nodes.get(spec.get("save_node"), {}).get("inputs", {})
+    if "filename_prefix" in save_inputs:
+        save_inputs["filename_prefix"] = f"scene_{scene_number:04d}"
+    return seed
 
 
 def _safe_audio_asset_path(filename: str | None) -> Path | None:
@@ -414,18 +477,18 @@ def datetime_now_iso():
 
 
 # ============================================================
-# PASO 1: GENERAR IMÁGENES (FLUX via ComfyUI Cloud)
+# PASO 1: GENERAR IMÁGENES (ComfyUI Cloud)
 # ============================================================
-def generate_flux_images(scenes, images_dir, workflow_path, pipeline_format="narrativa"):
-    """Genera imágenes FLUX para todas las escenas via ComfyUI Cloud."""
-    with open(workflow_path, "r", encoding="utf-8") as f:
+def generate_comfy_images(scenes, images_dir, workflow_spec, pipeline_format="narrativa"):
+    """Genera imágenes para todas las escenas via ComfyUI Cloud."""
+    with open(workflow_spec["workflow"], "r", encoding="utf-8") as f:
         base_workflow = json.load(f)
     
     stats = {"generated": 0, "skipped": 0, "failed": 0, "recovered": 0, "missing": [], "invalid": []}
     image_jobs = _load_image_jobs(images_dir)
     
     print("\n" + "=" * 60)
-    print("   PASO 1: Generando Imágenes FLUX")
+    print(f"   PASO 1: Generando imágenes {workflow_spec['label']}")
     print("=" * 60)
     
     with httpx.Client(timeout=120.0, follow_redirects=True) as client:
@@ -449,19 +512,22 @@ def generate_flux_images(scenes, images_dir, workflow_path, pipeline_format="nar
             
             # Preparar workflow
             nodes = copy.deepcopy(base_workflow)
-            final_prompt = _build_image_prompt(prompt, pipeline_format=pipeline_format)
-            nodes["200:195"]["inputs"]["text"] = final_prompt
-            nodes["200:197"]["inputs"]["seed"] = random.randint(100000000000000, 999999999999999)
-            nodes["200:196"]["inputs"]["width"] = 1344
-            nodes["200:196"]["inputs"]["height"] = 768
-            nodes["9"]["inputs"]["filename_prefix"] = f"scene_{num:04d}"
+            final_prompt = _build_image_prompt(
+                prompt,
+                pipeline_format=pipeline_format,
+                provider=workflow_spec["provider"],
+            )
+            seed = _apply_image_workflow_inputs(nodes, workflow_spec, final_prompt, num)
 
             image_jobs[str(num)] = {
                 "sceneNumber": num,
                 "status": "submitting",
+                "provider": workflow_spec["provider"],
+                "workflow": workflow_spec["workflow"].name,
                 "prompt": prompt,
                 "finalPrompt": final_prompt,
                 "filenamePrefix": f"scene_{num:04d}",
+                "seed": seed,
                 "submittedAt": datetime_now_iso(),
                 "outputs": [],
             }
@@ -534,12 +600,19 @@ def generate_flux_images(scenes, images_dir, workflow_path, pipeline_format="nar
     validation = validate_image_assets(scenes, images_dir)
     stats["missing"] = validation["missing"]
     stats["invalid"] = validation["invalid"]
-    print(f"\n   Resumen FLUX: {stats['generated']} generadas, {stats['skipped']} existentes, {stats['failed']} fallidas")
+    print(f"\n   Resumen {workflow_spec['label']}: {stats['generated']} generadas, {stats['skipped']} existentes, {stats['failed']} fallidas")
     if stats["recovered"]:
         print(f"   Recovery remoto: {stats['recovered']} imágenes descargadas")
     if stats["missing"] or stats["invalid"]:
         print(f"   [!] Visuales incompletos — missing={stats['missing']} invalid={stats['invalid']}")
     return stats
+
+
+def generate_flux_images(scenes, images_dir, workflow_path, pipeline_format="narrativa"):
+    """Compatibilidad para tests/scripts antiguos: fuerza el workflow FLUX."""
+    spec = _select_image_workflow("narrativa")
+    spec["workflow"] = Path(workflow_path)
+    return generate_comfy_images(scenes, images_dir, spec, pipeline_format=pipeline_format)
 
 
 # ============================================================
@@ -1173,22 +1246,21 @@ if __name__ == "__main__":
     print("═" * 60)
     
     # ════════════════════════════════════════════════════════
-    # PASO 1: IMÁGENES FLUX
+    # PASO 1: IMÁGENES
     # ════════════════════════════════════════════════════════
+    image_workflow = _select_image_workflow(pipeline_format)
     if not skip_images and not images_only:
-        workflow_path = BASE_DIR / "config" / "flux1_krea_dev_api.json"
-        flux_stats = generate_flux_images(
+        flux_stats = generate_comfy_images(
             scenes,
             images_dir,
-            workflow_path,
+            image_workflow,
             pipeline_format=pipeline_format,
         )
     elif images_only:
-        workflow_path = BASE_DIR / "config" / "flux1_krea_dev_api.json"
-        flux_stats = generate_flux_images(
+        flux_stats = generate_comfy_images(
             scenes,
             images_dir,
-            workflow_path,
+            image_workflow,
             pipeline_format=pipeline_format,
         )
         print(f"\n   Modo --images-only: terminado.")

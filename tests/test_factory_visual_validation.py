@@ -139,3 +139,21 @@ def test_explicit_output_folder_cannot_escape_project_directory():
     })
 
     assert folder == "final"
+
+
+def test_image_workflow_router_preserves_documentary_flux_path():
+    documentary = factory._select_image_workflow("narrativa")
+    cinematic = factory._select_image_workflow("cinematico")
+
+    assert documentary["provider"] == "flux"
+    assert documentary["workflow"].name == "flux1_krea_dev_api.json"
+    assert cinematic["provider"] == "flux"
+    assert cinematic["workflow"].name == "flux1_krea_dev_api.json"
+
+
+def test_image_workflow_router_uses_seedream_for_short_premium_formats():
+    for format_key in ["podcast", "autohipnosis", "meditacion_larga"]:
+        workflow = factory._select_image_workflow(format_key)
+
+        assert workflow["provider"] == "seedream"
+        assert workflow["workflow"].name == "seedream_5_lite_t2i_api.json"

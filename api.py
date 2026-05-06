@@ -2243,7 +2243,7 @@ _AGENT_CATALOG = """
 [agent_biblico] Historias Bíblicas — Éxodo, Apocalipsis, arqueología bíblica, relatos sagrados
 [agent_viajes] Viajes y Exploraciones — Shackleton, Everest, lugares peligrosos del mundo
 [agent_noticias_virales] Noticias Virales — eventos actuales que están en tendencia esta semana
-[agent_podcast_general] Este no es otro podcast más — conversación entre dos hosts (Mateo y Lucía) sobre cualquier tema, formato podcast multitema con dos voces alternando
+[agent_podcast_general] Esto no es amor — conversación entre dos hosts (Mateo y Lucía) sobre cualquier tema, formato podcast multitema con dos voces alternando
 [agent_autohipnosis] Autohipnosis Guiada — wellness, relajación, visualización, afirmaciones positivas, desarrollo personal seguro
 [agent_meditacion_larga] Meditación Larga — sesiones de 30 min, 1 h y 3 h para sueño, calma, afirmaciones espaciadas y visuales lentos
 """.strip()
@@ -3863,7 +3863,7 @@ def run_production(project_id):
             # Defaults actualizados 2026-05-03: Will + Lina (eleven_v3 con audio
             # tags). Salvatore + Serafina quedan para documentales (eleven v2).
             temp_json["podcast"] = project.get("podcast", {
-                "show_name": "Este no es otro podcast más",
+                "show_name": "Esto no es amor",
                 "host_a": {"name": "Mateo", "voice": "Will"},
                 "host_b": {"name": "Lucía", "voice": "Lina"},
             })

@@ -35,7 +35,7 @@ def test_podcast_dialogue_blocks_are_preserved_when_capped():
     assert [b["text"] for b in preserved] == [b["text"] for b in blocks]
 
 
-def test_podcast_visual_prompts_avoid_faces_and_hands():
+def test_podcast_visual_prompts_are_object_led_and_text_safe():
     grouped = _group_blocks_into_scenes(
         _dialogue_blocks(30),
         target_scene_count=12,
@@ -46,8 +46,9 @@ def test_podcast_visual_prompts_avoid_faces_and_hands():
     prompts = [scene["prompt"].lower() for scene in scenes]
 
     assert scenes
-    assert all("hands outside" in prompt for prompt in prompts)
-    assert all("fingers not visible" in prompt for prompt in prompts)
+    assert all("object-led" in prompt or "empty-room" in prompt for prompt in prompts)
     assert all("no readable text" in prompt for prompt in prompts)
+    assert not any("hands outside" in prompt for prompt in prompts)
+    assert not any("fingers not visible" in prompt for prompt in prompts)
     assert not any("human hands near" in prompt for prompt in prompts)
     assert not any("face not visible" in prompt for prompt in prompts)

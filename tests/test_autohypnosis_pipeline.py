@@ -58,7 +58,7 @@ def test_autohypnosis_visual_scenes_are_capped_and_safe():
     assert len(scenes) <= AUTOHYPNOSIS_MAX_VISUAL_SCENES
     assert all(scene["narration_text"] for scene in scenes)
     assert all("no readable text" in prompt for prompt in prompts)
-    assert all("hands outside frame" in prompt for prompt in prompts)
+    assert all("object-led or environment-only composition" in prompt for prompt in prompts)
     assert all("no medical setting" in prompt for prompt in prompts)
     assert all("session-specific visual direction" in prompt for prompt in prompts)
 
@@ -140,7 +140,7 @@ def test_long_meditation_visual_scenes_preserve_script_and_target_duration():
     assert "Parrafo 1." in joined
     assert "Parrafo 30." in joined
     assert all("almost static composition" in prompt for prompt in prompts)
-    assert all("hands outside frame" in prompt for prompt in prompts)
+    assert all("environment-only composition" in prompt for prompt in prompts)
 
 
 def test_personalization_prompt_block_is_safe_and_frequency_aware():

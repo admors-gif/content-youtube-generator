@@ -1,0 +1,33 @@
+{
+  "25": {
+    "inputs": {
+      "model": "seedream 5.0 lite",
+      "prompt": "Premium cinematic editorial wellness scene, quiet object-led composition, soft natural light, refined textures, no readable text, no logos.",
+      "size_preset": "2560x1440 (16:9)",
+      "width": 2560,
+      "height": 1440,
+      "sequential_image_generation": "disabled",
+      "max_images": 1,
+      "seed": 1161169574,
+      "watermark": false,
+      "fail_on_partial": true
+    },
+    "class_type": "ByteDanceSeedreamNode",
+    "_meta": {
+      "title": "ByteDance Seedream 5 Lite"
+    }
+  },
+  "26": {
+    "inputs": {
+      "filename_prefix": "scene",
+      "images": [
+        "25",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Guardar Imagen"
+    }
+  }
+}
