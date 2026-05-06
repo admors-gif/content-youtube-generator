@@ -442,4 +442,26 @@ export const SYSTEM_AGENTS = [
     ],
     color: "#8B5CF6",
   },
+  {
+    agentId: "agent_meditacion_larga",
+    name: "Meditación Larga",
+    emoji: "🌌",
+    description: "Sesiones de 30 minutos, 1 hora o 3 horas con voz espaciada, ambiente en loop y visuales lentos para descanso profundo.",
+    category: "wellness",
+    promptFile: "agent_meditacion_larga.md",
+    tier: "creator",
+    format: "meditacion_larga",
+    defaultVoices: { narrator: "Lorenzo" },
+    durationProfiles: [
+      { id: "30m", label: "30 min", description: "Sesión compacta para una pausa profunda.", targetMinutes: 30 },
+      { id: "60m", label: "1 h", description: "Formato estándar para descanso o sueño.", targetMinutes: 60 },
+      { id: "180m", label: "3 h", description: "Sesión extendida con voz muy espaciada.", targetMinutes: 180 },
+    ],
+    exampleTopics: [
+      "Dormir profundamente con confianza interior",
+      "Meditación larga para soltar ansiedad diaria",
+      "Afirmaciones espaciadas para abundancia tranquila"
+    ],
+    color: "#9B6CFF",
+  },
 ];

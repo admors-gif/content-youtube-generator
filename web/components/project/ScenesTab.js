@@ -26,8 +26,8 @@ export default function ScenesTab({ project }) {
     "subtitling",
     "publishing",
   ].includes(project.status);
-  const isAutohypnosis = project.format === "autohipnosis";
-  const itemLabel = isAutohypnosis
+  const isWellness = ["autohipnosis", "meditacion_larga"].includes(project.format);
+  const itemLabel = isWellness
     ? `visual${totalScenes === 1 ? "" : "es"}`
     : `escena${totalScenes === 1 ? "" : "s"}`;
 
@@ -67,7 +67,7 @@ export default function ScenesTab({ project }) {
             textTransform: "uppercase",
           }}
         >
-          {isAutohypnosis ? "DISEÑANDO VISUALES" : "DIRIGIENDO ESCENAS"}
+          {isWellness ? "DISEÑANDO VISUALES" : "DIRIGIENDO ESCENAS"}
         </div>
         <h3
           style={{
@@ -80,7 +80,7 @@ export default function ScenesTab({ project }) {
             letterSpacing: "-0.02em",
           }}
         >
-          {isAutohypnosis ? "Visuales en preparación" : "Storyboard en preparación"}
+          {isWellness ? "Visuales en preparación" : "Storyboard en preparación"}
         </h3>
         <p
           style={{
@@ -90,7 +90,7 @@ export default function ScenesTab({ project }) {
             lineHeight: 1.5,
           }}
         >
-          {isAutohypnosis
+          {isWellness
             ? "Estamos preparando visuales lentos y calmados para sostener la sesión."
             : "El director de fotografía está dividiendo tu guión en prompts visuales cada 5 segundos."}
         </p>
@@ -119,7 +119,7 @@ export default function ScenesTab({ project }) {
               textTransform: "uppercase",
             }}
           >
-            {isAutohypnosis ? "VISUALES" : "STORYBOARD"}
+            {isWellness ? "VISUALES" : "STORYBOARD"}
           </div>
           <div
             style={{

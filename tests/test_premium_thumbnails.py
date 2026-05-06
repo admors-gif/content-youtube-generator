@@ -47,7 +47,7 @@ def test_autohypnosis_thumbnail_plan_avoids_medical_claims_and_generated_text():
     )
 
     assert plans[0]["hook"] == "REPROGRAMA\nTU MENTE"
-    assert "guided self-hypnosis thumbnail" in prompt
+    assert "guided meditation thumbnail" in prompt
     assert 'Line 1: "REPROGRAMA"' in prompt
     assert 'Line 2: "TU MENTE"' in prompt
     assert 'Do not render the format badge text "MEDITACIÓN GUIADA"' in prompt

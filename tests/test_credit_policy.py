@@ -1,4 +1,5 @@
 import api
+from fastapi import HTTPException
 
 
 def test_free_included_credits_are_disabled_by_default(monkeypatch):
@@ -89,3 +90,29 @@ def test_admin_grant_increment_covers_disabled_free_credit_debt():
 
     assert increment == 2
     assert after["remaining"] == 1
+
+
+def test_long_meditation_payload_accepts_duration_profile():
+    payload = api._validate_project_payload({
+        "title": "Dormir profundamente",
+        "agentId": "agent_meditacion_larga",
+        "agentFile": "agent_meditacion_larga.md",
+        "durationProfile": "3h",
+    })
+
+    assert payload["generation_options"]["duration_profile"] == "180m"
+
+
+def test_long_meditation_payload_rejects_invalid_duration_profile():
+    try:
+        api._validate_project_payload({
+            "title": "Dormir profundamente",
+            "agentId": "agent_meditacion_larga",
+            "agentFile": "agent_meditacion_larga.md",
+            "durationProfile": "12h",
+        })
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert exc.detail == "invalid durationProfile"
+    else:
+        raise AssertionError("invalid duration profile should be rejected")

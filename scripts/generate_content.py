@@ -739,6 +739,35 @@ AUTOHYPNOSIS_DURATION_PROFILES = {
     "deep": {"label": "profunda", "target_minutes": 25, "characters": "17,000 a 21,000"},
 }
 
+LONG_MEDITATION_FORMAT = "meditacion_larga"
+LONG_MEDITATION_ESTIMATED_WPM = 125
+LONG_MEDITATION_DURATION_PROFILES = {
+    "30m": {
+        "label": "30 min",
+        "target_minutes": 30,
+        "speech_minutes": 8,
+        "characters": "5,500 a 7,500",
+        "visual_scenes": 6,
+        "affirmation_spacing_minutes": 3,
+    },
+    "60m": {
+        "label": "1 h",
+        "target_minutes": 60,
+        "speech_minutes": 12,
+        "characters": "8,500 a 11,500",
+        "visual_scenes": 8,
+        "affirmation_spacing_minutes": 5,
+    },
+    "180m": {
+        "label": "3 h",
+        "target_minutes": 180,
+        "speech_minutes": 18,
+        "characters": "12,000 a 16,000",
+        "visual_scenes": 10,
+        "affirmation_spacing_minutes": 10,
+    },
+}
+
 AUTOHYPNOSIS_VISUAL_TEMPLATES = [
     (
         "Breath field",
@@ -764,6 +793,34 @@ AUTOHYPNOSIS_VISUAL_TEMPLATES = [
         "Neural calm",
         "Abstract neural pathways transforming into soft golden threads connected to {topic}, smooth organic shapes, slow flowing light, deep blue background, scientific but gentle wellness aesthetic, no readable text, no logos, 8k",
         ["mind", "neural", "transformation"],
+    ),
+]
+
+LONG_MEDITATION_VISUAL_TEMPLATES = [
+    (
+        "Night lake",
+        "A nearly still moonlit lake for a long guided meditation about {topic}, deep midnight blue water, soft silver reflection, distant warm horizon glow, calm premium sleep ambience, no people, no readable text, cinematic, 4k",
+        ["sleep", "lake", "stillness"],
+    ),
+    (
+        "Breathing particles",
+        "Minimal abstract breathing field for {topic}, slow violet gradients, sparse warm gold particles, soft depth, meditative premium background, no readable text, no logos, cinematic, 4k",
+        ["abstract", "breath", "calm"],
+    ),
+    (
+        "Safe bedroom",
+        "Elegant quiet bedroom at night for a long relaxation session about {topic}, soft lamp glow, linen textures, closed curtains, peaceful empty room, no people, no readable text, premium wellness photography, 4k",
+        ["room", "night", "sleep"],
+    ),
+    (
+        "Dawn identity",
+        "A soft dawn landscape symbolizing inner confidence and rest for {topic}, distant sun, gentle mist, still mountains, slow contemplative mood, no people, no readable text, cinematic, 8k",
+        ["dawn", "identity", "peace"],
+    ),
+    (
+        "Warm light path",
+        "A slow glowing path of warm light through a calm dark forest for {topic}, peaceful atmosphere, no faces, no hands, no readable text, premium meditation visual, cinematic, 4k",
+        ["path", "light", "safe"],
     ),
 ]
 
@@ -1027,6 +1084,55 @@ def _autohypnosis_duration_profile(topic: str, requested_profile: str | None = N
     return AUTOHYPNOSIS_DURATION_PROFILES["standard"]
 
 
+def _long_meditation_duration_profile(requested_profile: str | None = None, topic: str = "") -> dict:
+    """Normalize 30m/1h/3h presets for long meditation production."""
+    raw = (requested_profile or "").strip().lower().replace(" ", "")
+    aliases = {
+        "30": "30m",
+        "30m": "30m",
+        "30min": "30m",
+        "30minutos": "30m",
+        "mediahora": "30m",
+        "1h": "60m",
+        "60": "60m",
+        "60m": "60m",
+        "60min": "60m",
+        "1hora": "60m",
+        "180": "180m",
+        "180m": "180m",
+        "180min": "180m",
+        "3h": "180m",
+        "3horas": "180m",
+        "treshoras": "180m",
+    }
+    key = aliases.get(raw)
+    if key:
+        return {**LONG_MEDITATION_DURATION_PROFILES[key], "key": key}
+
+    lower = (topic or "").lower()
+    if any(token in lower for token in ["3 horas", "tres horas", "180 min", "180 minutos"]):
+        key = "180m"
+    elif any(token in lower for token in ["30 min", "30 minutos", "media hora"]):
+        key = "30m"
+    else:
+        key = "60m"
+    return {**LONG_MEDITATION_DURATION_PROFILES[key], "key": key}
+
+
+def _distribute_duration_seconds(total_seconds: int, scene_count: int) -> list[int]:
+    scene_count = max(1, int(scene_count or 1))
+    total_seconds = max(scene_count, int(total_seconds or scene_count))
+    durations = []
+    for i in range(scene_count):
+        start = round(i * total_seconds / scene_count)
+        end = round((i + 1) * total_seconds / scene_count)
+        durations.append(max(1, end - start))
+    drift = total_seconds - sum(durations)
+    if drift:
+        durations[-1] += drift
+    return durations
+
+
 def _build_autohypnosis_visual_scenes(topic: str, script_text: str) -> list:
     """
     Visuales acotados para autohipnosis: pocas escenas, tranquilas, sin manos,
@@ -1069,6 +1175,55 @@ def _build_autohypnosis_visual_scenes(topic: str, script_text: str) -> list:
             "prompt": prompt,
             "tags": (base_tags + topic_tags)[:5],
             "visual_category": category,
+        })
+
+    return visual_scenes
+
+
+def _build_long_meditation_visual_scenes(topic: str, script_text: str, profile: dict) -> list:
+    """
+    Long meditation uses few visual scenes and explicit target durations. The
+    factory pads each scene audio to these durations, keeping TTS cost bounded.
+    """
+    topic_clean = (topic or "deep rest").strip()
+    topic_tags = _topic_tags(topic)
+    target_scene_count = int(profile.get("visual_scenes") or 8)
+    segments = _split_text_into_balanced_segments(script_text, target_scene_count)
+    if not segments:
+        return []
+
+    durations = _distribute_duration_seconds(
+        int(float(profile.get("target_minutes", 60)) * 60),
+        len(segments),
+    )
+    safety_clauses = [
+        "no readable text",
+        "no logos",
+        "no medical setting",
+        "no hospital imagery",
+        "no faces facing camera",
+        "hands outside frame",
+        "fingers not visible",
+        "almost static composition",
+        "peaceful and non-clinical",
+    ]
+
+    visual_scenes = []
+    for i, segment in enumerate(segments):
+        category, template, base_tags = LONG_MEDITATION_VISUAL_TEMPLATES[i % len(LONG_MEDITATION_VISUAL_TEMPLATES)]
+        prompt = _append_unique_prompt_clauses(
+            template.format(topic=topic_clean),
+            safety_clauses,
+        )
+        visual_scenes.append({
+            "scene_number": i + 1,
+            "narration_text": segment,
+            "narration": segment,
+            "prompt": prompt,
+            "tags": (base_tags + topic_tags)[:5],
+            "visual_category": category,
+            "target_duration_seconds": durations[i],
+            "pace": "long_meditation",
         })
 
     return visual_scenes
@@ -1251,10 +1406,112 @@ Devuelve solo el guion final."""
     return result
 
 
+def generate_long_meditation_script(
+    topic: str,
+    agent_file: str = "agent_meditacion_larga.md",
+    project_id: str = None,
+    duration_profile: str | None = None,
+) -> dict:
+    """
+    Genera la parte hablada de una meditacion larga. La duracion final se logra
+    despues con pausas, ambiente y visuales largos; no con 3 horas de TTS.
+    """
+    agent_name = agent_file.replace("agent_", "").replace(".md", "").replace("_", " ").title()
+    profile = _long_meditation_duration_profile(duration_profile, topic)
+    print(f"\n🌌 MOTOR 1 (MEDITACION LARGA): Generando guia para '{topic}'...")
+    print(f"   Modelo: {CLAUDE_MODEL_SCRIPT if claude_client else GPT_MODEL}")
+    print(f"   Agente: {agent_name} ({agent_file})")
+    print(f"   Duracion final: {profile['label']} | Voz objetivo: {profile['speech_minutes']} min")
+
+    agent_prompt = load_prompt(agent_file)
+    user_message = f"""Genera la parte hablada de una meditacion guiada larga sobre el siguiente objetivo.
+
+OBJETIVO: {topic}
+
+Perfil de produccion:
+- Duracion final del video: {profile['target_minutes']} minutos
+- Duracion hablada objetivo: aproximadamente {profile['speech_minutes']} minutos
+- Extension hablada objetivo: {profile['characters']} caracteres
+- Afirmaciones espaciadas: disenar bloques que funcionen con pausas de aproximadamente {profile['affirmation_spacing_minutes']} minutos entre intervenciones
+- Visuales finales: {profile['visual_scenes']} escenas casi estaticas
+
+Requisitos estrictos:
+- Espanol neutro de Latinoamerica
+- Una sola voz
+- Texto plano, sin encabezados, sin bullets, sin markdown
+- No uses tags entre corchetes
+- Usa puntos suspensivos para respiracion y pausas naturales
+- No prometas curas, resultados garantizados ni tratamiento medico
+- El guion debe sostener una experiencia larga: menos palabras, mas profundidad, afirmaciones memorables y silencios naturales
+- Si el objetivo menciona dormir, noche o descanso, termina permitiendo seguir descansando; si no, termina con una integracion tranquila
+
+Devuelve solo el guion hablado final."""
+
+    if claude_client:
+        response = claude_client.messages.create(
+            model=CLAUDE_MODEL_SCRIPT,
+            max_tokens=12000,
+            system=agent_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        script_text = response.content[0].text
+        used_model = CLAUDE_MODEL_SCRIPT
+    else:
+        response = openai_client.chat.completions.create(
+            model=GPT_MODEL,
+            messages=[
+                {"role": "system", "content": agent_prompt},
+                {"role": "user", "content": user_message},
+            ],
+        )
+        script_text = response.choices[0].message.content
+        used_model = GPT_MODEL
+
+    script_text = _normalize_autohypnosis_delivery(script_text)
+    char_count = len(script_text)
+    word_count = len(script_text.split())
+    speech_minutes = word_count / LONG_MEDITATION_ESTIMATED_WPM
+
+    result = {
+        "topic": topic,
+        "agent": agent_file,
+        "script": script_text,
+        "metadata": {
+            "model": used_model,
+            "agent_personality": agent_file,
+            "characters": char_count,
+            "words": word_count,
+            "estimated_duration_minutes": round(profile["target_minutes"], 1),
+            "estimated_speech_minutes": round(speech_minutes, 1),
+            "target_duration_minutes": profile["target_minutes"],
+            "duration_profile": profile["key"],
+            "duration_label": profile["label"],
+            "speech_target_minutes": profile["speech_minutes"],
+            "visual_scene_target": profile["visual_scenes"],
+            "format": LONG_MEDITATION_FORMAT,
+            "generated_at": datetime.now().isoformat(),
+            "web_research": False,
+            "research_sources": 0,
+        },
+    }
+
+    print(f"\n   ✅ Meditacion larga generada!")
+    print(f"   📝 Caracteres TTS: {char_count:,}")
+    print(f"   📊 Palabras: {word_count:,}")
+    print(f"   ⏱️  Voz estimada: {speech_minutes:.1f} min | Final: {profile['target_minutes']} min")
+
+    return result
+
+
 # ============================================================
 # PIPELINE PRINCIPAL
 # ============================================================
-def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md", project_id: str = None):
+def run_full_pipeline(
+    topic: str,
+    agent_file: str = "agent_erotico_historico.md",
+    project_id: str = None,
+    generation_options: dict | None = None,
+):
     """
     Ejecuta el pipeline completo de generación de contenido textual.
     Incluye error-handling global para reportar fallos a Firebase.
@@ -1267,6 +1524,7 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
     print(f"📌 Tema: {topic}")
     print(f"🎭 Agente: {agent_file}")
     print(f"🗂️  Proyecto: {project_id}")
+    generation_options = generation_options or {}
 
     # Validar que al menos un motor de IA esté disponible
     if not claude_client and not openai_client:
@@ -1279,10 +1537,13 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
     # para evitar exceso de escenas y conservar el estilo correcto.
     is_podcast = agent_file.startswith("agent_podcast_")
     is_autohypnosis = agent_file == "agent_autohipnosis.md"
+    is_long_meditation = agent_file == "agent_meditacion_larga.md"
     if is_podcast:
         print("🎙️  Modo PODCAST detectado — pipeline conversacional con 2 voces")
     if is_autohypnosis:
         print("🌙 Modo AUTOHIPNOSIS detectado — sesión guiada con visuales contemplativos")
+    if is_long_meditation:
+        print("🌌 Modo MEDITACION LARGA detectado — duracion extendida con bajo costo")
 
     try:
         update_progress(project_id, "Escribiendo la estructura narrativa...", 10, {"status": "scripting"})
@@ -1291,7 +1552,19 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
         if is_podcast:
             result = generate_podcast_script(topic, agent_file, project_id)
         elif is_autohypnosis:
-            result = generate_autohypnosis_script(topic, agent_file, project_id)
+            result = generate_autohypnosis_script(
+                topic,
+                agent_file,
+                project_id,
+                duration_profile=generation_options.get("duration_profile"),
+            )
+        elif is_long_meditation:
+            result = generate_long_meditation_script(
+                topic,
+                agent_file,
+                project_id,
+                duration_profile=generation_options.get("duration_profile"),
+            )
         else:
             result = generate_script(topic, agent_file)
         script = result["script"]
@@ -1300,7 +1573,7 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
 
         # PASO 2: Agregar etiquetas de emoción (tagger especializado para podcast
         # respeta densidades por speaker)
-        if is_autohypnosis:
+        if is_autohypnosis or is_long_meditation:
             tagged_script = _normalize_autohypnosis_delivery(script)
         else:
             emotion_prompt_file = "emotion_tagger_podcast.md" if is_podcast else "emotion_tagger.md"
@@ -1331,6 +1604,14 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
             video_scenes = _build_autohypnosis_visual_scenes(topic, tagged_script)
             print(f"   🌙 Autohipnosis visual: {len(video_scenes)} escenas contemplativas "
                   f"(target={AUTOHYPNOSIS_TARGET_VISUAL_SCENES}, max={AUTOHYPNOSIS_MAX_VISUAL_SCENES})")
+        elif is_long_meditation:
+            long_profile = _long_meditation_duration_profile(
+                result["metadata"].get("duration_profile"),
+                topic,
+            )
+            video_scenes = _build_long_meditation_visual_scenes(topic, tagged_script, long_profile)
+            print(f"   🌌 Meditacion larga visual: {len(video_scenes)} escenas casi estaticas "
+                  f"(final={long_profile['target_minutes']} min)")
         else:
             video_scenes = generate_video_prompts(script, prompt_file="video_prompt_generator.md")
 
@@ -1361,7 +1642,7 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
         full_result = {
             "topic": topic,
             "agent": agent_file,
-            "format": "podcast" if is_podcast else "autohipnosis" if is_autohypnosis else "narrativa",
+            "format": "podcast" if is_podcast else LONG_MEDITATION_FORMAT if is_long_meditation else "autohipnosis" if is_autohypnosis else "narrativa",
             "script_plain": script,
             "script_tagged": tagged_script,
             "video_scenes": video_scenes,
@@ -1393,6 +1674,30 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
                     "status": "awaiting_curated_tracks",
                 },
             }
+        if is_long_meditation:
+            full_result["longMeditation"] = {
+                "voice": "Lorenzo",
+                "safety": "wellness_only",
+                "target_minutes": result["metadata"].get("target_duration_minutes"),
+                "duration_profile": result["metadata"].get("duration_profile"),
+                "duration_label": result["metadata"].get("duration_label"),
+                "speech_target_minutes": result["metadata"].get("speech_target_minutes"),
+                "estimated_speech_minutes": result["metadata"].get("estimated_speech_minutes"),
+                "visual_scene_target": result["metadata"].get("visual_scene_target"),
+                "affirmation_spacing_minutes": _long_meditation_duration_profile(
+                    result["metadata"].get("duration_profile"),
+                    topic,
+                ).get("affirmation_spacing_minutes"),
+                "background_music": {
+                    "enabled": True,
+                    "asset": None,
+                    "volume_db": -30,
+                    "status": "procedural_ambient_until_curated_tracks",
+                    "procedural_fallback": True,
+                },
+                "subtitles": {"enabled": False, "reason": "long_form_relaxation"},
+                "shorts": {"enabled": False, "reason": "long_form_relaxation"},
+            }
 
         output_path = OUTPUT_DIR / f"FULL_{safe_name}_{timestamp}.json"
         with open(output_path, "w", encoding="utf-8") as f:
@@ -1403,23 +1708,32 @@ def run_full_pipeline(topic: str, agent_file: str = "agent_erotico_historico.md"
             try:
                 words = len(script.split())
                 # Podcast/autohipnosis son más pausados que narrativa.
-                wpm = 130 if is_podcast else AUTOHYPNOSIS_ESTIMATED_WPM if is_autohypnosis else 150
+                wpm = 130 if is_podcast else LONG_MEDITATION_ESTIMATED_WPM if is_long_meditation else AUTOHYPNOSIS_ESTIMATED_WPM if is_autohypnosis else 150
+                estimated_minutes = round(words / wpm, 1)
+                if is_long_meditation:
+                    estimated_minutes = result["metadata"].get("target_duration_minutes") or estimated_minutes
                 firestore_payload = {
                     "status": "script_ready",
                     "script.plain": script,
                     "script.tagged": tagged_script,
                     "script.wordCount": words,
-                    "script.estimatedMinutes": round(words / wpm, 1),
+                    "script.estimatedMinutes": round(estimated_minutes, 1),
                     "scenes": video_scenes,
                     "seo": seo,
                     "completedAt": firestore.SERVER_TIMESTAMP,
                 }
+                if is_long_meditation:
+                    firestore_payload["script.speechEstimatedMinutes"] = result["metadata"].get("estimated_speech_minutes")
+                    firestore_payload["script.targetMinutes"] = result["metadata"].get("target_duration_minutes")
                 if is_podcast:
                     firestore_payload["format"] = "podcast"
                     firestore_payload["podcast"] = full_result["podcast"]
                 if is_autohypnosis:
                     firestore_payload["format"] = "autohipnosis"
                     firestore_payload["autohipnosis"] = full_result["autohipnosis"]
+                if is_long_meditation:
+                    firestore_payload["format"] = LONG_MEDITATION_FORMAT
+                    firestore_payload["longMeditation"] = full_result["longMeditation"]
                 update_progress(project_id, "Guion listo para revisión", 100, firestore_payload)
                 print(f"✅ Firebase actualizado para proyecto {project_id}")
             except Exception as e:

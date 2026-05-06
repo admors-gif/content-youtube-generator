@@ -53,6 +53,7 @@ export const MONOGRAM_BY_AGENT_ID = {
   agent_noticias_virales: "Nv",
   agent_podcast_general:  "Pc",
   agent_autohipnosis:     "Ah",
+  agent_meditacion_larga: "ML",
 };
 
 /**

@@ -465,7 +465,32 @@ def _validate_project_payload(data: dict) -> dict:
     if agent_file[:-3] != agent_id:
         raise HTTPException(status_code=400, detail="agent mismatch")
 
-    return {"title": title, "agent_id": agent_id, "agent_file": agent_file}
+    duration_profile = (data.get("durationProfile") or data.get("duration_profile") or "").strip().lower()
+    allowed_duration_profiles = {"30m", "60m", "180m"}
+    generation_options = {}
+    if agent_id == "agent_meditacion_larga":
+        aliases = {
+            "30": "30m",
+            "30m": "30m",
+            "30min": "30m",
+            "60": "60m",
+            "60m": "60m",
+            "1h": "60m",
+            "180": "180m",
+            "180m": "180m",
+            "3h": "180m",
+        }
+        duration_profile = aliases.get(duration_profile.replace(" ", ""), duration_profile or "60m")
+        if duration_profile not in allowed_duration_profiles:
+            raise HTTPException(status_code=400, detail="invalid durationProfile")
+        generation_options["duration_profile"] = duration_profile
+
+    return {
+        "title": title,
+        "agent_id": agent_id,
+        "agent_file": agent_file,
+        "generation_options": generation_options,
+    }
 
 
 def _upload_video_to_storage(local_path: Path, project_id: str, content_type: str = None) -> dict | None:
@@ -1299,7 +1324,7 @@ def _thumbnail_hook_lines(hook: str) -> list[str]:
 
 
 def _thumbnail_format_badge(agent_id: str | None = None) -> str | None:
-    if agent_id == "agent_autohipnosis":
+    if agent_id in {"agent_autohipnosis", "agent_meditacion_larga"}:
         return "MEDITACIÓN GUIADA"
     if agent_id == "agent_podcast_general":
         return "PODCAST"
@@ -1317,7 +1342,7 @@ def _thumbnail_hook_plans(title: str, agent_id: str | None = None) -> list[dict]
     is_science = any(word in lower for word in ["ciencia", "cerebro", "psicologia", "psicología", "neuro"])
     keywords = _pick_thumbnail_keywords(clean_title, max_words=3)
 
-    if agent_id == "agent_autohipnosis":
+    if agent_id in {"agent_autohipnosis", "agent_meditacion_larga"}:
         return [
             {
                 "label": "early",
@@ -1399,14 +1424,14 @@ def _build_premium_thumbnail_prompt(title: str, plan: dict, agent_id: str | None
     format_hint = (
         "podcast thumbnail"
         if agent_id == "agent_podcast_general"
-        else "guided self-hypnosis thumbnail"
-        if agent_id == "agent_autohipnosis"
+        else "guided meditation thumbnail"
+        if agent_id in {"agent_autohipnosis", "agent_meditacion_larga"}
         else "documentary thumbnail"
     )
     safety_hint = (
         "This is wellness and personal growth content, not medical treatment. "
         "Avoid clinical, hospital, doctor, pill, or therapy imagery. "
-        if agent_id == "agent_autohipnosis"
+        if agent_id in {"agent_autohipnosis", "agent_meditacion_larga"}
         else ""
     )
     return (
@@ -2071,6 +2096,7 @@ _AGENT_CATALOG = """
 [agent_noticias_virales] Noticias Virales — eventos actuales que están en tendencia esta semana
 [agent_podcast_general] Este no es otro podcast más — conversación entre dos hosts (Mateo y Lucía) sobre cualquier tema, formato podcast multitema con dos voces alternando
 [agent_autohipnosis] Autohipnosis Guiada — wellness, relajación, visualización, afirmaciones positivas, desarrollo personal seguro
+[agent_meditacion_larga] Meditación Larga — sesiones de 30 min, 1 h y 3 h para sueño, calma, afirmaciones espaciadas y visuales lentos
 """.strip()
 
 
@@ -2861,6 +2887,7 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
                 "creditsRemaining": max(0, counts["remaining"] - 1),
                 "agentId": payload["agent_id"],
                 "agentFile": payload["agent_file"],
+                "generationOptions": payload.get("generation_options") or {},
             }
 
         @firestore.transactional
@@ -2951,6 +2978,7 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
                 "output": {},
                 "seo": {},
                 "costs": {"creditCost": 1},
+                "generationOptions": payload.get("generation_options") or {},
                 "creditCharged": True,
                 "creditChargedAt": firestore.SERVER_TIMESTAMP,
                 "createdAt": firestore.SERVER_TIMESTAMP,
@@ -2965,6 +2993,7 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
             payload["title"],
             payload["agent_file"],
             project_ref.id,
+            payload.get("generation_options") or {},
         )
         return {
             "ok": True,
@@ -3049,6 +3078,7 @@ async def trigger_generation(request: Request, background_tasks: BackgroundTasks
     topic = data.get("topic")
     agent_file = data.get("agentFile", "agent_erotico_historico.md")
     project_id = data.get("projectId")
+    generation_options = data.get("generationOptions") or data.get("generation_options") or {}
     
     if not topic:
         return {"status": "error", "message": "Missing 'topic' in request body"}
@@ -3060,7 +3090,7 @@ async def trigger_generation(request: Request, background_tasks: BackgroundTasks
         raise HTTPException(status_code=403, detail="projectId required")
 
     # Ejecutar en segundo plano para no dejar colgada la petición HTTP a n8n
-    background_tasks.add_task(run_script, topic, agent_file, project_id)
+    background_tasks.add_task(run_script, topic, agent_file, project_id, generation_options)
     
     return {
         "status": "accepted", 
@@ -3441,14 +3471,24 @@ async def recover_from_disk(project_id: str, request: Request):
         return JSONResponse(status_code=500, content={"error": str(e)[:300]})
 
 
-def run_script(topic, agent_file, project_id):
+def run_script(topic, agent_file, project_id, generation_options=None):
     print(f"🚀 [API] Starting background job for '{topic}' with '{agent_file}' (Project: {project_id})...", flush=True)
     try:
+        generation_options = generation_options or {}
+        if not generation_options and project_id:
+            try:
+                _ensure_firebase_initialized()
+                from firebase_admin import firestore
+                snap = firestore.client().collection("projects").document(project_id).get()
+                if snap.exists:
+                    generation_options = (snap.to_dict() or {}).get("generationOptions") or {}
+            except Exception as options_err:
+                print(f"   ⚠️ generationOptions lookup skipped: {options_err}", flush=True)
         # Import directo — sin subprocess, para que los errores aparezcan en logs
         import sys
         sys.path.insert(0, "/app")
         from scripts.generate_content import run_full_pipeline
-        result = run_full_pipeline(topic, agent_file, project_id)
+        result = run_full_pipeline(topic, agent_file, project_id, generation_options=generation_options)
         if result:
             print(f"✅ [API] Pipeline completed successfully for '{topic}'", flush=True)
             # Moderation gate — corre justo despues de generar el guion para
@@ -3614,6 +3654,10 @@ def run_production(project_id):
             project.get("format") == "autohipnosis"
             or agent_id == "agent_autohipnosis"
         )
+        is_long_meditation_project = (
+            project.get("format") == "meditacion_larga"
+            or agent_id == "agent_meditacion_larga"
+        )
 
         # Mapear scenes de Firestore al formato factory.py
         factory_scenes = []
@@ -3623,6 +3667,9 @@ def run_production(project_id):
                 "prompt": s.get("prompt", ""),
                 "narration": s.get("narration_text", s.get("narration", "")),
             }
+            target_duration = s.get("target_duration_seconds", s.get("targetDurationSeconds"))
+            if target_duration:
+                scene_dict["target_duration_seconds"] = target_duration
             # Para podcast, propagar dialogue_blocks (los necesita la dual TTS)
             if is_podcast_project and s.get("dialogue_blocks"):
                 scene_dict["dialogue_blocks"] = s["dialogue_blocks"]
@@ -3647,6 +3694,10 @@ def run_production(project_id):
             })
         elif is_autohypnosis_project:
             temp_json["format"] = "autohipnosis"
+            temp_json["autohipnosis"] = project.get("autohipnosis") or {}
+        elif is_long_meditation_project:
+            temp_json["format"] = "meditacion_larga"
+            temp_json["longMeditation"] = project.get("longMeditation") or {}
         temp_path = f"/app/output/scripts/PRODUCE_{safe_title}.json"
         os.makedirs(os.path.dirname(temp_path), exist_ok=True)
         with open(temp_path, "w", encoding="utf-8") as f:
@@ -3802,9 +3853,14 @@ def run_production(project_id):
         # SoftTimeLimitExceeded, evitando el "thread monitor zombie" que
         # sobreescribía status=completed con producing 85%. Timeout subido
         # de 3600 → 7200 (cinematico con 99 escenas tarda hasta 1h25m).
+        factory_cmd = [
+            "python", "scripts/factory.py", temp_path,
+            "--mode", "cinematico", "--luma-scenes", "8", "--skip-images",
+        ]
+        if is_long_meditation_project:
+            factory_cmd.append("--skip-subs")
         returncode, stderr_tail = _run_factory_subprocess(
-            ["python", "scripts/factory.py", temp_path,
-             "--mode", "cinematico", "--luma-scenes", "8", "--skip-images"],
+            factory_cmd,
             monitor_thread=factory_monitor,
             stop_event=stop_monitoring,
             timeout=10500,  # 175min — debajo del soft_time_limit Celery (180min)
@@ -3822,7 +3878,7 @@ def run_production(project_id):
         video_dir = Path(f"/app/output/videos/{safe_title}")
         final_candidate, candidate_has_subs, invalid_candidates = _pick_valid_final_video(video_dir)
         
-        if not candidate_has_subs:
+        if not candidate_has_subs and not is_long_meditation_project:
             # factory.py no generó subtítulos — intentar directamente
             update_progress(92, "Generando subtítulos...", "assembling")
             
@@ -3921,7 +3977,7 @@ def run_production(project_id):
         # Generar shorts vertical 9:16 (3 momentos del video final)
         # No bloqueante: si falla, el video largo ya está completado.
         shorts_results = []
-        if final_path and storage_info:
+        if final_path and storage_info and not is_long_meditation_project:
             try:
                 update_progress(97, "Creando versiones cortas...", "publishing")
                 shorts_results = build_shorts_for_project(video_dir, project_id)
@@ -3956,7 +4012,10 @@ def run_production(project_id):
                 except Exception:
                     pass
 
-        status_msg = "Tu video está listo" if not has_subs else "Tu video con subtítulos está listo"
+        if is_long_meditation_project:
+            status_msg = "Tu sesión está lista"
+        else:
+            status_msg = "Tu video está listo" if not has_subs else "Tu video con subtítulos está listo"
 
         update_payload = {
             "status": "completed",

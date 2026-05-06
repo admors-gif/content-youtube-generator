@@ -64,3 +64,28 @@ def test_autohypnosis_music_resolves_only_curated_assets(tmp_path, monkeypatch):
     assert result["enabled"] is True
     assert result["asset"] == track.resolve()
     assert result["volume_db"] == -18.0
+
+
+def test_long_meditation_music_uses_procedural_fallback_without_asset():
+    result = factory._get_autohypnosis_music_config({
+        "format": "meditacion_larga",
+        "longMeditation": {
+            "background_music": {
+                "enabled": True,
+                "asset": None,
+                "volume_db": -30,
+                "procedural_fallback": True,
+            },
+        },
+    })
+
+    assert result["enabled"] is True
+    assert result["procedural"] is True
+    assert result["volume_db"] == -30.0
+
+
+def test_long_meditation_target_duration_for_scene_prefers_explicit_value():
+    scene = {"target_duration_seconds": 1800}
+
+    assert factory._target_duration_for_scene(scene, fallback_duration=5) == 1800
+    assert factory._target_duration_for_scene({}, fallback_duration=7) == 7

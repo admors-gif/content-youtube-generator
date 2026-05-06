@@ -211,6 +211,14 @@ export default function NewProjectPage() {
 
   /* Filtro de tier (visual del kit, no estaba en legacy pero coexiste) */
   const [tierFilter, setTierFilter] = useState("all");
+  const [durationProfile, setDurationProfile] = useState("60m");
+
+  const selectAgent = (agent) => {
+    setSelectedAgent(agent);
+    const defaultProfile = agent.durationProfiles?.find((p) => p.id === "60m")
+      || agent.durationProfiles?.[0];
+    if (defaultProfile) setDurationProfile(defaultProfile.id);
+  };
 
   /* PRESERVADO: fetchRecommendations */
   const fetchRecommendations = async () => {
@@ -286,6 +294,9 @@ export default function NewProjectPage() {
           title: topic.trim(),
           agentId: selectedAgent.agentId,
           agentFile: selectedAgent.promptFile,
+          ...(selectedAgent.durationProfiles?.length
+            ? { durationProfile }
+            : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -318,6 +329,9 @@ export default function NewProjectPage() {
   /* Word/char count para textarea */
   const wordCount = topic.trim().split(/\s+/).filter(Boolean).length;
   const charCount = topic.length;
+  const durationProfiles = selectedAgent?.durationProfiles || [];
+  const selectedDurationProfile = durationProfiles.find((p) => p.id === durationProfile)
+    || durationProfiles[0];
 
   return (
     <div>
@@ -575,7 +589,7 @@ export default function NewProjectPage() {
                   agent={agent}
                   selected={selectedAgent?.agentId === agent.agentId}
                   recommendation={recommendationMap[agent.agentId]}
-                  onSelect={() => setSelectedAgent(agent)}
+                  onSelect={() => selectAgent(agent)}
                 />
               </div>
             ))}
@@ -777,6 +791,86 @@ export default function NewProjectPage() {
               </div>
             </label>
 
+            {durationProfiles.length > 0 && (
+              <div style={{ marginBottom: "var(--s-5)" }}>
+                <div
+                  style={{
+                    font: "var(--t-mono-sm)",
+                    color: "var(--paper-mute)",
+                    marginBottom: 10,
+                    letterSpacing: "0.18em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  DURACIÓN DE SESIÓN
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                    gap: 8,
+                  }}
+                >
+                  {durationProfiles.map((profile) => {
+                    const active = profile.id === durationProfile;
+                    return (
+                      <button
+                        key={profile.id}
+                        type="button"
+                        onClick={() => setDurationProfile(profile.id)}
+                        style={{
+                          textAlign: "left",
+                          padding: "12px 14px",
+                          borderRadius: "var(--r-2)",
+                          border: active
+                            ? "1px solid var(--ember)"
+                            : "1px solid var(--rule-1)",
+                          background: active ? "var(--ember-tint)" : "var(--ink-0)",
+                          color: "var(--paper)",
+                          cursor: "pointer",
+                          transition:
+                            "border-color var(--dur-base) var(--ease-out), background var(--dur-base) var(--ease-out)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            font: "var(--t-h3)",
+                            fontFamily: "var(--font-display)",
+                            fontWeight: 700,
+                            color: active ? "var(--ember)" : "var(--paper)",
+                            marginBottom: 4,
+                          }}
+                        >
+                          {profile.label}
+                        </div>
+                        <div
+                          style={{
+                            font: "var(--t-caption)",
+                            color: "var(--paper-dim)",
+                            lineHeight: 1.35,
+                          }}
+                        >
+                          {profile.description}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedDurationProfile && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      font: "var(--t-caption)",
+                      color: "var(--paper-dim)",
+                    }}
+                  >
+                    Voz espaciada, ambiente continuo y visuales lentos durante{" "}
+                    {selectedDurationProfile.label}.
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Suggestions chips */}
             {selectedAgent.exampleTopics?.length > 0 && (
               <div style={{ marginBottom: "var(--s-5)" }}>
@@ -885,7 +979,10 @@ export default function NewProjectPage() {
                 </>
               ) : (
                 <>
-                  Crear documental <Icon name="arrowRight" size={16} />
+                  {selectedAgent.format === "meditacion_larga"
+                    ? "Crear sesión"
+                    : "Crear documental"}{" "}
+                  <Icon name="arrowRight" size={16} />
                 </>
               )}
             </button>

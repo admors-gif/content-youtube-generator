@@ -37,8 +37,19 @@ const AUTOHYPNOSIS_PHASE_DEFS = [
   { id: "delivery", label: "Entrega final" },
 ];
 
+const LONG_MEDITATION_PHASE_DEFS = [
+  { id: "research", label: "Preparación" },
+  { id: "script",   label: "Guía" },
+  { id: "images",   label: "Visuales" },
+  { id: "voice",    label: "Voz espaciada" },
+  { id: "assembly", label: "Ambiente" },
+  { id: "delivery", label: "Entrega final" },
+];
+
 function phaseDefsForFormat(format) {
-  return format === "autohipnosis" ? AUTOHYPNOSIS_PHASE_DEFS : PHASE_DEFS;
+  if (format === "meditacion_larga") return LONG_MEDITATION_PHASE_DEFS;
+  if (format === "autohipnosis") return AUTOHYPNOSIS_PHASE_DEFS;
+  return PHASE_DEFS;
 }
 
 /**

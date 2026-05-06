@@ -1,9 +1,13 @@
 from scripts.generate_content import (
     AUTOHYPNOSIS_MAX_VISUAL_SCENES,
     AUTOHYPNOSIS_ESTIMATED_WPM,
+    LONG_MEDITATION_FORMAT,
     _append_unique_prompt_clauses,
     _autohypnosis_duration_profile,
     _build_autohypnosis_visual_scenes,
+    _build_long_meditation_visual_scenes,
+    _distribute_duration_seconds,
+    _long_meditation_duration_profile,
     _normalize_autohypnosis_delivery,
     _split_text_into_balanced_segments,
 )
@@ -68,3 +72,34 @@ def test_autohypnosis_duration_defaults_to_standard_profile():
 
     assert profile["target_minutes"] == 15
     assert AUTOHYPNOSIS_ESTIMATED_WPM == 155
+
+
+def test_long_meditation_duration_profiles_normalize_aliases():
+    assert _long_meditation_duration_profile("30m")["target_minutes"] == 30
+    assert _long_meditation_duration_profile("1h")["target_minutes"] == 60
+    assert _long_meditation_duration_profile("3 horas")["target_minutes"] == 180
+
+
+def test_long_meditation_duration_distribution_has_no_drift():
+    durations = _distribute_duration_seconds(180 * 60, 10)
+
+    assert len(durations) == 10
+    assert sum(durations) == 180 * 60
+    assert min(durations) > 0
+
+
+def test_long_meditation_visual_scenes_preserve_script_and_target_duration():
+    script = _sample_autohypnosis_script(30)
+    profile = _long_meditation_duration_profile("3h")
+
+    scenes = _build_long_meditation_visual_scenes("dormir con confianza", script, profile)
+    joined = "\n\n".join(scene["narration_text"] for scene in scenes)
+    prompts = [scene["prompt"].lower() for scene in scenes]
+
+    assert LONG_MEDITATION_FORMAT == "meditacion_larga"
+    assert len(scenes) <= profile["visual_scenes"]
+    assert sum(scene["target_duration_seconds"] for scene in scenes) == 180 * 60
+    assert "Parrafo 1." in joined
+    assert "Parrafo 30." in joined
+    assert all("almost static composition" in prompt for prompt in prompts)
+    assert all("hands outside frame" in prompt for prompt in prompts)

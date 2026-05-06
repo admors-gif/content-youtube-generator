@@ -57,6 +57,10 @@ AUTOHYPNOSIS_IMAGE_PROMPT_PREFIX = (
 
 AUTOHYPNOSIS_MUSIC_DIR = BASE_DIR / "assets" / "audio" / "autohipnosis"
 AUTOHYPNOSIS_DEFAULT_MUSIC_VOLUME_DB = -28.0
+LONG_MEDITATION_FORMAT = "meditacion_larga"
+WELLNESS_FORMATS = {"autohipnosis", LONG_MEDITATION_FORMAT}
+LONG_MEDITATION_DEFAULT_MUSIC_VOLUME_DB = -30.0
+LONG_MEDITATION_STATIC_FPS = 6
 
 # Importar módulos propios
 sys.path.insert(0, str(Path(__file__).parent))
@@ -109,7 +113,7 @@ def _build_image_prompt(prompt: str, pipeline_format: str = "narrativa") -> str:
     prompt = (prompt or "").strip()
     if pipeline_format == "podcast":
         return f"{PODCAST_IMAGE_PROMPT_PREFIX} {prompt}".strip()
-    if pipeline_format == "autohipnosis":
+    if pipeline_format in WELLNESS_FORMATS:
         return f"{AUTOHYPNOSIS_IMAGE_PROMPT_PREFIX} {prompt}".strip()
     return f"{GENERAL_IMAGE_PROMPT_PREFIX} {prompt}".strip()
 
@@ -130,14 +134,31 @@ def _safe_audio_asset_path(filename: str | None) -> Path | None:
 
 
 def _get_autohypnosis_music_config(data: dict) -> dict:
-    if data.get("format") != "autohipnosis":
+    pipeline_format = data.get("format")
+    if pipeline_format not in WELLNESS_FORMATS:
         return {"enabled": False}
-    cfg = ((data.get("autohipnosis") or {}).get("background_music") or {})
+    format_key = "longMeditation" if pipeline_format == LONG_MEDITATION_FORMAT else "autohipnosis"
+    cfg = ((data.get(format_key) or {}).get("background_music") or {})
     if not cfg.get("enabled"):
         return {"enabled": False}
     asset = _safe_audio_asset_path(cfg.get("asset"))
+    try:
+        fallback_enabled = bool(cfg.get("procedural_fallback"))
+    except Exception:
+        fallback_enabled = False
     if not asset:
-        print("   [music] Autohipnosis background music configured but asset is missing; continuing voice-only.")
+        if pipeline_format == LONG_MEDITATION_FORMAT and fallback_enabled:
+            try:
+                volume_db = float(cfg.get("volume_db", LONG_MEDITATION_DEFAULT_MUSIC_VOLUME_DB))
+            except Exception:
+                volume_db = LONG_MEDITATION_DEFAULT_MUSIC_VOLUME_DB
+            volume_db = max(-42.0, min(-18.0, volume_db))
+            return {
+                "enabled": True,
+                "procedural": True,
+                "volume_db": volume_db,
+            }
+        print("   [music] Background music configured but asset is missing; continuing voice-only.")
         return {"enabled": False}
     try:
         volume_db = float(cfg.get("volume_db", AUTOHYPNOSIS_DEFAULT_MUSIC_VOLUME_DB))
@@ -145,6 +166,48 @@ def _get_autohypnosis_music_config(data: dict) -> dict:
         volume_db = AUTOHYPNOSIS_DEFAULT_MUSIC_VOLUME_DB
     volume_db = max(-42.0, min(-18.0, volume_db))
     return {"enabled": True, "asset": asset, "volume_db": volume_db}
+
+
+def _create_procedural_ambient_bed(project_dir: Path, duration: float, volume_db: float) -> Path | None:
+    """
+    Creates a copyright-safe ambient bed locally. No samples, no external music:
+    only generated brown noise plus a very low sine tone.
+    """
+    if duration <= 0:
+        return None
+
+    ambient_path = project_dir / "ambient_bed_procedural.mp3"
+    if ambient_path.exists() and ambient_path.stat().st_size > 10000:
+        existing_duration = get_audio_duration(ambient_path)
+        if existing_duration >= duration - 1:
+            return ambient_path
+
+    fade_out_start = max(0.0, duration - 12.0)
+    filter_complex = (
+        "[0:a]lowpass=f=1200,highpass=f=35,volume=0.55[noise];"
+        "[1:a]volume=0.020,tremolo=f=0.10:d=0.20[tone];"
+        "[noise][tone]amix=inputs=2:duration=longest,"
+        "afade=t=in:st=0:d=8,"
+        f"afade=t=out:st={fade_out_start:.3f}:d=12,"
+        "alimiter=limit=0.85[a]"
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", f"anoisesrc=color=brown:amplitude=0.06:d={duration:.3f}",
+        "-f", "lavfi", "-i", f"sine=frequency=174:sample_rate=44100:duration={duration:.3f}",
+        "-filter_complex", filter_complex,
+        "-map", "[a]",
+        "-c:a", "libmp3lame", "-b:a", "128k",
+        str(ambient_path),
+    ]
+    timeout = max(120, min(1800, int(duration * 0.25)))
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    if result.returncode == 0 and ambient_path.exists() and ambient_path.stat().st_size > 10000:
+        print("   [music] Cama ambiental procedural generada sin assets externos.")
+        return ambient_path
+
+    print(f"   [music] Ambiente procedural falló; continuando voice-only: {result.stderr[:200]}")
+    return None
 
 
 def _mix_background_music(master_audio: Path, project_dir: Path, music_cfg: dict) -> Path:
@@ -156,9 +219,19 @@ def _mix_background_music(master_audio: Path, project_dir: Path, music_cfg: dict
     if not music_cfg.get("enabled"):
         return master_audio
 
-    music_path = music_cfg.get("asset")
     duration = get_audio_duration(master_audio)
-    if not music_path or duration <= 0:
+    if duration <= 0:
+        return master_audio
+
+    if music_cfg.get("procedural"):
+        music_path = _create_procedural_ambient_bed(
+            project_dir,
+            duration,
+            float(music_cfg.get("volume_db", LONG_MEDITATION_DEFAULT_MUSIC_VOLUME_DB)),
+        )
+    else:
+        music_path = music_cfg.get("asset")
+    if not music_path:
         return master_audio
 
     mixed_audio = project_dir / "master_audio_with_music.mp3"
@@ -474,6 +547,68 @@ def get_audio_duration(audio_path):
         return 5.0  # fallback
 
 
+def _target_duration_for_scene(scene: dict, fallback_duration: float = 5.0) -> float:
+    """Returns the explicit long-form scene duration when present."""
+    for key in ("target_duration_seconds", "targetDurationSeconds", "duration_seconds"):
+        value = scene.get(key)
+        try:
+            numeric = float(value)
+            if numeric > 0:
+                return numeric
+        except Exception:
+            continue
+    return float(fallback_duration)
+
+
+def _pad_long_meditation_audio_segments(scenes, audio_dir: Path) -> dict:
+    """
+    Extends each spoken segment with silence until its target scene duration.
+    This keeps TTS cost bounded while producing 30m/1h/3h sessions.
+    """
+    stats = {"padded": 0, "skipped": 0, "missing": [], "failed": []}
+    print("\n" + "=" * 60)
+    print("   PASO 2B: Espaciando voz para meditación larga")
+    print("=" * 60)
+
+    for scene in scenes:
+        num = _scene_number(scene)
+        if not num:
+            continue
+        audio_path = audio_dir / f"narration_{num:04d}.mp3"
+        if not audio_path.exists() or audio_path.stat().st_size < 1000:
+            stats["missing"].append(num)
+            continue
+
+        current_duration = get_audio_duration(audio_path)
+        target_duration = _target_duration_for_scene(scene, current_duration)
+        if current_duration >= target_duration - 1.0:
+            stats["skipped"] += 1
+            continue
+
+        padded_path = audio_dir / f"narration_{num:04d}.padded.mp3"
+        pad_seconds = max(0.0, target_duration - current_duration)
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(audio_path),
+            "-af", f"apad=pad_dur={pad_seconds:.3f},atrim=0:{target_duration:.3f}",
+            "-c:a", "libmp3lame", "-b:a", "192k",
+            str(padded_path),
+        ]
+        timeout = max(60, min(900, int(target_duration * 0.15)))
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if result.returncode == 0 and padded_path.exists() and padded_path.stat().st_size > 1000:
+            padded_path.replace(audio_path)
+            stats["padded"] += 1
+        else:
+            stats["failed"].append(num)
+            print(f"   [!] Escena {num}: no se pudo espaciar audio: {result.stderr[:200]}")
+
+    print(f"   Resumen: {stats['padded']} espaciadas, {stats['skipped']} ya listas")
+    if stats["missing"] or stats["failed"]:
+        print(f"   [!] Audio incompleto — missing={stats['missing']} failed={stats['failed']}")
+    return stats
+
+
 # ============================================================
 # PASO 3A: KEN BURNS — Sincronizado con audio
 # ============================================================
@@ -552,6 +687,72 @@ def apply_ken_burns_all(scenes, images_dir, kenburns_dir, audio_dir, fallback_du
     return stats
 
 
+def apply_static_meditation_visuals_all(scenes, images_dir, kenburns_dir, audio_dir, fallback_duration=300):
+    """
+    Low-motion renderer for long meditations. It avoids 30fps zoompan over
+    multi-hour videos, using still-image clips at low FPS for predictable cost.
+    """
+    fps = LONG_MEDITATION_STATIC_FPS
+    stats = {"generated": 0, "skipped": 0, "missing": [], "failed": []}
+
+    print("\n" + "=" * 60)
+    print("   PASO 3: Visuales casi estáticos (meditación larga)")
+    print("=" * 60)
+
+    kenburns_dir.mkdir(parents=True, exist_ok=True)
+
+    for i, scene in enumerate(scenes):
+        num = _scene_number(scene)
+        img_path = images_dir / f"scene_{num:04d}.png"
+        vid_path = kenburns_dir / f"scene_{num:04d}.mp4"
+        audio_path = audio_dir / f"narration_{num:04d}.mp3"
+
+        if vid_path.exists() and vid_path.stat().st_size > 1000:
+            stats["skipped"] += 1
+            continue
+
+        if not img_path.exists() or img_path.stat().st_size < IMAGE_MIN_BYTES:
+            stats["missing"].append(num)
+            print(f"   [!] Escena {num}: imagen ausente o inválida")
+            continue
+
+        duration = get_audio_duration(audio_path) if audio_path.exists() else _target_duration_for_scene(scene, fallback_duration)
+        duration_buffered = duration + 0.06
+        vf = (
+            "scale=1920:1080:force_original_aspect_ratio=increase,"
+            "crop=1920:1080,setsar=1,"
+            f"fps={fps},format=yuv420p"
+        )
+        cmd = [
+            "ffmpeg", "-y",
+            "-loop", "1",
+            "-i", str(img_path),
+            "-t", f"{duration_buffered:.3f}",
+            "-vf", vf,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "24",
+            "-tune", "stillimage",
+            "-r", str(fps),
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            str(vid_path),
+        ]
+        timeout = max(120, min(1800, int(duration_buffered * 0.35)))
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if result.returncode == 0 and vid_path.exists() and vid_path.stat().st_size > 1000:
+            stats["generated"] += 1
+            print(f"   [{i+1}/{len(scenes)}] Visual lento listo ({duration/60:.1f} min)")
+        else:
+            stats["failed"].append(num)
+            print(f"   [{i+1}/{len(scenes)}] Escena {num}: visual lento falló")
+
+    print(f"   Resumen: {stats['generated']} generados, {stats['skipped']} existentes")
+    if stats["missing"] or stats["failed"]:
+        print(f"   [!] Visuales lentos incompletos — missing={stats['missing']} failed={stats['failed']}")
+    return stats
+
+
 # ============================================================
 # PASO 3B: LUMA CLIPS (Cinemático)
 # ============================================================
@@ -601,6 +802,7 @@ def assemble_final_video(
     luma_indices=None,
     format_label=None,
     music_config=None,
+    low_motion=False,
 ):
     """
     Ensamblaje con sync perfecto:
@@ -732,11 +934,14 @@ def assemble_final_video(
             f.write(f"file '{safe_path}'\n")
     
     # Concat con re-encode para uniformizar codec entre KB y composites
+    target_fps = LONG_MEDITATION_STATIC_FPS if low_motion else 30
     concat_cmd = [
         "ffmpeg", "-y", "-f", "concat", "-safe", "0",
         "-i", str(vis_list), "-an",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-        "-pix_fmt", "yuv420p", "-r", "30",
+        "-c:v", "libx264",
+        "-preset", "veryfast" if low_motion else "fast",
+        "-crf", "24" if low_motion else "20",
+        "-pix_fmt", "yuv420p", "-r", str(target_fps),
         str(master_visual)
     ]
     
@@ -777,8 +982,10 @@ def assemble_final_video(
             f"[0:v]tpad=stop_mode=clone:stop_duration={pad_seconds:.3f}[v]",
             "-map", "[v]",
             "-map", "1:a",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-            "-pix_fmt", "yuv420p", "-r", "30",
+            "-c:v", "libx264",
+            "-preset", "veryfast" if low_motion else "fast",
+            "-crf", "24" if low_motion else "20",
+            "-pix_fmt", "yuv420p", "-r", str(target_fps),
             "-c:a", "aac", "-b:a", "192k",
             "-shortest",  # ahora el shortest = audio (que termina antes del pad extra)
             "-movflags", "+faststart",
@@ -883,14 +1090,17 @@ if __name__ == "__main__":
         print("[!] No se encontraron escenas en el JSON")
         sys.exit(1)
 
+    pipeline_format = data.get("format", "narrativa")
+    is_long_meditation_format = pipeline_format == LONG_MEDITATION_FORMAT
+
     # Algunos formatos usan visuales atmosféricos y largos; Luma no aporta
-    # suficiente valor frente a Ken Burns y encarece el resultado.
-    if data.get("format") in {"podcast", "autohipnosis"} and mode == "cinematico":
+    # suficiente valor frente a visuales lentos y encarece el resultado.
+    if pipeline_format in {"podcast", *WELLNESS_FORMATS} and mode == "cinematico":
         print(f"⚠️  Format={data.get('format')} detectado — overrideando mode 'cinematico' a 'narrativa'")
         mode = "narrativa"
 
     # Label visible en filename: refleja el formato real, no el modo interno del pipeline.
-    format_label = data.get("format") if data.get("format") in {"podcast", "autohipnosis"} else mode
+    format_label = pipeline_format if pipeline_format in {"podcast", *WELLNESS_FORMATS} else mode
 
     # Determinar título y agente
     # Usar topic para nombre de carpeta (consistente con VPS)
@@ -941,7 +1151,7 @@ if __name__ == "__main__":
             scenes,
             images_dir,
             workflow_path,
-            pipeline_format=data.get("format", "narrativa"),
+            pipeline_format=pipeline_format,
         )
     elif images_only:
         workflow_path = BASE_DIR / "config" / "flux1_krea_dev_api.json"
@@ -949,7 +1159,7 @@ if __name__ == "__main__":
             scenes,
             images_dir,
             workflow_path,
-            pipeline_format=data.get("format", "narrativa"),
+            pipeline_format=pipeline_format,
         )
         print(f"\n   Modo --images-only: terminado.")
         if flux_stats.get("missing") or flux_stats.get("invalid"):
@@ -983,14 +1193,23 @@ if __name__ == "__main__":
         )
     else:
         tts_stats = generate_narration(scenes, audio_dir, agent_name)
+
+    if is_long_meditation_format:
+        pad_stats = _pad_long_meditation_audio_segments(scenes, audio_dir)
+        if pad_stats.get("missing") or pad_stats.get("failed"):
+            print(f"   [!] Audio meditación larga incompleto: missing={pad_stats.get('missing')} failed={pad_stats.get('failed')}")
+            sys.exit(2)
     
     # ════════════════════════════════════════════════════════
     # PASO 3: VISUALES (Ken Burns + Luma según modo)
     # ════════════════════════════════════════════════════════
     luma_indices = None
     
-    # Ken Burns para todas las escenas (ambos modos)
-    kb_stats = apply_ken_burns_all(scenes, images_dir, kenburns_dir, audio_dir)
+    # Ken Burns para formatos narrativos; visuales estáticos para meditación larga.
+    if is_long_meditation_format:
+        kb_stats = apply_static_meditation_visuals_all(scenes, images_dir, kenburns_dir, audio_dir)
+    else:
+        kb_stats = apply_ken_burns_all(scenes, images_dir, kenburns_dir, audio_dir)
     if kb_stats.get("missing") or kb_stats.get("failed"):
         print(f"   [!] Movimiento incompleto: missing={kb_stats.get('missing')} failed={kb_stats.get('failed')}")
         sys.exit(2)
@@ -1013,12 +1232,13 @@ if __name__ == "__main__":
             luma_indices,
             format_label=format_label,
             music_config=_get_autohypnosis_music_config(data),
+            low_motion=is_long_meditation_format,
         )
     
     # ════════════════════════════════════════════════════════
     # PASO 5: SUBTÍTULOS (Whisper + ASS + FFmpeg)
     # ════════════════════════════════════════════════════════
-    skip_subs = "--skip-subs" in sys.argv
+    skip_subs = "--skip-subs" in sys.argv or is_long_meditation_format
     subtitled_video = None
     
     if final_video and not skip_subs:

@@ -46,8 +46,8 @@ export default function ScriptTab({
     project.script?.approved && project.status !== "script_ready";
   const wordCount = project.script?.wordCount || 0;
   const minutes = project.script?.estimatedMinutes || 0;
-  const isAutohypnosis = project.format === "autohipnosis";
-  const loadingCopy = isAutohypnosis
+  const isWellness = ["autohipnosis", "meditacion_larga"].includes(project.format);
+  const loadingCopy = isWellness
     ? {
         eyebrow: "SESIÓN EN PREPARACIÓN",
         title: "Diseñando una guía profunda",

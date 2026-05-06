@@ -11,10 +11,11 @@ export default function StatsPanel({
   approved = false,
   format = "",
 }) {
+  const isWellness = ["autohipnosis", "meditacion_larga"].includes(format);
   const rows = [
     { label: "PALABRAS", value: wordCount.toLocaleString("es") },
     {
-      label: format === "autohipnosis" ? "SESIÓN ESTIMADA" : "DURACIÓN ESTIMADA",
+      label: isWellness ? "SESIÓN ESTIMADA" : "DURACIÓN ESTIMADA",
       value: estimatedMinutes ? `${estimatedMinutes} min` : "—",
     },
     {
