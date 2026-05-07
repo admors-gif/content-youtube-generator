@@ -379,6 +379,16 @@ export default function YouTubePublishModal({ open, onClose, projectId, project,
                     {String(job.status || "queued").toUpperCase()}
                   </div>
                   <div className="cf-body" style={{ marginTop: 8 }}>{job.step || "En proceso"}</div>
+                  {job.error && (
+                    <div className="cf-caption" style={{ marginTop: 8, color: "var(--bad)" }}>
+                      {job.error}
+                    </div>
+                  )}
+                  {job.warning && (
+                    <div className="cf-caption" style={{ marginTop: 8, color: "var(--warn)" }}>
+                      {job.warning}
+                    </div>
+                  )}
                   {job.youtubeStudioUrl && (
                     <a className="cf-btn cf-btn--secondary" href={job.youtubeStudioUrl} target="_blank" rel="noreferrer" style={{ marginTop: 12 }}>
                       Abrir en Studio

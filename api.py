@@ -3304,21 +3304,31 @@ def _run_youtube_publish_job(uid: str, project_id: str, job_id: str, payload: di
             raise RuntimeError("YouTube did not return video id")
 
         thumbnail_uploaded = False
+        thumbnail_warning = ""
         if thumb:
             job_ref.update({
                 "step": "Subiendo miniatura",
                 "youtubeVideoId": video_id,
                 "updatedAt": firestore.SERVER_TIMESTAMP,
             })
-            thumbnail_uploaded = _youtube_upload_thumbnail(access, video_id, thumb)
+            try:
+                thumbnail_uploaded = _youtube_upload_thumbnail(access, video_id, thumb)
+            except Exception as thumb_exc:
+                # New YouTube channels may reject custom thumbnails until the
+                # channel is verified. The upload itself is still useful, so do
+                # not turn a thumbnail problem into a failed publication.
+                thumbnail_warning = str(thumb_exc)[:500]
 
         youtube_url = f"https://studio.youtube.com/video/{video_id}/edit"
         job_ref.update({
             "status": "completed",
-            "step": "Listo para revisión en YouTube Studio",
+            "step": "Listo para revisión en YouTube Studio"
+            if not thumbnail_warning
+            else "Video subido; revisa la miniatura en YouTube Studio",
             "youtubeVideoId": video_id,
             "youtubeStudioUrl": youtube_url,
             "thumbnailUploaded": thumbnail_uploaded,
+            "warning": thumbnail_warning,
             "completedAt": firestore.SERVER_TIMESTAMP,
             "updatedAt": firestore.SERVER_TIMESTAMP,
         })
