@@ -3164,7 +3164,7 @@ def _youtube_fetch_channels(access_token: str) -> list[dict]:
     import requests
     response = requests.get(
         "https://www.googleapis.com/youtube/v3/channels",
-        params={"part": "snippet,brandingSettings", "mine": "true", "maxResults": 50},
+        params={"part": "snippet,brandingSettings,status", "mine": "true", "maxResults": 50},
         headers={"Authorization": f"Bearer {access_token}"},
         timeout=30,
     )
@@ -3174,11 +3174,15 @@ def _youtube_fetch_channels(access_token: str) -> list[dict]:
     for item in response.json().get("items", []):
         snippet = item.get("snippet") or {}
         branding = item.get("brandingSettings") or {}
+        status = item.get("status") or {}
         channels.append({
             "channelId": item.get("id"),
             "title": snippet.get("title") or "Canal sin nombre",
             "description": (branding.get("channel") or {}).get("description") or snippet.get("description") or "",
             "thumbnailUrl": ((snippet.get("thumbnails") or {}).get("default") or {}).get("url"),
+            "longUploadsStatus": status.get("longUploadsStatus"),
+            "madeForKids": status.get("madeForKids"),
+            "selfDeclaredMadeForKids": status.get("selfDeclaredMadeForKids"),
         })
     return [c for c in channels if c.get("channelId")]
 
@@ -3241,6 +3245,9 @@ def _youtube_public_channel_doc(snapshot) -> dict:
         "title": data.get("title") or "Canal conectado",
         "description": data.get("description") or "",
         "thumbnailUrl": data.get("thumbnailUrl"),
+        "longUploadsStatus": data.get("longUploadsStatus"),
+        "madeForKids": data.get("madeForKids"),
+        "selfDeclaredMadeForKids": data.get("selfDeclaredMadeForKids"),
         "connectedAt": str(data.get("connectedAt") or ""),
         "updatedAt": str(data.get("updatedAt") or ""),
     }
@@ -3275,6 +3282,37 @@ def _youtube_project_video_dir(data: dict) -> Path:
     if not folder:
         raise ValueError("project has no videoFolder")
     return Path(f"/app/output/videos/{folder}")
+
+
+def _youtube_video_preflight(data: dict) -> dict:
+    result = {
+        "durationSeconds": None,
+        "durationMinutes": None,
+        "isLongerThanDefaultLimit": False,
+        "defaultLimitSeconds": 15 * 60,
+        "filename": None,
+        "hasSubtitles": False,
+    }
+    try:
+        video_dir = _youtube_project_video_dir(data)
+        if not video_dir.is_dir():
+            return {**result, "warning": "project output folder not found"}
+        video_file, has_subs, invalid = _pick_valid_final_video(video_dir, min_duration_seconds=1)
+        if not video_file:
+            return {**result, "warning": "final video not found", "invalidCandidates": invalid[:3]}
+        ok, duration, err = _validate_media_file(video_file, min_duration_seconds=1)
+        if not ok:
+            return {**result, "warning": err or "final video duration could not be read"}
+        return {
+            **result,
+            "durationSeconds": round(duration, 2),
+            "durationMinutes": round(duration / 60, 1),
+            "isLongerThanDefaultLimit": duration > 15 * 60,
+            "filename": video_file.name,
+            "hasSubtitles": bool(has_subs),
+        }
+    except Exception as exc:
+        return {**result, "warning": str(exc)[:200]}
 
 
 def _youtube_upload_video(access_token: str, video_file: Path, resource: dict) -> str:
@@ -3521,13 +3559,43 @@ def youtube_channels(request: Request):
         return {"configured": False, "channels": [], "missing": status["missing"], "redirectUri": status.get("redirectUri")}
     _ensure_firebase_initialized()
     from firebase_admin import firestore
-    docs = (
-        firestore.client()
-        .collection("users")
-        .document(principal["uid"])
-        .collection("youtubeChannels")
-        .stream()
-    )
+    db = firestore.client()
+    channels_ref = db.collection("users").document(principal["uid"]).collection("youtubeChannels")
+    docs = list(channels_ref.stream())
+    refreshed = {}
+    for doc in docs:
+        stored = doc.to_dict() or {}
+        encrypted_refresh = stored.get("refreshTokenEncrypted")
+        if not encrypted_refresh:
+            continue
+        try:
+            access = _youtube_refresh_access_token(_youtube_decrypt_token(encrypted_refresh)).get("access_token")
+            if not access:
+                continue
+            for channel in _youtube_fetch_channels(access):
+                channel_ref = channels_ref.document(channel["channelId"])
+                existing = channel_ref.get()
+                channel_ref.set({
+                    **channel,
+                    "refreshTokenEncrypted": (
+                        (existing.to_dict() or {}).get("refreshTokenEncrypted")
+                        if existing.exists
+                        else encrypted_refresh
+                    ),
+                    "connectedAt": (
+                        (existing.to_dict() or {}).get("connectedAt")
+                        if existing.exists
+                        else firestore.SERVER_TIMESTAMP
+                    ),
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                }, merge=True)
+                refreshed[channel["channelId"]] = channel
+        except Exception as exc:
+            try:
+                log.warning("youtube_channel_refresh_failed", uid=principal["uid"], channel_id=doc.id, error=str(exc)[:200])
+            except TypeError:
+                log.warning(f"youtube_channel_refresh_failed uid={principal['uid']} channel_id={doc.id} error={str(exc)[:200]}")
+    docs = list(channels_ref.stream()) if refreshed else docs
     return {"configured": True, "channels": [_youtube_public_channel_doc(doc) for doc in docs]}
 
 
@@ -3554,6 +3622,7 @@ def youtube_publish_preview(project_id: str, request: Request):
             "pinnedComment": pack["pinned_comment"],
             "chapters": pack["chapters"],
         },
+        "video": _youtube_video_preflight(data),
         "thumbnails": thumbnails,
         "defaults": {"privacyStatus": "private", "categoryId": "22"},
     }

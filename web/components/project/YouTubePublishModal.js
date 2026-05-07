@@ -50,6 +50,14 @@ function humanizeYouTubeWarning(value) {
   return raw;
 }
 
+function formatDuration(seconds) {
+  const total = Number(seconds) || 0;
+  if (total <= 0) return "";
+  const minutes = Math.floor(total / 60);
+  const remaining = Math.round(total % 60);
+  return `${minutes}:${String(remaining).padStart(2, "0")} min`;
+}
+
 export default function YouTubePublishModal({ open, onClose, projectId, project, user }) {
   const [loading, setLoading] = useState(false);
   const [channels, setChannels] = useState([]);
@@ -151,6 +159,15 @@ export default function YouTubePublishModal({ open, onClose, projectId, project,
     const thumbs = preview?.thumbnails || [];
     return thumbs[Math.max(0, Math.min(Number(form.thumbnailIndex) || 0, thumbs.length - 1))];
   }, [preview?.thumbnails, form.thumbnailIndex]);
+  const selectedChannel = useMemo(
+    () => channels.find((channel) => channel.channelId === form.channelId),
+    [channels, form.channelId],
+  );
+  const videoDurationSeconds = Number(preview?.video?.durationSeconds || 0);
+  const longUploadsStatus = String(selectedChannel?.longUploadsStatus || "").toLowerCase();
+  const isLongVideo = Boolean(preview?.video?.isLongerThanDefaultLimit);
+  const longUploadBlocked = isLongVideo && longUploadsStatus && longUploadsStatus !== "allowed";
+  const longUploadWarning = isLongVideo && longUploadsStatus !== "allowed";
 
   if (!open) return null;
 
@@ -278,6 +295,22 @@ export default function YouTubePublishModal({ open, onClose, projectId, project,
         {configured === true && channels.length > 0 && (
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 280px", gap: 18 }}>
             <div style={{ display: "grid", gap: 14 }}>
+              {longUploadWarning && (
+                <div className="cf-card" style={{ padding: 14, borderColor: "var(--warn)" }}>
+                  <div className="cf-h4" style={{ marginBottom: 8 }}>Verifica el canal para videos largos</div>
+                  <div className="cf-body">
+                    Este video dura {formatDuration(videoDurationSeconds) || "más de 15 minutos"}. YouTube suele rechazar
+                    videos de más de 15 minutos si el canal aún no tiene subidas largas habilitadas.
+                  </div>
+                  <div className="cf-caption" style={{ marginTop: 10 }}>
+                    Estado detectado: {longUploadsStatus || "no confirmado"}.{" "}
+                    <a href="https://www.youtube.com/verify" target="_blank" rel="noreferrer" style={{ color: "var(--warn)" }}>
+                      Verificar canal
+                    </a>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <FieldLabel>Canal</FieldLabel>
                 <select
@@ -406,9 +439,9 @@ export default function YouTubePublishModal({ open, onClose, projectId, project,
                 className="cf-btn cf-btn--primary"
                 style={{ width: "100%", justifyContent: "center", marginTop: 14 }}
                 onClick={submitPublish}
-                disabled={loading || !form.channelId || !form.title}
+                disabled={loading || !form.channelId || !form.title || longUploadBlocked}
               >
-                <Icon name="uploadCloud" size={16} /> Subir como privado
+                <Icon name="uploadCloud" size={16} /> {longUploadBlocked ? "Verifica canal" : "Subir como privado"}
               </button>
               <div className="cf-caption" style={{ marginTop: 10 }}>
                 La publicación inicia privada para revisar antes de hacerla pública.
