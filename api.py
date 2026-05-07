@@ -1330,8 +1330,10 @@ def build_shorts_for_project(video_dir: Path, project_id: str) -> list:
 
 
 # ── Thumbnails (3 variantes por video) ─────────────────────────────────────
-# Ruta principal: GPT Image genera la miniatura completa con texto integrado.
-# Fallback: composicion local con frases cortas, nunca con el titulo completo.
+# Ruta principal: GPT Image genera un fondo premium sin texto; el backend
+# compone el titulo exacto encima para evitar letras inventadas.
+# Rollback: CONTENT_FACTORY_THUMBNAIL_EXACT_TITLE_OVERLAY=false vuelve al
+# comportamiento anterior de texto integrado por el modelo.
 # Mas adelante (Phase 3.2 multi-channel) se podra parametrizar por canal.
 THUMBNAIL_DEFAULT_THEME = {
     "font_path_primary": "/usr/share/fonts/truetype/montserrat/Montserrat-Black.ttf",
@@ -1370,6 +1372,10 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 def _premium_thumbnails_enabled() -> bool:
     return _env_bool("CONTENT_FACTORY_PREMIUM_THUMBNAILS", True)
+
+
+def _thumbnail_exact_title_overlay_enabled() -> bool:
+    return _env_bool("CONTENT_FACTORY_THUMBNAIL_EXACT_TITLE_OVERLAY", True)
 
 
 def _thumbnail_model() -> str:
@@ -1618,7 +1624,13 @@ def _thumbnail_hook_plans(title: str, agent_id: str | None = None) -> list[dict]
     ]
 
 
-def _build_premium_thumbnail_prompt(title: str, plan: dict, agent_id: str | None = None) -> str:
+def _build_premium_thumbnail_prompt(
+    title: str,
+    plan: dict,
+    agent_id: str | None = None,
+    *,
+    render_headline: bool = True,
+) -> str:
     clean_title = " ".join((title or "").split()) or "este documental"
     headline_lines = _thumbnail_hook_lines(plan.get("hook", ""))
     headline_instructions = "\n".join(
@@ -1660,22 +1672,39 @@ def _build_premium_thumbnail_prompt(title: str, plan: dict, agent_id: str | None
             "- Faces must be realistic, expressive, premium, not uncanny.\n"
         )
     )
+    if render_headline:
+        headline_block = (
+            "Main headline text to render exactly, large and crisp, on separate lines:\n"
+            f"{headline_instructions}\n"
+            "Do not render the words 'Line', line numbers, slashes, pipes, quotes, or separators.\n"
+        )
+        text_composition_rules = (
+            "- The thumbnail must already include the headline text as part of the generated image.\n"
+            "- Spell the Spanish headline exactly; no extra words, subtitles, quotes, pseudo-text, logos, or watermarks.\n"
+            "- Make the headline huge, bold, high-contrast, and readable on a phone screen.\n"
+        )
+    else:
+        headline_block = (
+            f"Create a text-free thumbnail background for the exact video title: \"{clean_title}\".\n"
+            "Do not render any letters, words, captions, subtitles, labels, signs, pseudo-text, logos, or watermarks anywhere.\n"
+        )
+        text_composition_rules = (
+            "- Leave generous negative space for a later backend overlay of the exact title text.\n"
+            "- Keep the most important visual subject outside the title-safe area; prefer emotional objects on the right or lower third.\n"
+            "- The final title will be added by code, so the generated image itself must be completely text-free.\n"
+        )
     return (
         "Create a finished, high-conversion YouTube "
         f"{format_hint}, 16:9 landscape, topic: \"{clean_title}\".\n"
-        "Main headline text to render exactly, large and crisp, on separate lines:\n"
-        f"{headline_instructions}\n"
-        "Do not render the words 'Line', line numbers, slashes, pipes, quotes, or separators.\n"
+        f"{headline_block}"
         f"{badge_instruction}"
         f"Core concept: {plan['concept']}.\n"
         f"Variant direction: {plan.get('variant', 'primary')}. Make this concept visually specific to the topic; avoid generic wellness stock-image layouts.\n"
         f"{safety_hint}"
         "Composition requirements:\n"
-        "- The thumbnail must already include the headline text as part of the generated image.\n"
-        "- Spell the Spanish headline exactly; no extra words, subtitles, quotes, pseudo-text, logos, or watermarks.\n"
-        "- Make the headline huge, bold, high-contrast, and readable on a phone screen.\n"
-        "- Keep the headline and main subject fully inside the central 16:9 safe area; the image may be center-cropped from 1536x1024 to 1280x720.\n"
-        "- Reserve the top-right corner for a later format badge overlay; do not place the main headline or face there.\n"
+        f"{text_composition_rules}"
+        "- Keep the final title area and main subject fully inside the central 16:9 safe area; the image may be center-cropped from 1536x1024 to 1280x720.\n"
+        "- Reserve the top-right corner for a later format badge overlay; do not place the main title area or face there.\n"
         f"{people_rules}"
         "- Strong contrast, sharp focus, punchy but tasteful color accents, mobile-readable composition.\n"
         "- Clickbait must be safe and truthful: curiosity, transformation, mystery, or emotional payoff without deception.\n"
@@ -1813,7 +1842,118 @@ def _draw_thumbnail_badge(draw, badge: str, target_w: int, theme: dict | None = 
     )
 
 
-def _finalize_generated_thumbnail(raw_image: Path, output_path: Path, badge: str | None = None) -> bool:
+def _thumbnail_display_title(title: str) -> str:
+    clean = " ".join((title or "").split()).strip()
+    return (clean or "Contenido completo").upper()
+
+
+def _measure_text_width(draw, text: str, font, stroke_width: int = 0) -> int:
+    bbox = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
+    return bbox[2] - bbox[0]
+
+
+def _wrap_thumbnail_title(draw, text: str, font, max_width: int) -> list[str]:
+    words = text.split()
+    if not words:
+        return [text]
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if not current or _measure_text_width(draw, candidate, font, stroke_width=7) <= max_width:
+            current = candidate
+            continue
+        lines.append(current)
+        current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _fit_exact_title_layout(draw, title_text: str, max_width: int, max_height: int):
+    display = _thumbnail_display_title(title_text)
+    max_lines = 5 if len(display) > 58 else 4
+    for size in range(106, 35, -3):
+        font = _load_thumbnail_font(size)
+        spacing = max(5, size // 11)
+        lines = _wrap_thumbnail_title(draw, display, font, max_width)
+        if len(lines) > max_lines:
+            continue
+        widths, heights = [], []
+        for line in lines:
+            bbox = draw.textbbox((0, 0), line, font=font, stroke_width=7)
+            widths.append(bbox[2] - bbox[0])
+            heights.append(bbox[3] - bbox[1])
+        total_height = sum(heights) + spacing * (len(lines) - 1)
+        if max(widths or [0]) <= max_width and total_height <= max_height:
+            return font, lines, spacing, widths, heights
+
+    font = _load_thumbnail_font(36)
+    spacing = 5
+    lines = _wrap_thumbnail_title(draw, display, font, max_width)
+    widths, heights = [], []
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=font, stroke_width=6)
+        widths.append(bbox[2] - bbox[0])
+        heights.append(bbox[3] - bbox[1])
+    return font, lines, spacing, widths, heights
+
+
+def _exact_title_overlay_box(variant: str | None) -> tuple[int, int, int, int, str]:
+    normalized = (variant or "").lower()
+    if normalized in {"patron", "secreto", "mid"}:
+        return 92, 110, 835, 486, "center"
+    if normalized in {"paz", "revelacion", "closing"}:
+        return 70, 116, 790, 500, "left"
+    return 70, 105, 820, 500, "left"
+
+
+def _draw_exact_title_overlay(img, title_text: str, variant: str | None = None):
+    from PIL import Image, ImageDraw, ImageFilter
+
+    img = img.convert("RGBA")
+    target_w, target_h = img.size
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    gd = ImageDraw.Draw(overlay)
+
+    for x in range(0, min(target_w, 910), 3):
+        alpha = max(0, int(220 * (1 - (x / 910))))
+        gd.rectangle((x, 0, x + 2, target_h), fill=(0, 0, 0, alpha))
+    for y in range(target_h // 2, target_h, 3):
+        alpha = int(((y - target_h // 2) / (target_h // 2)) * 105)
+        gd.rectangle((0, y, target_w, y + 2), fill=(0, 0, 0, alpha))
+
+    x0, y0, max_w, max_h, align = _exact_title_overlay_box(variant)
+    gd.rounded_rectangle((x0 - 24, y0 - 20, x0 + max_w + 34, y0 + max_h + 24), radius=22, fill=(0, 0, 0, 78))
+    img = Image.alpha_composite(img, overlay)
+
+    draw = ImageDraw.Draw(img, "RGBA")
+    font, lines, spacing, widths, heights = _fit_exact_title_layout(draw, title_text, max_w, max_h)
+    total_height = sum(heights) + spacing * (len(lines) - 1)
+    y = y0 + max(0, (max_h - total_height) // 2)
+
+    for idx, line in enumerate(lines):
+        width = widths[idx]
+        x = x0 + (max_w - width) // 2 if align == "center" else x0
+        fill = (255, 255, 255)
+        if idx == len(lines) - 1 and len(lines) > 1:
+            fill = (255, 214, 10)
+
+        shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        sd = ImageDraw.Draw(shadow)
+        sd.text((x + 8, y + 9), line, font=font, fill=(0, 0, 0, 210), stroke_width=11, stroke_fill=(0, 0, 0, 230))
+        shadow = shadow.filter(ImageFilter.GaussianBlur(1.2))
+        img = Image.alpha_composite(img, shadow)
+        draw = ImageDraw.Draw(img, "RGBA")
+        draw.text((x, y), line, font=font, fill=fill, stroke_width=7, stroke_fill=(0, 0, 0))
+        y += heights[idx] + spacing
+
+    return img
+
+
+def _finalize_generated_thumbnail(raw_image: Path, output_path: Path, badge: str | None = None,
+                                  title_text: str | None = None,
+                                  variant: str | None = None) -> bool:
     try:
         from PIL import Image, ImageDraw, ImageEnhance
     except ImportError:
@@ -1825,10 +1965,12 @@ def _finalize_generated_thumbnail(raw_image: Path, output_path: Path, badge: str
         img = _fit_generated_thumbnail_canvas(img, 1280, 720)
         img = ImageEnhance.Contrast(img).enhance(1.04)
         img = ImageEnhance.Sharpness(img).enhance(1.05)
+        if title_text:
+            img = _draw_exact_title_overlay(img, title_text, variant=variant)
         if badge:
             draw = ImageDraw.Draw(img, "RGBA")
             _draw_thumbnail_badge(draw, badge, 1280)
-        img.save(str(output_path), "JPEG", quality=94, optimize=True)
+        img.convert("RGB").save(str(output_path), "JPEG", quality=94, optimize=True)
         return output_path.exists() and output_path.stat().st_size > 0
     except Exception as e:
         print(f"   ❌ Generated thumbnail finalize failed: {e}")
@@ -1870,6 +2012,16 @@ def _fit_thumbnail_font(draw, lines: list[str], max_width: int, max_height: int)
     return font, spacing, widths, heights
 
 
+def _thumbnail_lines_for_overlay(draw, hook_text: str, max_width: int, max_height: int):
+    if "\n" not in (hook_text or "") and len((hook_text or "").strip()) > 32:
+        font, lines, spacing, widths, heights = _fit_exact_title_layout(draw, hook_text, max_width, max_height)
+        return lines, font, spacing, widths, heights
+
+    lines = _thumbnail_hook_lines(hook_text)
+    font, spacing, widths, heights = _fit_thumbnail_font(draw, lines, max_width, max_height)
+    return lines, font, spacing, widths, heights
+
+
 def _render_premium_thumbnail(base_image: Path, hook_text: str, output_path: Path,
                               variant: str = "impacto", badge: str | None = None) -> bool:
     try:
@@ -1897,8 +2049,7 @@ def _render_premium_thumbnail(base_image: Path, hook_text: str, output_path: Pat
         img = Image.alpha_composite(img.convert("RGBA"), overlay)
 
         draw = ImageDraw.Draw(img, "RGBA")
-        lines = _thumbnail_hook_lines(hook_text)
-        font, spacing, widths, heights = _fit_thumbnail_font(draw, lines, 1120, 270)
+        lines, font, spacing, widths, heights = _thumbnail_lines_for_overlay(draw, hook_text, 1120, 270)
         total_height = sum(heights) + spacing * (len(lines) - 1)
         y = 385 + (270 - total_height) // 2
         colors = [(255, 255, 255), (255, 214, 10), (255, 255, 255)]
@@ -1951,6 +2102,7 @@ def _build_premium_thumbnails_for_project(video_dir: Path, project_id: str, titl
     thumbs_dir = video_dir / "thumbnails"
     thumbs_dir.mkdir(parents=True, exist_ok=True)
     badge = _thumbnail_format_badge(agent_id)
+    exact_title_overlay = _thumbnail_exact_title_overlay_enabled()
     results = []
     for i, plan in enumerate(_thumbnail_hook_plans(title, agent_id=agent_id), 1):
         label = plan["label"]
@@ -1958,12 +2110,23 @@ def _build_premium_thumbnails_for_project(video_dir: Path, project_id: str, titl
         safe_variant = _thumbnail_safe_filename(variant)
         raw = thumbs_dir / f"THUMB_RAW_{i:02d}_{safe_variant}.jpg"
         out = thumbs_dir / f"THUMB_{i:02d}_{label}_{safe_variant}.jpg"
-        prompt = _build_premium_thumbnail_prompt(title, plan, agent_id=agent_id)
+        prompt = _build_premium_thumbnail_prompt(
+            title,
+            plan,
+            agent_id=agent_id,
+            render_headline=not exact_title_overlay,
+        )
 
         print(f"   🖼️ Diseñando miniatura premium {i}/3 ({variant})")
         if not _generate_premium_thumbnail_image(prompt, raw):
             continue
-        if not _finalize_generated_thumbnail(raw, out, badge=badge):
+        if not _finalize_generated_thumbnail(
+            raw,
+            out,
+            badge=badge,
+            title_text=title if exact_title_overlay else None,
+            variant=variant,
+        ):
             continue
         upload = _upload_video_to_storage(out, f"{project_id}/thumbnails")
         if upload:
@@ -1973,6 +2136,8 @@ def _build_premium_thumbnails_for_project(video_dir: Path, project_id: str, titl
                 "variant": variant,
                 "source": "gpt-image",
                 "hook": plan["hook"],
+                "display_text": _thumbnail_display_title(title) if exact_title_overlay else plan["hook"],
+                "text_mode": "exact_title_overlay" if exact_title_overlay else "generated_headline",
                 "model": _thumbnail_model(),
                 "badge": badge,
                 "size_kb": round(out.stat().st_size / 1024, 1),
@@ -2027,32 +2192,11 @@ def _render_thumbnail(source_image: Path, title_text: str, output_path: Path,
         img = ImageEnhance.Contrast(img).enhance(1.10)
         img = ImageEnhance.Brightness(img).enhance(0.85)
 
-        # Cargar fuente (intenta Montserrat Black, fallback a DejaVu Bold)
-        font_size = 120 if len(title_text) <= 14 else 90 if len(title_text) <= 22 else 72
-        font = None
-        for fp in [th["font_path_primary"], th["font_path_fallback"]]:
-            try:
-                if os.path.exists(fp):
-                    font = ImageFont.truetype(fp, font_size)
-                    break
-            except Exception:
-                continue
-        if font is None:
-            font = ImageFont.load_default()
-
         draw = ImageDraw.Draw(img, "RGBA")
-
-        # Calcular tamaño del texto para posicionarlo
-        # Wrap manual: hasta 2 líneas
-        text = title_text.strip()
-        words = text.split()
-        if len(words) > 2 and font_size >= 90:
-            mid = len(words) // 2
-            text = " ".join(words[:mid]) + "\n" + " ".join(words[mid:])
-
-        # Bbox para centrado
-        bbox = draw.multiline_textbbox((0, 0), text, font=font, stroke_width=th["stroke_width"], align="center", spacing=4)
-        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        lines, font, spacing, widths, heights = _thumbnail_lines_for_overlay(draw, title_text, 1120, 300)
+        text = "\n".join(lines)
+        text_w = max(widths or [0])
+        text_h = sum(heights) + spacing * (len(lines) - 1)
 
         # Posición según variant
         if variant == "bottom":
@@ -2086,7 +2230,7 @@ def _render_thumbnail(source_image: Path, title_text: str, output_path: Path,
         draw.multiline_text(
             (x, y), text, font=font, fill=th["text_color"],
             stroke_width=th["stroke_width"], stroke_fill=th["stroke_color"],
-            align="center", spacing=4,
+            align="center", spacing=spacing,
         )
 
         # Variant 'corner': agregar barra roja vertical de acento a la izquierda
@@ -2133,10 +2277,11 @@ def _build_scene_thumbnails_for_project(video_dir: Path, project_id: str, title:
 
     results = []
     badge = _thumbnail_format_badge(agent_id)
+    exact_title_overlay = _thumbnail_exact_title_overlay_enabled()
     for offset, (label, src, variant) in enumerate(picks, 0):
         i = start_index + offset
         plan = plans[min(i - 1, len(plans) - 1)]
-        hook = plan.get("hook") or _pick_thumbnail_keywords(title, max_words=3)
+        hook = title if exact_title_overlay else (plan.get("hook") or _pick_thumbnail_keywords(title, max_words=3))
         out = thumbs_dir / f"THUMB_{i:02d}_{label}_{variant}.jpg"
         print(f"   🖼️ Renderizando thumbnail fallback {i} ({label}, variant={variant})")
         if not _render_thumbnail(src, hook, out, variant=variant, badge=badge):
@@ -2149,6 +2294,8 @@ def _build_scene_thumbnails_for_project(video_dir: Path, project_id: str, title:
                 "variant": variant,
                 "source": "scene",
                 "hook": hook,
+                "display_text": _thumbnail_display_title(title) if exact_title_overlay else hook,
+                "text_mode": "exact_title_overlay" if exact_title_overlay else "hook_overlay",
                 "badge": badge,
                 "size_kb": round(out.stat().st_size / 1024, 1),
                 "gs_path": upload["gs_path"],
@@ -2586,12 +2733,175 @@ def get_video_url(project_id: str, request: Request):
         return JSONResponse(status_code=500, content={"error": str(e)[:200]})
 
 
+def _as_text_list(value) -> list[str]:
+    if isinstance(value, list):
+        raw_items = value
+    elif isinstance(value, str):
+        raw_items = re.split(r"[,#\n;]+", value)
+    else:
+        raw_items = []
+    items: list[str] = []
+    for item in raw_items:
+        clean = " ".join(str(item).strip().strip("#").split())
+        if clean and clean.lower() not in {x.lower() for x in items}:
+            items.append(clean)
+    return items
+
+
+def _compact_title_words(title: str, limit: int = 7) -> list[str]:
+    stopwords = {
+        "el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del",
+        "y", "o", "que", "por", "para", "con", "sin", "en", "te", "tu", "tus",
+        "su", "sus", "se", "es", "no", "lo", "le", "a",
+    }
+    words = []
+    for token in re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9]+", title or ""):
+        if len(token) < 3 or token.lower() in stopwords:
+            continue
+        if token.lower() not in {w.lower() for w in words}:
+            words.append(token)
+        if len(words) >= limit:
+            break
+    return words
+
+
+def _youtube_hashtag(value: str) -> str:
+    words = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9]+", value or "")
+    if not words:
+        return ""
+    tag = "#" + "".join(word[:1].upper() + word[1:] for word in words)
+    return tag[:80]
+
+
+def _youtube_tags_for_project(data: dict, title: str) -> list[str]:
+    seo = data.get("seo_metadata") or {}
+    agent_id = data.get("agentId") or data.get("agent")
+    fmt = data.get("format")
+    if agent_id == "agent_podcast_general" or fmt == "podcast":
+        extras = ["Esto no es amor", "podcast en español", "apego emocional", "amor propio", "relaciones"]
+    elif fmt in {"autohipnosis", "meditacion_larga"}:
+        extras = ["meditación guiada", "relajación", "calma", "bienestar"]
+    else:
+        extras = ["documental", "historia", "video educativo"]
+    tags = []
+    for extra in extras:
+        if extra.lower() not in {tag.lower() for tag in tags}:
+            tags.append(extra)
+    for word in _compact_title_words(title, limit=8):
+        if word.lower() not in {tag.lower() for tag in tags}:
+            tags.append(word)
+    for tag in _as_text_list(seo.get("tags")):
+        if tag.lower() not in {item.lower() for item in tags}:
+            tags.append(tag)
+
+    limited: list[str] = []
+    total = 0
+    for tag in tags:
+        candidate_len = len(tag) + (2 if limited else 0)
+        if total + candidate_len > 480:
+            break
+        limited.append(tag)
+        total += candidate_len
+    return limited[:30]
+
+
+def _youtube_hashtags_for_project(data: dict, title: str, tags: list[str]) -> list[str]:
+    agent_id = data.get("agentId") or data.get("agent")
+    fmt = data.get("format")
+    if agent_id == "agent_podcast_general" or fmt == "podcast":
+        base = ["Esto no es amor", "Apego emocional", "Amor propio", "Relaciones", "Podcast"]
+    elif fmt in {"autohipnosis", "meditacion_larga"}:
+        base = ["Meditación guiada", "Calma", "Bienestar", "Relajación"]
+    else:
+        base = ["Documental", "Historia", "Cultura"]
+    candidates = base + tags[:6] + _compact_title_words(title, limit=5)
+    hashtags: list[str] = []
+    for item in candidates:
+        tag = _youtube_hashtag(item)
+        if tag and tag.lower() not in {h.lower() for h in hashtags}:
+            hashtags.append(tag)
+        if len(hashtags) >= 8:
+            break
+    return hashtags
+
+
+def _chapter_lines_from_scenes(scenes: list) -> list[str]:
+    lines = []
+    current = 0
+    for i, scene in enumerate(scenes or [], 1):
+        duration = scene.get("target_duration_seconds") or scene.get("targetDurationSeconds")
+        label = scene.get("title") or scene.get("label") or f"Parte {i}"
+        if i == 1:
+            label = "Inicio"
+        minutes = int(current // 60)
+        seconds = int(current % 60)
+        lines.append(f"{minutes:02d}:{seconds:02d} {label}")
+        try:
+            current += max(1, float(duration or 0))
+        except (TypeError, ValueError):
+            current += 0
+    return lines if len(lines) >= 3 and current > 0 else []
+
+
+def _build_youtube_publish_pack(project_id: str, data: dict) -> dict:
+    title = data.get("title") or (data.get("seo_metadata") or {}).get("title") or "Video listo para publicar"
+    seo = data.get("seo_metadata") or {}
+    description = " ".join(str(seo.get("description") or "").split())
+    if not description:
+        description = f"Nuevo episodio: {title}."
+
+    tags = _youtube_tags_for_project(data, title)
+    hashtags = _youtube_hashtags_for_project(data, title, tags)
+    chapters = _chapter_lines_from_scenes(data.get("scenes") or [])
+    hashtag_line = " ".join(hashtags)
+
+    description_parts = [
+        description,
+        "",
+        "En este video exploramos el tema con una mirada clara, emocional y práctica.",
+    ]
+    if chapters:
+        description_parts.extend(["", "Capítulos:", *chapters[:20]])
+    if hashtag_line:
+        description_parts.extend(["", hashtag_line])
+    youtube_description = "\n".join(description_parts).strip()
+
+    pinned_comment = (
+        "¿Qué parte de este tema te hizo más sentido? Te leo en comentarios."
+        if data.get("format") != "podcast"
+        else "¿Esto te sonó a amor o a apego? Cuéntame en comentarios qué parte te pegó más."
+    )
+    checklist = "\n".join([
+        "# Checklist de publicación",
+        "",
+        "- [ ] Subir el video final con subtítulos.",
+        "- [ ] Elegir una de las 3 miniaturas.",
+        "- [ ] Pegar título, descripción, hashtags y tags.",
+        "- [ ] Revisar que los primeros 30 segundos enganchen.",
+        "- [ ] Confirmar volumen, subtítulos y cortes de shorts.",
+        "- [ ] Publicar o programar.",
+        "- [ ] Fijar el comentario sugerido.",
+        "- [ ] Usar los shorts como promoción del video largo.",
+    ])
+    return {
+        "project_id": project_id,
+        "title": title,
+        "description": youtube_description,
+        "hashtags": hashtags,
+        "tags": tags,
+        "tags_csv": ", ".join(tags),
+        "pinned_comment": pinned_comment,
+        "chapters": chapters,
+        "checklist": checklist,
+    }
+
+
 @app.get("/download/all/{project_id}")
 def download_all(project_id: str, request: Request):
     """
     Streamea un ZIP con TODO el material del proyecto organizado en carpetas:
-    video/, audio/narrations/, images/, luma_clips/, ken_burns/, composites/,
-    + subtitulos.ass + transcripcion.json + guion.txt + proyecto.json.
+    video/, shorts/, thumbnails/, audio/narrations/, images/, luma_clips/,
+    ken_burns/, composites/ + carpeta youtube/ lista para publicación.
 
     Usa zipstream-ng para construir el ZIP on-the-fly (no en memoria),
     crítico cuando hay 88+ archivos por proyecto y video final de 150-200MB.
@@ -2648,6 +2958,11 @@ def download_all(project_id: str, request: Request):
         # Clips Luma
         add_glob(video_dir / "luma_clips", "*.mp4", "luma_clips")
 
+        # Material de publicación
+        add_glob(video_dir / "shorts", "*.mp4", "shorts")
+        add_glob(video_dir / "thumbnails", "*.jpg", "thumbnails")
+        add_glob(video_dir / "thumbnails", "*.png", "thumbnails")
+
         # Ken Burns (carpeta puede ser 'kenburns' o 'ken_burns' según versión)
         for kb_name in ["kenburns", "ken_burns"]:
             add_glob(video_dir / kb_name, "*.mp4", "ken_burns")
@@ -2665,17 +2980,40 @@ def download_all(project_id: str, request: Request):
         if script_text:
             zs.add(script_text.encode("utf-8"), arcname=f"{folder}/guion.txt")
 
+        publish_pack = _build_youtube_publish_pack(project_id, data)
+        youtube_files = {
+            "youtube/titulo.txt": publish_pack["title"],
+            "youtube/descripcion.txt": publish_pack["description"],
+            "youtube/hashtags.txt": " ".join(publish_pack["hashtags"]),
+            "youtube/tags.txt": publish_pack["tags_csv"],
+            "youtube/comentario_fijado.txt": publish_pack["pinned_comment"],
+            "youtube/checklist_publicacion.md": publish_pack["checklist"],
+            "youtube/metadata_youtube.json": json.dumps(
+                publish_pack,
+                indent=2,
+                ensure_ascii=False,
+                default=str,
+            ),
+        }
+        if publish_pack.get("chapters"):
+            youtube_files["youtube/capitulos.txt"] = "\n".join(publish_pack["chapters"])
+        for rel_path, content in youtube_files.items():
+            zs.add(str(content).encode("utf-8"), arcname=f"{folder}/{rel_path}")
+
         # Metadata del proyecto en JSON
         meta = {
             "id": project_id,
             "title": title,
             "agentId": data.get("agentId"),
+            "format": data.get("format"),
             "createdAt": str(data.get("createdAt")),
             "completedAt": str(data.get("completedAt")),
             "hasSubtitles": data.get("hasSubtitles"),
             "videoFolder": folder,
             "videoSizeMB": data.get("videoSizeMB"),
             "viralityScore": data.get("viralityScore"),
+            "seo_metadata": data.get("seo_metadata"),
+            "youtube": publish_pack,
             "scenesCount": len(data.get("scenes") or []),
             "downloadedAt": datetime.now(timezone.utc).isoformat(),
         }

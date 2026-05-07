@@ -1,0 +1,58 @@
+/**
+ * API Route Proxy — Download full project package from VPS over HTTPS.
+ *
+ * The browser cannot reliably fetch the HTTP VPS directly from the HTTPS app.
+ * This keeps auth intact and streams the ZIP through the Next server.
+ */
+import * as Sentry from "@sentry/nextjs";
+
+export async function GET(request, { params }) {
+  const { projectId } = await params;
+  const vpsUrl = process.env.NEXT_PUBLIC_VPS_API_URL || "http://187.77.30.158:8085";
+
+  try {
+    const forwardedHeaders = { Accept: "application/zip" };
+    const authorization = request.headers.get("authorization");
+    const adminToken = request.headers.get("x-admin-token");
+    if (authorization) forwardedHeaders.Authorization = authorization;
+    if (adminToken) forwardedHeaders["X-Admin-Token"] = adminToken;
+
+    const response = await fetch(
+      `${vpsUrl}/download/all/${encodeURIComponent(projectId)}`,
+      { headers: forwardedHeaders },
+    );
+
+    if (!response.ok) {
+      const contentType = response.headers.get("content-type") || "application/json";
+      const body = await response.text();
+      return new Response(body || JSON.stringify({ error: "Package not available" }), {
+        status: response.status,
+        headers: { "Content-Type": contentType },
+      });
+    }
+
+    const contentLength = response.headers.get("content-length");
+    const disposition = response.headers.get("content-disposition");
+    const safeName = `${projectId}_material_completo.zip`.replace(/[^a-zA-Z0-9_\-.]/g, "_");
+
+    return new Response(response.body, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": disposition || `attachment; filename="${safeName}"`,
+        ...(contentLength && { "Content-Length": contentLength }),
+        "Cache-Control": "no-cache",
+      },
+    });
+  } catch (error) {
+    Sentry.captureException(error, {
+      tags: { route: "download_all_proxy" },
+      extra: { projectId },
+    });
+    console.error("Full package download proxy error:", error);
+    return new Response(JSON.stringify({ error: "Download failed" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+}

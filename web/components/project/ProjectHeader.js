@@ -23,6 +23,7 @@ export default function ProjectHeader({
   agent,
   onDownloadVideo,
   onDownloadAll,
+  downloadAllLoading = false,
 }) {
   const color = agent?.color || "var(--ember)";
   const mono = getMonogram(project.agentId);
@@ -150,15 +151,19 @@ export default function ProjectHeader({
             </button>
             <button
               onClick={onDownloadAll}
+              disabled={downloadAllLoading}
               className="cf-btn cf-btn--ghost"
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 8,
+                opacity: downloadAllLoading ? 0.72 : 1,
+                cursor: downloadAllLoading ? "wait" : "pointer",
               }}
               title="Todo el material del proyecto en un ZIP organizado"
             >
-              <Icon name="package" size={16} /> Material completo
+              <Icon name="package" size={16} />{" "}
+              {downloadAllLoading ? "Preparando ZIP" : "Material completo"}
             </button>
           </div>
         )}

@@ -44,6 +44,41 @@ def test_esto_no_es_amor_thumbnail_plans_are_object_led_and_channel_specific():
     assert "cinematic podcast set with a microphone" not in prompt
 
 
+def test_exact_title_thumbnail_overlay_prompt_is_text_free_and_reversible():
+    title = "Por qué te obsesionas con quien no te elige."
+    plans = api._thumbnail_hook_plans(title, agent_id="agent_podcast_general")
+
+    prompt = api._build_premium_thumbnail_prompt(
+        title,
+        plans[0],
+        agent_id="agent_podcast_general",
+        render_headline=False,
+    )
+    legacy_prompt = api._build_premium_thumbnail_prompt(
+        title,
+        plans[0],
+        agent_id="agent_podcast_general",
+        render_headline=True,
+    )
+
+    assert "text-free thumbnail background" in prompt
+    assert "Do not render any letters" in prompt
+    assert "final title will be added by code" in prompt
+    assert title in prompt
+    assert "Main headline text to render exactly" not in prompt
+    assert "Line 1:" not in prompt
+    assert "Main headline text to render exactly" in legacy_prompt
+    assert 'Line 1: "' in legacy_prompt
+
+
+def test_exact_title_thumbnail_overlay_flag_defaults_on_and_can_rollback(monkeypatch):
+    monkeypatch.delenv("CONTENT_FACTORY_THUMBNAIL_EXACT_TITLE_OVERLAY", raising=False)
+    assert api._thumbnail_exact_title_overlay_enabled() is True
+
+    monkeypatch.setenv("CONTENT_FACTORY_THUMBNAIL_EXACT_TITLE_OVERLAY", "false")
+    assert api._thumbnail_exact_title_overlay_enabled() is False
+
+
 def test_generation_size_uses_landscape_size_for_latest_image_models():
     assert api._thumbnail_generation_size("gpt-image-1.5") == "1536x1024"
     assert api._thumbnail_generation_size("gpt-image-1") == "1536x1024"
@@ -146,6 +181,68 @@ def test_generated_thumbnail_finalize_outputs_youtube_jpeg(tmp_path):
     assert ok is True
     assert out.exists()
     assert Image.open(out).size == (1280, 720)
+
+
+def test_generated_thumbnail_finalize_can_overlay_exact_long_title(tmp_path):
+    from PIL import Image, ImageChops
+
+    raw = tmp_path / "raw.jpg"
+    out = tmp_path / "final.jpg"
+    title = "Por qué te obsesionas con quien no te elige."
+    Image.new("RGB", (1536, 1024), (22, 45, 52)).save(raw)
+
+    ok = api._finalize_generated_thumbnail(
+        Path(raw),
+        Path(out),
+        badge="PODCAST",
+        title_text=title,
+        variant="apego",
+    )
+
+    assert ok is True
+    assert out.exists()
+    final = Image.open(out).convert("RGB")
+    assert final.size == (1280, 720)
+    baseline = api._fit_generated_thumbnail_canvas(Image.open(raw).convert("RGB"))
+    diff = ImageChops.difference(final, baseline)
+    assert diff.getbbox() is not None
+
+
+def test_premium_thumbnail_builder_uses_text_free_background_and_exact_title(monkeypatch, tmp_path):
+    from PIL import Image
+
+    captured_prompts = []
+
+    def fake_generate(prompt, output_path):
+        captured_prompts.append(prompt)
+        Image.new("RGB", (1536, 1024), (20, 40, 50)).save(output_path)
+        return True
+
+    def fake_upload(path, folder):
+        return {
+            "gs_path": f"gs://bucket/{folder}/{Path(path).name}",
+            "signed_url": f"https://example.test/{Path(path).name}",
+        }
+
+    monkeypatch.setenv("CONTENT_FACTORY_THUMBNAIL_EXACT_TITLE_OVERLAY", "true")
+    monkeypatch.setattr(api, "_generate_premium_thumbnail_image", fake_generate)
+    monkeypatch.setattr(api, "_upload_video_to_storage", fake_upload)
+
+    title = "Por qué te obsesionas con quien no te elige."
+    results = api._build_premium_thumbnails_for_project(
+        tmp_path,
+        "project-1",
+        title,
+        agent_id="agent_podcast_general",
+    )
+
+    assert len(results) == 3
+    assert len(captured_prompts) == 3
+    assert all("Do not render any letters" in prompt for prompt in captured_prompts)
+    assert all("Line 1:" not in prompt for prompt in captured_prompts)
+    assert all(item["text_mode"] == "exact_title_overlay" for item in results)
+    assert all(item["display_text"] == title.upper() for item in results)
+    assert all((tmp_path / "thumbnails" / f"THUMB_{i:02d}_{results[i-1]['label']}_{results[i-1]['variant']}.jpg").exists() for i in range(1, 4))
 
 
 def test_generated_thumbnail_canvas_preserves_full_portrait_safe_area():

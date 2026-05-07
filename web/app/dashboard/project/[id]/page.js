@@ -87,6 +87,7 @@ export default function ProjectDetailsPage({ params }) {
     loading: false,
     error: null,
   });
+  const [downloadAllLoading, setDownloadAllLoading] = useState(false);
   const normalizedProgress = useMemo(
     () => normalizeProgressPercent(project),
     [project],
@@ -373,9 +374,9 @@ export default function ProjectDetailsPage({ params }) {
   };
 
   const handleDownloadAll = async () => {
-    const vpsBase = getApiBase();
+    setDownloadAllLoading(true);
     try {
-      const res = await fetch(`${vpsBase}/download/all/${encodeURIComponent(id)}`, {
+      const res = await fetch(`/api/download/all/${encodeURIComponent(id)}`, {
         headers: await authHeaders(user),
       });
       if (!res.ok) {
@@ -394,6 +395,8 @@ export default function ProjectDetailsPage({ params }) {
       URL.revokeObjectURL(url);
     } catch (err) {
       alert(userDeliveryError(err.message));
+    } finally {
+      setDownloadAllLoading(false);
     }
   };
 
@@ -409,6 +412,7 @@ export default function ProjectDetailsPage({ params }) {
         agent={agent}
         onDownloadVideo={handleDownloadVideo}
         onDownloadAll={handleDownloadAll}
+        downloadAllLoading={downloadAllLoading}
       />
 
       {isDeliveryRecoverable && (
