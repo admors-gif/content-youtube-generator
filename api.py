@@ -2783,7 +2783,16 @@ def _youtube_tags_for_project(data: dict, title: str) -> list[str]:
     agent_id = data.get("agentId") or data.get("agent")
     fmt = data.get("format")
     if agent_id == "agent_podcast_general" or fmt == "podcast":
-        extras = ["Esto no es amor", "podcast en español", "apego emocional", "amor propio", "relaciones"]
+        extras = [
+            "Esto no es amor",
+            "podcast en español",
+            "apego emocional",
+            "dependencia emocional",
+            "amor propio",
+            "relaciones",
+            "contacto cero",
+            "sanación emocional",
+        ]
     elif fmt in {"autohipnosis", "meditacion_larga"}:
         extras = ["meditación guiada", "relajación", "calma", "bienestar"]
     else:
@@ -2814,12 +2823,19 @@ def _youtube_hashtags_for_project(data: dict, title: str, tags: list[str]) -> li
     agent_id = data.get("agentId") or data.get("agent")
     fmt = data.get("format")
     if agent_id == "agent_podcast_general" or fmt == "podcast":
-        base = ["Esto no es amor", "Apego emocional", "Amor propio", "Relaciones", "Podcast"]
+        base = [
+            "Esto no es amor",
+            "Apego emocional",
+            "Dependencia emocional",
+            "Amor propio",
+            "Relaciones",
+            "Podcast en español",
+        ]
     elif fmt in {"autohipnosis", "meditacion_larga"}:
         base = ["Meditación guiada", "Calma", "Bienestar", "Relajación"]
     else:
         base = ["Documental", "Historia", "Cultura"]
-    candidates = base + tags[:6] + _compact_title_words(title, limit=5)
+    candidates = base if (agent_id == "agent_podcast_general" or fmt == "podcast") else base + tags[:6] + _compact_title_words(title, limit=5)
     hashtags: list[str] = []
     for item in candidates:
         tag = _youtube_hashtag(item)
@@ -2833,9 +2849,25 @@ def _youtube_hashtags_for_project(data: dict, title: str, tags: list[str]) -> li
 def _chapter_lines_from_scenes(scenes: list) -> list[str]:
     lines = []
     current = 0
+    meaningful_labels = []
+    for scene in scenes or []:
+        label = " ".join(str(scene.get("title") or scene.get("label") or "").split())
+        if label and not re.fullmatch(r"(?i)(parte|part|scene|escena)\s*\d+", label):
+            meaningful_labels.append(label)
+    if len(meaningful_labels) < 2:
+        return []
+
     for i, scene in enumerate(scenes or [], 1):
         duration = scene.get("target_duration_seconds") or scene.get("targetDurationSeconds")
-        label = scene.get("title") or scene.get("label") or f"Parte {i}"
+        label = " ".join(str(scene.get("title") or scene.get("label") or "").split())
+        if not label or re.fullmatch(r"(?i)(parte|part|scene|escena)\s*\d+", label):
+            label = "Inicio" if i == 1 else ""
+        if not label:
+            try:
+                current += max(1, float(duration or 0))
+            except (TypeError, ValueError):
+                current += 0
+            continue
         if i == 1:
             label = "Inicio"
         minutes = int(current // 60)
@@ -2848,28 +2880,76 @@ def _chapter_lines_from_scenes(scenes: list) -> list[str]:
     return lines if len(lines) >= 3 and current > 0 else []
 
 
-def _build_youtube_publish_pack(project_id: str, data: dict) -> dict:
-    title = data.get("title") or (data.get("seo_metadata") or {}).get("title") or "Video listo para publicar"
+def _is_podcast_project(data: dict) -> bool:
+    return (data.get("agentId") or data.get("agent")) == "agent_podcast_general" or data.get("format") == "podcast"
+
+
+def _youtube_base_description(data: dict, title: str) -> str:
     seo = data.get("seo_metadata") or {}
     description = " ".join(str(seo.get("description") or "").split())
-    if not description:
-        description = f"Nuevo episodio: {title}."
+    if description:
+        return description
+    if _is_podcast_project(data):
+        return (
+            f"Un episodio de Esto no es amor sobre {title}, apego emocional, "
+            "amor propio y relaciones donde la ansiedad puede confundirse con cariño."
+        )
+    return f"Nuevo video: {title}."
 
-    tags = _youtube_tags_for_project(data, title)
-    hashtags = _youtube_hashtags_for_project(data, title, tags)
-    chapters = _chapter_lines_from_scenes(data.get("scenes") or [])
+
+def _youtube_description_for_project(
+    data: dict,
+    title: str,
+    base_description: str,
+    hashtags: list[str],
+    chapters: list[str],
+) -> str:
     hashtag_line = " ".join(hashtags)
+    if _is_podcast_project(data):
+        parts = [
+            base_description,
+            (
+                f"En este episodio de Esto no es amor hablamos de {title} desde el apego emocional, "
+                "la dependencia emocional, la dependencia afectiva, el amor propio y esas relaciones donde la intensidad se siente como amor, "
+                "pero en realidad puede esconder ansiedad, miedo al abandono o necesidad de validación."
+            ),
+            (
+                "Si alguna vez perseguiste a quien no te elegía, confundiste incertidumbre con química o sentiste "
+                "que soltar era imposible, este espacio es para mirar la verdad sin juicio y volver a elegirte."
+            ),
+            (
+                "Suscríbete para más conversaciones sobre relaciones, límites, contacto cero, autoestima y sanación emocional. "
+                "Déjame en comentarios qué parte te movió más o qué tema quieres que hablemos en un próximo episodio."
+            ),
+            (
+                "Si quieres crear tu propio podcast o necesitas ayuda para convertir tus ideas en contenido listo para publicar, "
+                "también puedes ponerte en contacto con nosotros."
+            ),
+        ]
+        if chapters:
+            parts.extend(["Momentos del episodio:", *chapters[:12]])
+        if hashtag_line:
+            parts.append(hashtag_line)
+        return "\n\n".join(part for part in parts if part).strip()[:5000]
 
-    description_parts = [
-        description,
-        "",
+    parts = [
+        base_description,
         "En este video exploramos el tema con una mirada clara, emocional y práctica.",
     ]
     if chapters:
-        description_parts.extend(["", "Capítulos:", *chapters[:20]])
+        parts.extend(["Capítulos:", *chapters[:20]])
     if hashtag_line:
-        description_parts.extend(["", hashtag_line])
-    youtube_description = "\n".join(description_parts).strip()
+        parts.append(hashtag_line)
+    return "\n\n".join(part for part in parts if part).strip()[:5000]
+
+
+def _build_youtube_publish_pack(project_id: str, data: dict) -> dict:
+    title = data.get("title") or (data.get("seo_metadata") or {}).get("title") or "Video listo para publicar"
+    tags = _youtube_tags_for_project(data, title)
+    hashtags = _youtube_hashtags_for_project(data, title, tags)
+    chapters = _chapter_lines_from_scenes(data.get("scenes") or [])
+    description = _youtube_base_description(data, title)
+    youtube_description = _youtube_description_for_project(data, title, description, hashtags, chapters)
 
     pinned_comment = (
         "¿Qué parte de este tema te hizo más sentido? Te leo en comentarios."
@@ -3252,6 +3332,20 @@ def _youtube_upload_thumbnail(access_token: str, video_id: str, thumbnail_file: 
     return True
 
 
+def _youtube_thumbnail_warning(exc: Exception | str) -> str:
+    raw = str(exc)
+    lowered = raw.lower()
+    if "thumbnail" in lowered and ("permission" in lowered or "403" in lowered or "forbidden" in lowered):
+        return (
+            "El video sí se subió, pero YouTube no permitió subir la miniatura personalizada. "
+            "Esto suele pasar cuando el canal aún no tiene permisos de miniaturas personalizadas; "
+            "verifícalo en YouTube Studio o súbela manualmente ahí."
+        )
+    if "thumbnail exceeds" in lowered or "2mb" in lowered:
+        return "El video sí se subió, pero la miniatura pesa más de 2 MB. Usa una variante más ligera o súbela manualmente en YouTube Studio."
+    return "El video sí se subió, pero no se pudo aplicar la miniatura personalizada. Revísala manualmente en YouTube Studio."
+
+
 def _run_youtube_publish_job(uid: str, project_id: str, job_id: str, payload: dict):
     try:
         _ensure_firebase_initialized()
@@ -3317,7 +3411,7 @@ def _run_youtube_publish_job(uid: str, project_id: str, job_id: str, payload: di
                 # New YouTube channels may reject custom thumbnails until the
                 # channel is verified. The upload itself is still useful, so do
                 # not turn a thumbnail problem into a failed publication.
-                thumbnail_warning = str(thumb_exc)[:500]
+                thumbnail_warning = _youtube_thumbnail_warning(thumb_exc)[:500]
 
         youtube_url = f"https://studio.youtube.com/video/{video_id}/edit"
         job_ref.update({

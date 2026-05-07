@@ -40,6 +40,16 @@ async function readJsonResponse(res) {
   }
 }
 
+function humanizeYouTubeWarning(value) {
+  const raw = String(value || "");
+  const lower = raw.toLowerCase();
+  if (!raw) return "";
+  if (lower.includes("thumbnail") && (lower.includes("permission") || lower.includes("403") || lower.includes("forbidden"))) {
+    return "El video sí se subió, pero YouTube no permitió aplicar la miniatura personalizada. Verifica el canal en YouTube Studio o súbela manualmente ahí.";
+  }
+  return raw;
+}
+
 export default function YouTubePublishModal({ open, onClose, projectId, project, user }) {
   const [loading, setLoading] = useState(false);
   const [channels, setChannels] = useState([]);
@@ -381,7 +391,7 @@ export default function YouTubePublishModal({ open, onClose, projectId, project,
                   )}
                   {job.warning && (
                     <div className="cf-caption" style={{ marginTop: 8, color: "var(--warn)" }}>
-                      {job.warning}
+                      {humanizeYouTubeWarning(job.warning)}
                     </div>
                   )}
                   {job.youtubeStudioUrl && (

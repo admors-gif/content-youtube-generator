@@ -26,8 +26,27 @@ def test_youtube_publish_pack_for_podcast_contains_upload_material():
     assert "apego emocional" in pack["tags"]
     assert "podcast en español" in pack["tags"]
     assert "00:00 Inicio" in pack["description"]
+    assert "Suscríbete" in pack["description"]
+    assert "crear tu propio podcast" in pack["description"]
+    assert "Parte 1" not in pack["description"]
     assert "comentarios" in pack["pinned_comment"].lower()
     assert "- [ ] Subir el video final con subtítulos." in pack["checklist"]
+
+
+def test_youtube_publish_pack_omits_generic_part_chapters_for_podcast():
+    data = {
+        "title": "Esto no es amor, es apego: aprende a reconocer la diferencia",
+        "format": "podcast",
+        "agentId": "agent_podcast_general",
+        "scenes": [{"target_duration_seconds": 60} for _ in range(15)],
+    }
+
+    pack = api._build_youtube_publish_pack("project-1", data)
+
+    assert pack["chapters"] == []
+    assert "Parte 12" not in pack["description"]
+    assert "dependencia emocional" in pack["description"]
+    assert "#PodcastEnEspañol" in pack["description"]
 
 
 def test_youtube_tags_are_limited_and_deduplicated():

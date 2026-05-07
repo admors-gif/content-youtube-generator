@@ -39,6 +39,20 @@ def test_youtube_video_resource_keeps_scheduled_upload_private():
     assert resource["status"]["publishAt"] == "2026-05-10T18:00:00Z"
 
 
+def test_youtube_thumbnail_warning_is_clear_for_channel_permission_error():
+    raw = (
+        'youtube thumbnail upload failed: { "error": { "code": 403, '
+        '"message": "The authenticated user doesn\'t have permissions to upload and set custom video thumbnails." }}'
+    )
+
+    warning = api._youtube_thumbnail_warning(raw)
+
+    assert "video sí se subió" in warning
+    assert "miniatura personalizada" in warning
+    assert "{" not in warning
+    assert "403" not in warning
+
+
 def test_youtube_config_status_reports_missing_oauth_env(monkeypatch):
     for key in [
         "YOUTUBE_OAUTH_CLIENT_ID",
