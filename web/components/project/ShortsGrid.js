@@ -10,10 +10,11 @@ import Icon from "@/components/Icon";
 const SHORT_LABELS = {
   hook: "HOOK",
   mid: "PUNTO FUERTE",
+  end: "CIERRE",
   closing: "CIERRE",
 };
 
-export default function ShortsGrid({ shorts }) {
+export default function ShortsGrid({ shorts, onPublishShorts }) {
   if (!Array.isArray(shorts) || shorts.length === 0) return null;
 
   return (
@@ -35,17 +36,34 @@ export default function ShortsGrid({ shorts }) {
         >
           VERSIONES CORTAS · 9:16
         </div>
-        <div
-          style={{
-            font: "var(--t-h3)",
-            color: "var(--paper)",
-            marginTop: 4,
-            fontFamily: "var(--font-display)",
-            fontWeight: 600,
-          }}
-        >
-          {shorts.length} clip{shorts.length === 1 ? "" : "s"} listos para
-          publicar
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <div
+            style={{
+              font: "var(--t-h3)",
+              color: "var(--paper)",
+              marginTop: 4,
+              fontFamily: "var(--font-display)",
+              fontWeight: 600,
+            }}
+          >
+            {shorts.length} clip{shorts.length === 1 ? "" : "s"} listos para
+            publicar
+          </div>
+          {onPublishShorts && (
+            <button
+              type="button"
+              onClick={onPublishShorts}
+              className="cf-btn cf-btn--secondary"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+              title="Revisar metadata y programar Shorts en YouTube"
+            >
+              <Icon name="uploadCloud" size={16} /> Publicar Shorts
+            </button>
+          )}
         </div>
       </div>
       <div

@@ -25,6 +25,7 @@ import ThumbnailsGrid from "@/components/project/ThumbnailsGrid";
 import ScriptTab from "@/components/project/ScriptTab";
 import ScenesTab from "@/components/project/ScenesTab";
 import YouTubePublishModal from "@/components/project/YouTubePublishModal";
+import YouTubeShortsPublishModal from "@/components/project/YouTubeShortsPublishModal";
 import Icon from "@/components/Icon";
 
 /**
@@ -90,6 +91,7 @@ export default function ProjectDetailsPage({ params }) {
   });
   const [downloadAllLoading, setDownloadAllLoading] = useState(false);
   const [publishModalOpen, setPublishModalOpen] = useState(false);
+  const [shortsPublishModalOpen, setShortsPublishModalOpen] = useState(false);
   const normalizedProgress = useMemo(
     () => normalizeProgressPercent(project),
     [project],
@@ -439,6 +441,13 @@ export default function ProjectDetailsPage({ params }) {
         user={user}
       />
 
+      <YouTubeShortsPublishModal
+        open={shortsPublishModalOpen}
+        onClose={() => setShortsPublishModalOpen(false)}
+        projectId={id}
+        user={user}
+      />
+
       {isDeliveryRecoverable && (
         <div
           className="cf-card cf-fade cf-fade--1"
@@ -505,7 +514,10 @@ export default function ProjectDetailsPage({ params }) {
       )}
 
       {project.status === "completed" && (
-        <ShortsGrid shorts={project.shorts} />
+        <ShortsGrid
+          shorts={project.shorts}
+          onPublishShorts={() => setShortsPublishModalOpen(true)}
+        />
       )}
 
       {project.status === "completed" && (

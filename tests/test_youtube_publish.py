@@ -87,3 +87,73 @@ def test_youtube_config_status_reports_missing_oauth_env(monkeypatch):
     assert status["configured"] is False
     assert "client_id" in status["missing"]
     assert "client_secret" in status["missing"]
+
+
+def test_youtube_short_resource_sets_safe_upload_metadata():
+    data = {
+        "title": "Esto no es amor, es apego: aprende a reconocer la diferencia",
+        "format": "podcast",
+        "agentId": "agent_podcast_general",
+    }
+    short = {"index": 1, "label": "hook"}
+    payload = {
+        "title": "La señal que no querías ver",
+        "privacyStatus": "public",
+        "publishAt": "2026-05-10T18:00:00Z",
+        "tags": "apego emocional, amor propio, apego emocional",
+    }
+
+    resource = api._youtube_short_resource("project-1", data, short, payload)
+
+    assert resource["snippet"]["title"] == "La señal que no querías ver #Shorts"
+    assert resource["snippet"]["tags"].count("apego emocional") == 1
+    assert resource["status"]["privacyStatus"] == "private"
+    assert resource["status"]["publishAt"] == "2026-05-10T18:00:00Z"
+    assert resource["status"]["selfDeclaredMadeForKids"] is False
+    assert resource["status"]["containsSyntheticMedia"] is True
+    assert resource["paidProductPlacementDetails"]["hasPaidProductPlacement"] is False
+
+
+def test_youtube_shorts_pack_includes_seo_hashtags_and_offsets():
+    data = {
+        "title": "Por qué te obsesionas con quien no te elige.",
+        "format": "podcast",
+        "agentId": "agent_podcast_general",
+        "shorts": [
+            {"index": 1, "label": "hook", "duration": 55},
+            {"index": 2, "label": "mid", "duration": 55},
+            {"index": 3, "label": "end", "duration": 55},
+        ],
+    }
+
+    pack = api._build_youtube_shorts_publish_pack("project-1", data)
+
+    assert len(pack["shorts"]) == 3
+    assert "#Shorts" in pack["shorts"][0]["metadata"]["hashtags"]
+    assert "#EstoNoEsAmor" in pack["shorts"][0]["metadata"]["description"]
+    assert pack["shorts"][0]["metadata"]["offsetHours"] == -24
+    assert pack["shorts"][1]["metadata"]["offsetHours"] == -3
+    assert pack["shorts"][2]["metadata"]["offsetHours"] == 24
+
+
+def test_youtube_short_preflight_blocks_horizontal_or_too_long(tmp_path, monkeypatch):
+    shorts_dir = tmp_path / "shorts"
+    shorts_dir.mkdir()
+    short_file = shorts_dir / "SHORT_01_hook.mp4"
+    short_file.write_bytes(b"fake")
+
+    monkeypatch.setattr(api, "_validate_media_file", lambda *_args, **_kwargs: (True, 181.0, ""))
+    monkeypatch.setattr(api, "_youtube_video_dimensions", lambda *_args, **_kwargs: (1080, 1920))
+
+    result = api._youtube_short_preflight(tmp_path, {"index": 1, "label": "hook"})
+
+    assert result["eligible"] is False
+    assert "180 seconds" in result["error"]
+
+    monkeypatch.setattr(api, "_validate_media_file", lambda *_args, **_kwargs: (True, 55.0, ""))
+    monkeypatch.setattr(api, "_youtube_video_dimensions", lambda *_args, **_kwargs: (1920, 1080))
+
+    result = api._youtube_short_preflight(tmp_path, {"index": 1, "label": "hook"})
+
+    assert result["eligible"] is False
+    assert "vertical" in result["error"]

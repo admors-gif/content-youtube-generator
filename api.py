@@ -3237,6 +3237,169 @@ def _build_youtube_video_resource(project_id: str, data: dict, payload: dict | N
     }
 
 
+_YOUTUBE_SHORT_HASHTAGS = [
+    "#Shorts",
+    "#EstoNoEsAmor",
+    "#ApegoEmocional",
+    "#AmorPropio",
+    "#Relaciones",
+]
+
+_YOUTUBE_SHORT_LABEL_COPY = {
+    "hook": {
+        "name": "Gancho",
+        "title": "La señal que no debes ignorar",
+        "description": "Un fragmento para reconocer cuándo la intensidad se parece más al apego que al amor.",
+        "offsetHours": -24,
+    },
+    "mid": {
+        "name": "Punto fuerte",
+        "title": "La parte que más duele aceptar",
+        "description": "Una idea central del episodio para mirar el patrón con más claridad.",
+        "offsetHours": -3,
+    },
+    "end": {
+        "name": "Cierre",
+        "title": "Vuelve a elegirte",
+        "description": "Un recordatorio final para soltar lo que no te elige y volver a ti.",
+        "offsetHours": 24,
+    },
+    "closing": {
+        "name": "Cierre",
+        "title": "Vuelve a elegirte",
+        "description": "Un recordatorio final para soltar lo que no te elige y volver a ti.",
+        "offsetHours": 24,
+    },
+}
+
+
+def _youtube_short_hashtags(data: dict, title: str) -> list[str]:
+    if _is_podcast_project(data):
+        return list(_YOUTUBE_SHORT_HASHTAGS)
+    tags = ["#Shorts"]
+    for item in _youtube_hashtags_for_project(data, title, _youtube_tags_for_project(data, title))[:4]:
+        if item.lower() not in {tag.lower() for tag in tags}:
+            tags.append(item)
+    return tags[:5]
+
+
+def _youtube_shorts_title(value: str, suffix: str = " #Shorts") -> str:
+    title = " ".join(str(value or "").split()).replace("<", "").replace(">", "")
+    if not title:
+        title = "Short listo para publicar"
+    if "#shorts" in title.lower():
+        return title[:100].rstrip()
+    room = 100 - len(suffix)
+    if len(title) > room:
+        title = title[: max(1, room - 1)].rstrip(" .,:;") + "..."
+    return f"{title}{suffix}"[:100].rstrip()
+
+
+def _build_youtube_short_metadata(project_id: str, data: dict, short: dict) -> dict:
+    long_title = data.get("title") or (data.get("seo_metadata") or {}).get("title") or "Episodio listo"
+    label = str(short.get("label") or "").strip().lower()
+    label_copy = _YOUTUBE_SHORT_LABEL_COPY.get(label) or {
+        "name": f"Clip {short.get('index') or ''}".strip(),
+        "title": "Un momento clave del episodio",
+        "description": "Un fragmento del episodio completo.",
+        "offsetHours": 24,
+    }
+    hashtags = _youtube_short_hashtags(data, long_title)
+    tags = _youtube_tags_for_project(data, long_title)
+    for extra in ["shorts", "YouTube Shorts", label_copy["name"]]:
+        if extra and extra.lower() not in {tag.lower() for tag in tags}:
+            tags.append(extra)
+
+    if _is_podcast_project(data):
+        title = _youtube_shorts_title(f"Esto no es amor: {label_copy['title']}")
+        description_parts = [
+            f"Short del episodio completo: {long_title}.",
+            label_copy["description"],
+            "Mira el episodio completo en el canal y suscríbete para más conversaciones sobre apego emocional, amor propio, límites y relaciones.",
+            "Déjame en comentarios si esto te sonó a amor o a apego.",
+        ]
+    else:
+        title = _youtube_shorts_title(f"{long_title} - {label_copy['name']}")
+        description_parts = [
+            f"Short del video completo: {long_title}.",
+            label_copy["description"],
+            "Mira el video completo en el canal y suscríbete para más contenido.",
+        ]
+
+    long_video_id = ((data.get("youtube") or {}).get("lastVideoId") or "").strip()
+    if long_video_id:
+        description_parts.append(f"Episodio completo: https://youtu.be/{long_video_id}")
+
+    description_parts.append(" ".join(hashtags))
+    return {
+        "projectId": project_id,
+        "index": int(short.get("index") or 0),
+        "label": label,
+        "labelName": label_copy["name"],
+        "title": title,
+        "description": "\n\n".join(part for part in description_parts if part).strip()[:5000],
+        "tags": tags[:30],
+        "tagsCsv": ", ".join(tags[:30]),
+        "hashtags": hashtags,
+        "offsetHours": int(label_copy.get("offsetHours") or 24),
+    }
+
+
+def _build_youtube_shorts_publish_pack(project_id: str, data: dict) -> dict:
+    shorts = []
+    for short in data.get("shorts") or []:
+        if not isinstance(short, dict):
+            continue
+        metadata = _build_youtube_short_metadata(project_id, data, short)
+        shorts.append({
+            **short,
+            "metadata": metadata,
+        })
+    return {
+        "projectId": project_id,
+        "shorts": shorts,
+        "hashtags": _youtube_short_hashtags(data, data.get("title") or ""),
+        "scheduleOffsetsHours": [-24, -3, 24],
+    }
+
+
+def _youtube_short_resource(project_id: str, data: dict, short: dict, payload: dict | None = None) -> dict:
+    payload = payload or {}
+    metadata = _build_youtube_short_metadata(project_id, data, short)
+    title = _youtube_shorts_title(payload.get("title") or metadata["title"])
+    description = str(payload.get("description") or metadata["description"])[:5000]
+    if "#shorts" not in description.lower():
+        description = (description.rstrip() + "\n\n#Shorts")[:5000]
+    tags = _youtube_split_tags(payload.get("tags") or metadata["tags"])
+    privacy = str(payload.get("privacyStatus") or "private").strip().lower()
+    if privacy not in {"private", "unlisted", "public"}:
+        privacy = "private"
+    publish_at = str(payload.get("publishAt") or "").strip()
+    if publish_at:
+        privacy = "private"
+
+    status = {
+        "privacyStatus": privacy,
+        "selfDeclaredMadeForKids": False,
+        "containsSyntheticMedia": True,
+    }
+    if publish_at:
+        status["publishAt"] = publish_at
+
+    return {
+        "snippet": {
+            "title": title,
+            "description": description,
+            "tags": tags,
+            "categoryId": str(payload.get("categoryId") or "22"),
+        },
+        "status": status,
+        "paidProductPlacementDetails": {
+            "hasPaidProductPlacement": bool(payload.get("hasPaidProductPlacement") or False),
+        },
+    }
+
+
 def _youtube_public_channel_doc(snapshot) -> dict:
     data = snapshot.to_dict() or {}
     return {
@@ -3315,12 +3478,92 @@ def _youtube_video_preflight(data: dict) -> dict:
         return {**result, "warning": str(exc)[:200]}
 
 
+def _youtube_video_dimensions(video_path: Path) -> tuple[int, int]:
+    try:
+        out = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "json",
+                str(video_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if out.returncode != 0:
+            return 0, 0
+        streams = (json.loads(out.stdout or "{}").get("streams") or [])
+        first = streams[0] if streams else {}
+        return int(first.get("width") or 0), int(first.get("height") or 0)
+    except Exception:
+        return 0, 0
+
+
+def _youtube_short_file(video_dir: Path, short: dict) -> Path | None:
+    shorts_dir = video_dir / "shorts"
+    if not shorts_dir.is_dir():
+        return None
+    index = int(short.get("index") or 0)
+    label = re.sub(r"[^A-Za-z0-9_-]+", "", str(short.get("label") or ""))
+    candidates: list[Path] = []
+    if index and label:
+        candidates.append(shorts_dir / f"SHORT_{index:02d}_{label}.mp4")
+    if index:
+        candidates.extend(sorted(shorts_dir.glob(f"SHORT_{index:02d}_*.mp4")))
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _youtube_short_preflight(video_dir: Path, short: dict) -> dict:
+    file_path = _youtube_short_file(video_dir, short)
+    result = {
+        "index": int(short.get("index") or 0),
+        "label": short.get("label") or "",
+        "filename": file_path.name if file_path else None,
+        "durationSeconds": None,
+        "width": None,
+        "height": None,
+        "eligible": False,
+        "error": "",
+    }
+    if not file_path:
+        return {**result, "error": "short file not found on disk"}
+    ok, duration, err = _validate_media_file(file_path, min_duration_seconds=1)
+    width, height = _youtube_video_dimensions(file_path)
+    result.update({
+        "durationSeconds": round(duration, 2),
+        "width": width or None,
+        "height": height or None,
+    })
+    if not ok:
+        return {**result, "error": err or "short is not readable"}
+    if duration > 180:
+        return {**result, "error": "short exceeds 180 seconds"}
+    if not width or not height:
+        return {**result, "error": "short dimensions could not be read"}
+    if height < width:
+        return {**result, "error": "short must be vertical or square"}
+    return {**result, "eligible": True}
+
+
 def _youtube_upload_video(access_token: str, video_file: Path, resource: dict) -> str:
     import requests
     size = video_file.stat().st_size
+    parts = ["snippet", "status"]
+    if resource.get("paidProductPlacementDetails"):
+        parts.append("paidProductPlacementDetails")
     init = requests.post(
         "https://www.googleapis.com/upload/youtube/v3/videos",
-        params={"uploadType": "resumable", "part": "snippet,status"},
+        params={"uploadType": "resumable", "part": ",".join(parts)},
         headers={
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json; charset=UTF-8",
@@ -3464,12 +3707,15 @@ def _run_youtube_publish_job(uid: str, project_id: str, job_id: str, payload: di
             "completedAt": firestore.SERVER_TIMESTAMP,
             "updatedAt": firestore.SERVER_TIMESTAMP,
         })
-        project_ref.update({
+        project_update = {
             "youtube.lastPublishJobId": job_id,
             "youtube.lastVideoId": video_id,
             "youtube.lastStudioUrl": youtube_url,
             "youtube.lastPublishedAt": firestore.SERVER_TIMESTAMP,
-        })
+        }
+        if payload.get("publishAt"):
+            project_update["youtube.lastScheduledPublishAt"] = payload.get("publishAt")
+        project_ref.update(project_update)
     except Exception as exc:
         try:
             _ensure_firebase_initialized()
@@ -3477,6 +3723,139 @@ def _run_youtube_publish_job(uid: str, project_id: str, job_id: str, payload: di
             firestore.client().collection("youtubePublishJobs").document(job_id).update({
                 "status": "error",
                 "step": "Error al publicar",
+                "error": str(exc)[:500],
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            })
+        except Exception:
+            pass
+
+
+def _run_youtube_shorts_publish_job(uid: str, project_id: str, job_id: str, payload: dict):
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        job_ref = db.collection("youtubePublishJobs").document(job_id)
+        job_ref.update({
+            "status": "running",
+            "step": "Preparando Shorts y metadata",
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+
+        project_ref = db.collection("projects").document(project_id)
+        project_snap = project_ref.get()
+        if not project_snap.exists:
+            raise RuntimeError("project not found")
+        project = project_snap.to_dict() or {}
+        if project.get("userId") != uid:
+            raise RuntimeError("project access denied")
+        if project.get("status") != "completed":
+            raise RuntimeError("project is not completed")
+
+        channel_id = str(payload.get("channelId") or "").strip()
+        if not channel_id:
+            raise RuntimeError("missing channelId")
+        channel_ref = db.collection("users").document(uid).collection("youtubeChannels").document(channel_id)
+        channel_snap = channel_ref.get()
+        if not channel_snap.exists:
+            raise RuntimeError("YouTube channel is not connected")
+        channel = channel_snap.to_dict() or {}
+        refresh_token = _youtube_decrypt_token(channel.get("refreshTokenEncrypted") or "")
+        access = _youtube_refresh_access_token(refresh_token).get("access_token")
+        if not access:
+            raise RuntimeError("youtube refresh did not return access token")
+
+        video_dir = _youtube_project_video_dir(project)
+        if not video_dir.is_dir():
+            raise RuntimeError("project output folder not found")
+
+        selected = payload.get("shorts") if isinstance(payload.get("shorts"), list) else []
+        by_index = {
+            int(short.get("index") or 0): short
+            for short in (project.get("shorts") or [])
+            if isinstance(short, dict)
+        }
+        successes = []
+        errors = []
+        total = len(selected)
+        for position, short_payload in enumerate(selected, 1):
+            try:
+                index = int(short_payload.get("index") or 0)
+                source_short = by_index.get(index)
+                if not source_short:
+                    raise RuntimeError(f"short {index} not found in project")
+                preflight = _youtube_short_preflight(video_dir, source_short)
+                if not preflight.get("eligible"):
+                    raise RuntimeError(preflight.get("error") or f"short {index} is not eligible")
+                short_file = _youtube_short_file(video_dir, source_short)
+                if not short_file:
+                    raise RuntimeError(f"short {index} file not found")
+
+                resource = _youtube_short_resource(project_id, project, source_short, short_payload)
+                job_ref.update({
+                    "step": f"Subiendo Short {position}/{total}",
+                    "currentShortIndex": index,
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                })
+                video_id = _youtube_upload_video(access, short_file, resource)
+                if not video_id:
+                    raise RuntimeError("YouTube did not return video id")
+                item = {
+                    "index": index,
+                    "label": source_short.get("label") or "",
+                    "youtubeVideoId": video_id,
+                    "youtubeStudioUrl": f"https://studio.youtube.com/video/{video_id}/edit",
+                    "title": resource["snippet"]["title"],
+                    "privacyStatus": resource["status"]["privacyStatus"],
+                    "publishAt": resource["status"].get("publishAt") or "",
+                    "uploadedAt": datetime.now(timezone.utc).isoformat(),
+                }
+                successes.append(item)
+                job_ref.update({
+                    "items": successes + errors,
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                })
+            except Exception as item_exc:
+                error_item = {
+                    "index": int(short_payload.get("index") or 0) if isinstance(short_payload, dict) else 0,
+                    "status": "error",
+                    "error": str(item_exc)[:300],
+                }
+                errors.append(error_item)
+                job_ref.update({
+                    "items": successes + errors,
+                    "warning": f"{len(errors)} Short(s) con error",
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                })
+
+        if not successes:
+            detail = "; ".join(item.get("error", "") for item in errors) or "no Shorts uploaded"
+            raise RuntimeError(detail[:500])
+
+        warning = ""
+        if errors:
+            warning = f"Se subieron {len(successes)} de {total} Shorts. Revisa los errores antes de reintentar."
+
+        job_ref.update({
+            "status": "completed",
+            "step": "Shorts listos para revisión en YouTube Studio",
+            "items": successes + errors,
+            "warning": warning,
+            "completedAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        project_ref.update({
+            "youtube.shortsLastPublishJobId": job_id,
+            "youtube.shortsLastPublishedAt": firestore.SERVER_TIMESTAMP,
+            "youtube.shortsUploads": firestore.ArrayUnion(successes),
+        })
+    except Exception as exc:
+        try:
+            _ensure_firebase_initialized()
+            from firebase_admin import firestore
+            firestore.client().collection("youtubePublishJobs").document(job_id).update({
+                "status": "error",
+                "step": "Error al publicar Shorts",
                 "error": str(exc)[:500],
                 "updatedAt": firestore.SERVER_TIMESTAMP,
             })
@@ -3628,6 +4007,56 @@ def youtube_publish_preview(project_id: str, request: Request):
     }
 
 
+@app.get("/youtube/shorts/preview/{project_id}")
+def youtube_shorts_publish_preview(project_id: str, request: Request):
+    principal = _require_project_access(request, project_id)
+    data = principal.get("project") or {}
+    pack = _build_youtube_shorts_publish_pack(project_id, data)
+    preflight_by_index = {}
+    try:
+        video_dir = _youtube_project_video_dir(data)
+        for short in data.get("shorts") or []:
+            if isinstance(short, dict):
+                preflight_by_index[int(short.get("index") or 0)] = _youtube_short_preflight(video_dir, short)
+    except Exception as exc:
+        error = str(exc)[:200]
+        preflight_by_index = {
+            int(short.get("index") or 0): {
+                "index": int(short.get("index") or 0),
+                "label": short.get("label") or "",
+                "eligible": False,
+                "error": error,
+            }
+            for short in (data.get("shorts") or [])
+            if isinstance(short, dict)
+        }
+
+    shorts = []
+    for short in pack["shorts"]:
+        index = int(short.get("index") or 0)
+        shorts.append({
+            "index": index,
+            "label": short.get("label") or "",
+            "duration": short.get("duration"),
+            "sizeMb": short.get("size_mb"),
+            "signedUrl": short.get("signed_url"),
+            "metadata": short.get("metadata") or {},
+            "preflight": preflight_by_index.get(index, {}),
+        })
+
+    return {
+        "projectId": project_id,
+        "configured": _youtube_config_status()["configured"],
+        "shorts": shorts,
+        "defaults": {
+            "privacyStatus": "private",
+            "categoryId": "22",
+            "scheduleOffsetsHours": pack["scheduleOffsetsHours"],
+            "basePublishAt": ((data.get("youtube") or {}).get("lastScheduledPublishAt") or ""),
+        },
+    }
+
+
 @app.post("/youtube/publish/{project_id}")
 async def youtube_publish(project_id: str, request: Request, background_tasks: BackgroundTasks):
     principal = _require_project_access(request, project_id)
@@ -3652,6 +4081,56 @@ async def youtube_publish(project_id: str, request: Request, background_tasks: B
     })
     background_tasks.add_task(_run_youtube_publish_job, principal["uid"], project_id, job_ref.id, payload)
     return {"jobId": job_ref.id, "status": "queued", "metadata": resource_preview}
+
+
+@app.post("/youtube/shorts/publish/{project_id}")
+async def youtube_shorts_publish(project_id: str, request: Request, background_tasks: BackgroundTasks):
+    principal = _require_project_access(request, project_id)
+    status = _youtube_config_status()
+    if not status["configured"]:
+        return JSONResponse(status_code=503, content={"error": "youtube_oauth_not_configured", **status})
+    payload = await request.json()
+    selected = payload.get("shorts") if isinstance(payload.get("shorts"), list) else []
+    if not selected:
+        return JSONResponse(status_code=400, content={"error": "select at least one Short"})
+
+    data = principal.get("project") or {}
+    shorts_by_index = {
+        int(short.get("index") or 0): short
+        for short in (data.get("shorts") or [])
+        if isinstance(short, dict)
+    }
+    preview_resources = []
+    for item in selected:
+        if not isinstance(item, dict):
+            continue
+        source = shorts_by_index.get(int(item.get("index") or 0))
+        if source:
+            preview_resources.append({
+                "index": int(item.get("index") or 0),
+                "resource": _youtube_short_resource(project_id, data, source, item),
+            })
+    if not preview_resources:
+        return JSONResponse(status_code=400, content={"error": "selected Shorts are not available"})
+
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    db = firestore.client()
+    job_ref = db.collection("youtubePublishJobs").document()
+    job_ref.set({
+        "uid": principal["uid"],
+        "projectId": project_id,
+        "channelId": payload.get("channelId"),
+        "type": "shorts",
+        "status": "queued",
+        "step": "En cola para subir Shorts",
+        "items": [],
+        "metadata": {"shorts": preview_resources},
+        "createdAt": firestore.SERVER_TIMESTAMP,
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    })
+    background_tasks.add_task(_run_youtube_shorts_publish_job, principal["uid"], project_id, job_ref.id, payload)
+    return {"jobId": job_ref.id, "status": "queued", "metadata": {"shorts": preview_resources}}
 
 
 @app.get("/youtube/publish/jobs/{job_id}")
