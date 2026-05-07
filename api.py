@@ -3348,6 +3348,17 @@ def youtube_config(request: Request):
     return _youtube_config_status()
 
 
+@app.get("/youtube/oauth/status")
+def youtube_oauth_status():
+    status = _youtube_config_status()
+    return {
+        "configured": status["configured"],
+        "missing": status["missing"],
+        "redirectUri": status.get("redirectUri"),
+        "scopes": status["scopes"],
+    }
+
+
 @app.get("/youtube/oauth/start")
 def youtube_oauth_start(request: Request, returnTo: str = "/dashboard"):
     principal = _require_principal(request)

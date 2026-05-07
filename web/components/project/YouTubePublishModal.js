@@ -32,10 +32,18 @@ function FieldLabel({ children }) {
   );
 }
 
+async function readJsonResponse(res) {
+  try {
+    return await res.json();
+  } catch {
+    return {};
+  }
+}
+
 export default function YouTubePublishModal({ open, onClose, projectId, project, user }) {
   const [loading, setLoading] = useState(false);
   const [channels, setChannels] = useState([]);
-  const [configured, setConfigured] = useState(true);
+  const [configured, setConfigured] = useState(null);
   const [missing, setMissing] = useState([]);
   const [preview, setPreview] = useState(null);
   const [form, setForm] = useState({
@@ -60,24 +68,36 @@ export default function YouTubePublishModal({ open, onClose, projectId, project,
       setLoading(true);
       setError("");
       setJob(null);
+      setConfigured(null);
       try {
         const headers = await authHeaders(user);
-        const [previewRes, channelsRes] = await Promise.all([
+        const [previewRes, configRes, channelsRes] = await Promise.all([
           fetch(`${apiBase}/youtube/publish/preview/${encodeURIComponent(projectId)}`, { headers }),
+          fetch(`${apiBase}/youtube/oauth/status`),
           fetch(`${apiBase}/youtube/channels`, { headers }),
         ]);
 
-        const previewData = await previewRes.json();
-        const channelsData = await channelsRes.json();
+        const previewData = await readJsonResponse(previewRes);
+        const configData = await readJsonResponse(configRes);
+        const channelsData = await readJsonResponse(channelsRes);
         if (cancelled) return;
 
         if (!previewRes.ok) throw new Error(previewData.error || previewData.detail || "No se pudo cargar metadata");
 
+        const isConfigured = Boolean(configData.configured ?? channelsData.configured);
         setPreview(previewData);
-        setConfigured(Boolean(channelsData.configured));
-        setMissing(channelsData.missing || []);
-        const list = channelsData.channels || [];
+        setConfigured(isConfigured);
+        setMissing(configData.missing || channelsData.missing || []);
+        const list = channelsRes.ok ? channelsData.channels || [] : [];
         setChannels(list);
+        if (isConfigured && !channelsRes.ok) {
+          const detail = channelsData.error || channelsData.detail;
+          setError(
+            typeof detail === "string"
+              ? detail
+              : "No se pudieron cargar canales conectados. Puedes intentar conectar YouTube.",
+          );
+        }
         setForm((prev) => ({
           ...prev,
           channelId: prev.channelId || list[0]?.channelId || "",
@@ -219,7 +239,16 @@ export default function YouTubePublishModal({ open, onClose, projectId, project,
           </div>
         )}
 
-        {!configured && (
+        {loading && configured === null && (
+          <div className="cf-card" style={{ padding: 18, marginBottom: 16 }}>
+            <div className="cf-h4" style={{ marginBottom: 8 }}>Preparando conexión</div>
+            <div className="cf-body">
+              Validando proyecto, canal conectado y permisos de publicación.
+            </div>
+          </div>
+        )}
+
+        {!loading && configured === false && (
           <div className="cf-card" style={{ padding: 18, marginBottom: 16, borderColor: "var(--warn)" }}>
             <div className="cf-h4" style={{ marginBottom: 8 }}>Falta configurar OAuth de YouTube</div>
             <div className="cf-body" style={{ marginBottom: 12 }}>
@@ -229,7 +258,7 @@ export default function YouTubePublishModal({ open, onClose, projectId, project,
           </div>
         )}
 
-        {configured && channels.length === 0 && (
+        {configured === true && channels.length === 0 && (
           <div className="cf-card" style={{ padding: 18, marginBottom: 16 }}>
             <div className="cf-h4" style={{ marginBottom: 8 }}>Conecta tu canal</div>
             <div className="cf-body" style={{ marginBottom: 16 }}>
@@ -241,7 +270,7 @@ export default function YouTubePublishModal({ open, onClose, projectId, project,
           </div>
         )}
 
-        {configured && channels.length > 0 && (
+        {configured === true && channels.length > 0 && (
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 280px", gap: 18 }}>
             <div style={{ display: "grid", gap: 14 }}>
               <div>
