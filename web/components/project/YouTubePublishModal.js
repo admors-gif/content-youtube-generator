@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Icon from "@/components/Icon";
-import { authHeaders, getApiBase } from "@/lib/apiClient";
+import { authedFetch, getApiBase } from "@/lib/apiClient";
 
 const inputStyle = {
   width: "100%",
@@ -70,11 +70,10 @@ export default function YouTubePublishModal({ open, onClose, projectId, project,
       setJob(null);
       setConfigured(null);
       try {
-        const headers = await authHeaders(user);
         const [previewRes, configRes, channelsRes] = await Promise.all([
-          fetch(`${apiBase}/youtube/publish/preview/${encodeURIComponent(projectId)}`, { headers }),
+          authedFetch(user, `${apiBase}/youtube/publish/preview/${encodeURIComponent(projectId)}`),
           fetch(`${apiBase}/youtube/oauth/status`),
-          fetch(`${apiBase}/youtube/channels`, { headers }),
+          authedFetch(user, `${apiBase}/youtube/channels`),
         ]);
 
         const previewData = await readJsonResponse(previewRes);
@@ -125,9 +124,7 @@ export default function YouTubePublishModal({ open, onClose, projectId, project,
     let cancelled = false;
     const timer = window.setInterval(async () => {
       try {
-        const res = await fetch(`${apiBase}/youtube/publish/jobs/${encodeURIComponent(job.jobId)}`, {
-          headers: await authHeaders(user),
-        });
+        const res = await authedFetch(user, `${apiBase}/youtube/publish/jobs/${encodeURIComponent(job.jobId)}`);
         const data = await res.json();
         if (!cancelled && res.ok) setJob((prev) => ({ ...prev, ...data, jobId: prev.jobId }));
       } catch {
@@ -151,9 +148,7 @@ export default function YouTubePublishModal({ open, onClose, projectId, project,
     setError("");
     try {
       const returnTo = `/dashboard/project/${projectId}`;
-      const res = await fetch(`${apiBase}/youtube/oauth/start?returnTo=${encodeURIComponent(returnTo)}`, {
-        headers: await authHeaders(user),
-      });
+      const res = await authedFetch(user, `${apiBase}/youtube/oauth/start?returnTo=${encodeURIComponent(returnTo)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || data.detail || "YouTube no está configurado");
       window.location.href = data.authorizationUrl;
@@ -169,9 +164,9 @@ export default function YouTubePublishModal({ open, onClose, projectId, project,
       const publishAt = form.publishAtLocal
         ? new Date(form.publishAtLocal).toISOString()
         : "";
-      const res = await fetch(`${apiBase}/youtube/publish/${encodeURIComponent(projectId)}`, {
+      const res = await authedFetch(user, `${apiBase}/youtube/publish/${encodeURIComponent(projectId)}`, {
         method: "POST",
-        headers: await authHeaders(user, { "Content-Type": "application/json" }),
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           channelId: form.channelId,
           title: form.title,
