@@ -14,6 +14,7 @@ const ICON_PATHS = {
   sparkles:     <><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" /></>,
   image:        <><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></>,
   download:     <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></>,
+  uploadCloud:  <><path d="M16 16l-4-4-4 4M12 12v9" /><path d="M20.4 18.6A5 5 0 0 0 18 9h-1.3A8 8 0 1 0 4 16.3" /></>,
   package:      <><path d="m7.5 4.27 9 5.15M21 8 12 13 3 8M3 8v8l9 5 9-5V8M12 13v8" /></>,
   fileText:     <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></>,
   clapperboard: <><path d="M4 11V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v6m0 0v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8M4 11h16M9 7l-3-3M14 7l-3-3M19 7l-3-3" /></>,

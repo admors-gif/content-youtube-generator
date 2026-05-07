@@ -1,0 +1,38 @@
+{
+  "channel": "Esto no es amor",
+  "positioning": "Podcast editorial sobre apego emocional, dependencia afectiva, amor propio y relaciones donde se confunde intensidad con cariño.",
+  "visualDirection": "Editorial intimo",
+  "palette": {
+    "charcoal": "#09090B",
+    "deepTeal": "#0C7C78",
+    "warmAmber": "#D99A3D",
+    "cream": "#F5EFE6",
+    "redAccent": "#B6423A"
+  },
+  "motifs": [
+    "lamparas calidas",
+    "sillas vacias",
+    "tazas",
+    "espejos",
+    "llaves",
+    "libretas",
+    "telefono boca abajo",
+    "hilo rojo",
+    "puerta entreabierta"
+  ],
+  "avoid": [
+    "caras",
+    "manos",
+    "microfonos como objeto central",
+    "bocinas como objeto central",
+    "audifonos como objeto central",
+    "texto ilegible generado",
+    "estetica clinica fria"
+  ],
+  "thumbnailRules": {
+    "text": "Usar siempre el titulo exacto del video como overlay local, no pedir texto al modelo de imagen.",
+    "composition": "Objeto emocional o habitacion vacia con mucho contraste, sin personas reconocibles.",
+    "lighting": "Teal profundo en sombras y ambar calido en puntos de luz.",
+    "repeatability": "Mantener identidad del canal cambiando objeto, punto de vista, luz y composicion en cada video."
+  }
+}

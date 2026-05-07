@@ -23,6 +23,7 @@ export default function ProjectHeader({
   agent,
   onDownloadVideo,
   onDownloadAll,
+  onPublishYouTube,
   downloadAllLoading = false,
 }) {
   const color = agent?.color || "var(--ember)";
@@ -164,6 +165,18 @@ export default function ProjectHeader({
             >
               <Icon name="package" size={16} />{" "}
               {downloadAllLoading ? "Preparando ZIP" : "Material completo"}
+            </button>
+            <button
+              onClick={onPublishYouTube}
+              className="cf-btn cf-btn--ghost"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+              title="Revisar metadata y subir como privado o programado"
+            >
+              <Icon name="uploadCloud" size={16} /> Publicar en YouTube
             </button>
           </div>
         )}

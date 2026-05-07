@@ -55,6 +55,59 @@ jobs:
             ./ /docker/content-factory/
           ls -la /docker/content-factory/
 
+      - name: Merge runtime secrets into VPS env
+        env:
+          YOUTUBE_OAUTH_CLIENT_ID: ${{ secrets.YOUTUBE_OAUTH_CLIENT_ID }}
+          YOUTUBE_OAUTH_CLIENT_SECRET: ${{ secrets.YOUTUBE_OAUTH_CLIENT_SECRET }}
+          YOUTUBE_OAUTH_REDIRECT_URI: ${{ secrets.YOUTUBE_OAUTH_REDIRECT_URI }}
+          CONTENT_FACTORY_WEB_URL: ${{ secrets.CONTENT_FACTORY_WEB_URL }}
+          CONTENT_FACTORY_YOUTUBE_STATE_SECRET: ${{ secrets.CONTENT_FACTORY_YOUTUBE_STATE_SECRET }}
+          CONTENT_FACTORY_YOUTUBE_TOKEN_SECRET: ${{ secrets.CONTENT_FACTORY_YOUTUBE_TOKEN_SECRET }}
+        run: |
+          set -euo pipefail
+          cd /docker/content-factory
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path(".env")
+          names = [
+              "YOUTUBE_OAUTH_CLIENT_ID",
+              "YOUTUBE_OAUTH_CLIENT_SECRET",
+              "YOUTUBE_OAUTH_REDIRECT_URI",
+              "CONTENT_FACTORY_WEB_URL",
+              "CONTENT_FACTORY_YOUTUBE_STATE_SECRET",
+              "CONTENT_FACTORY_YOUTUBE_TOKEN_SECRET",
+          ]
+          updates = {name: os.environ.get(name, "").strip() for name in names}
+          updates = {name: value for name, value in updates.items() if value}
+          if not updates:
+              print("No YouTube runtime secrets configured; leaving .env unchanged")
+              raise SystemExit(0)
+
+          existing = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+          out = []
+          seen = set()
+          for line in existing:
+              key = None
+              if "=" in line and not line.lstrip().startswith("#"):
+                  key = line.split("=", 1)[0].strip()
+              if key in updates:
+                  if key not in seen:
+                      out.append(f"{key}={updates[key]}")
+                      seen.add(key)
+                  continue
+              out.append(line)
+
+          for key, value in updates.items():
+              if key not in seen:
+                  out.append(f"{key}={value}")
+
+          path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+          print(f"Updated {len(updates)} YouTube runtime env vars in /docker/content-factory/.env")
+          PY
+          chmod 600 .env || true
+
       - name: Build and start container
         run: |
           set -euo pipefail

@@ -24,6 +24,7 @@ import ShortsGrid from "@/components/project/ShortsGrid";
 import ThumbnailsGrid from "@/components/project/ThumbnailsGrid";
 import ScriptTab from "@/components/project/ScriptTab";
 import ScenesTab from "@/components/project/ScenesTab";
+import YouTubePublishModal from "@/components/project/YouTubePublishModal";
 import Icon from "@/components/Icon";
 
 /**
@@ -88,6 +89,7 @@ export default function ProjectDetailsPage({ params }) {
     error: null,
   });
   const [downloadAllLoading, setDownloadAllLoading] = useState(false);
+  const [publishModalOpen, setPublishModalOpen] = useState(false);
   const normalizedProgress = useMemo(
     () => normalizeProgressPercent(project),
     [project],
@@ -425,7 +427,16 @@ export default function ProjectDetailsPage({ params }) {
         agent={agent}
         onDownloadVideo={handleDownloadVideo}
         onDownloadAll={handleDownloadAll}
+        onPublishYouTube={() => setPublishModalOpen(true)}
         downloadAllLoading={downloadAllLoading}
+      />
+
+      <YouTubePublishModal
+        open={publishModalOpen}
+        onClose={() => setPublishModalOpen(false)}
+        projectId={id}
+        project={project}
+        user={user}
       />
 
       {isDeliveryRecoverable && (

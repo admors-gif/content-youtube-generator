@@ -1,5 +1,5 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 import subprocess
 import os
@@ -7,7 +7,12 @@ import sys
 import json
 import logging
 import base64
+import hashlib
+import hmac
+import secrets
+import time
 import urllib.request
+import urllib.parse
 import re
 from datetime import timedelta, datetime, timezone
 from pathlib import Path
@@ -2894,6 +2899,589 @@ def _build_youtube_publish_pack(project_id: str, data: dict) -> dict:
         "chapters": chapters,
         "checklist": checklist,
     }
+
+
+_YOUTUBE_SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.readonly",
+]
+_YOUTUBE_WEB_URL = os.environ.get(
+    "CONTENT_FACTORY_WEB_URL",
+    "https://content-youtube-generator.vercel.app",
+).rstrip("/")
+
+
+def _youtube_oauth_settings() -> dict:
+    redirect_uri = os.environ.get("YOUTUBE_OAUTH_REDIRECT_URI", "").strip()
+    if not redirect_uri:
+        public_api = os.environ.get("VPS_PUBLIC_URL", "").strip().rstrip("/")
+        if public_api:
+            redirect_uri = f"{public_api}/youtube/oauth/callback"
+
+    return {
+        "client_id": os.environ.get("YOUTUBE_OAUTH_CLIENT_ID", "").strip(),
+        "client_secret": os.environ.get("YOUTUBE_OAUTH_CLIENT_SECRET", "").strip(),
+        "redirect_uri": redirect_uri,
+        "state_secret": (
+            os.environ.get("CONTENT_FACTORY_YOUTUBE_STATE_SECRET", "").strip()
+            or _ADMIN_TOKEN
+            or os.environ.get("YOUTUBE_OAUTH_CLIENT_SECRET", "").strip()
+        ),
+        "token_secret": (
+            os.environ.get("CONTENT_FACTORY_YOUTUBE_TOKEN_SECRET", "").strip()
+            or _ADMIN_TOKEN
+        ),
+    }
+
+
+def _youtube_config_status() -> dict:
+    settings = _youtube_oauth_settings()
+    missing = [
+        key
+        for key in ["client_id", "client_secret", "redirect_uri", "state_secret", "token_secret"]
+        if not settings.get(key)
+    ]
+    return {
+        "configured": not missing,
+        "missing": missing,
+        "redirectUri": settings.get("redirect_uri") or None,
+        "scopes": list(_YOUTUBE_SCOPES),
+    }
+
+
+def _youtube_require_config() -> dict:
+    status = _youtube_config_status()
+    if not status["configured"]:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "youtube_oauth_not_configured",
+                "missing": status["missing"],
+                "redirectUri": status.get("redirectUri"),
+            },
+        )
+    return _youtube_oauth_settings()
+
+
+def _safe_youtube_return_path(value: str | None) -> str:
+    raw = (value or "/dashboard").strip()
+    if not raw.startswith("/") or raw.startswith("//"):
+        return "/dashboard"
+    if "\n" in raw or "\r" in raw:
+        return "/dashboard"
+    return raw[:300]
+
+
+def _youtube_b64(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _youtube_unb64(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def _youtube_sign_state(payload: dict) -> str:
+    settings = _youtube_require_config()
+    body = _youtube_b64(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    sig = hmac.new(settings["state_secret"].encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+    return f"{body}.{_youtube_b64(sig)}"
+
+
+def _youtube_verify_state(state: str) -> dict:
+    settings = _youtube_require_config()
+    try:
+        body, sig = state.split(".", 1)
+        expected = hmac.new(settings["state_secret"].encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+        provided = _youtube_unb64(sig)
+        if not hmac.compare_digest(expected, provided):
+            raise ValueError("bad signature")
+        payload = json.loads(_youtube_unb64(body).decode("utf-8"))
+        if int(payload.get("exp", 0)) < int(time.time()):
+            raise ValueError("expired")
+        return payload
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="invalid youtube oauth state") from exc
+
+
+def _youtube_fernet():
+    settings = _youtube_require_config()
+    try:
+        from cryptography.fernet import Fernet
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="cryptography dependency missing") from exc
+    key = base64.urlsafe_b64encode(hashlib.sha256(settings["token_secret"].encode("utf-8")).digest())
+    return Fernet(key)
+
+
+def _youtube_encrypt_token(value: str) -> str:
+    return _youtube_fernet().encrypt(value.encode("utf-8")).decode("ascii")
+
+
+def _youtube_decrypt_token(value: str) -> str:
+    return _youtube_fernet().decrypt(value.encode("ascii")).decode("utf-8")
+
+
+def _youtube_authorization_url(uid: str, return_to: str) -> str:
+    settings = _youtube_require_config()
+    state = _youtube_sign_state({
+        "uid": uid,
+        "returnTo": _safe_youtube_return_path(return_to),
+        "nonce": secrets.token_urlsafe(16),
+        "exp": int(time.time()) + 15 * 60,
+    })
+    params = {
+        "client_id": settings["client_id"],
+        "redirect_uri": settings["redirect_uri"],
+        "response_type": "code",
+        "scope": " ".join(_YOUTUBE_SCOPES),
+        "access_type": "offline",
+        "prompt": "consent",
+        "include_granted_scopes": "true",
+        "state": state,
+    }
+    return "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
+
+
+def _youtube_request_tokens(code: str) -> dict:
+    settings = _youtube_require_config()
+    import requests
+    response = requests.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "code": code,
+            "client_id": settings["client_id"],
+            "client_secret": settings["client_secret"],
+            "redirect_uri": settings["redirect_uri"],
+            "grant_type": "authorization_code",
+        },
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=400, detail=f"youtube token exchange failed: {response.text[:200]}")
+    return response.json()
+
+
+def _youtube_refresh_access_token(refresh_token: str) -> dict:
+    settings = _youtube_require_config()
+    import requests
+    response = requests.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "client_id": settings["client_id"],
+            "client_secret": settings["client_secret"],
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        },
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"youtube refresh failed: {response.text[:200]}")
+    return response.json()
+
+
+def _youtube_fetch_channels(access_token: str) -> list[dict]:
+    import requests
+    response = requests.get(
+        "https://www.googleapis.com/youtube/v3/channels",
+        params={"part": "snippet,brandingSettings", "mine": "true", "maxResults": 50},
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=400, detail=f"youtube channel lookup failed: {response.text[:200]}")
+    channels = []
+    for item in response.json().get("items", []):
+        snippet = item.get("snippet") or {}
+        branding = item.get("brandingSettings") or {}
+        channels.append({
+            "channelId": item.get("id"),
+            "title": snippet.get("title") or "Canal sin nombre",
+            "description": (branding.get("channel") or {}).get("description") or snippet.get("description") or "",
+            "thumbnailUrl": ((snippet.get("thumbnails") or {}).get("default") or {}).get("url"),
+        })
+    return [c for c in channels if c.get("channelId")]
+
+
+def _youtube_split_tags(value) -> list[str]:
+    if isinstance(value, list):
+        raw = value
+    else:
+        raw = re.split(r"[,;\n]", str(value or ""))
+    tags = []
+    seen = set()
+    for item in raw:
+        tag = " ".join(str(item).strip().split())
+        key = tag.lower()
+        if not tag or key in seen:
+            continue
+        if sum(len(t) + 2 for t in tags + [tag]) > 500:
+            break
+        seen.add(key)
+        tags.append(tag[:100])
+    return tags
+
+
+def _build_youtube_video_resource(project_id: str, data: dict, payload: dict | None = None) -> dict:
+    payload = payload or {}
+    pack = _build_youtube_publish_pack(project_id, data)
+    title = " ".join(str(payload.get("title") or pack["title"]).split())[:100]
+    description = str(payload.get("description") or pack["description"])[:5000]
+    tags = _youtube_split_tags(payload.get("tags") or pack.get("tags") or pack.get("tags_csv"))
+    privacy = str(payload.get("privacyStatus") or "private").strip().lower()
+    if privacy not in {"private", "unlisted", "public"}:
+        privacy = "private"
+    publish_at = str(payload.get("publishAt") or "").strip()
+    if publish_at:
+        privacy = "private"
+
+    status = {
+        "privacyStatus": privacy,
+        "selfDeclaredMadeForKids": False,
+    }
+    if publish_at:
+        status["publishAt"] = publish_at
+
+    return {
+        "snippet": {
+            "title": title,
+            "description": description,
+            "tags": tags,
+            "categoryId": str(payload.get("categoryId") or "22"),
+        },
+        "status": status,
+    }
+
+
+def _youtube_public_channel_doc(snapshot) -> dict:
+    data = snapshot.to_dict() or {}
+    return {
+        "id": snapshot.id,
+        "channelId": data.get("channelId") or snapshot.id,
+        "title": data.get("title") or "Canal conectado",
+        "description": data.get("description") or "",
+        "thumbnailUrl": data.get("thumbnailUrl"),
+        "connectedAt": str(data.get("connectedAt") or ""),
+        "updatedAt": str(data.get("updatedAt") or ""),
+    }
+
+
+def _youtube_thumbnail_candidates(video_dir: Path) -> list[Path]:
+    thumbs_dir = video_dir / "thumbnails"
+    if not thumbs_dir.is_dir():
+        return []
+    return sorted(
+        [
+            p for p in thumbs_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}
+        ],
+        key=lambda p: p.name,
+    )
+
+
+def _youtube_pick_thumbnail(video_dir: Path, index: int = 0) -> Path | None:
+    thumbs = _youtube_thumbnail_candidates(video_dir)
+    if not thumbs:
+        return None
+    index = max(0, min(index, len(thumbs) - 1))
+    selected = thumbs[index]
+    if selected.stat().st_size > 2 * 1024 * 1024:
+        raise ValueError("thumbnail exceeds YouTube 2MB limit")
+    return selected
+
+
+def _youtube_project_video_dir(data: dict) -> Path:
+    folder = data.get("videoFolder") or ""
+    if not folder:
+        raise ValueError("project has no videoFolder")
+    return Path(f"/app/output/videos/{folder}")
+
+
+def _youtube_upload_video(access_token: str, video_file: Path, resource: dict) -> str:
+    import requests
+    size = video_file.stat().st_size
+    init = requests.post(
+        "https://www.googleapis.com/upload/youtube/v3/videos",
+        params={"uploadType": "resumable", "part": "snippet,status"},
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json; charset=UTF-8",
+            "X-Upload-Content-Length": str(size),
+            "X-Upload-Content-Type": "video/mp4",
+        },
+        json=resource,
+        timeout=30,
+    )
+    if init.status_code >= 400:
+        raise RuntimeError(f"youtube upload init failed: {init.text[:300]}")
+    upload_url = init.headers.get("Location")
+    if not upload_url:
+        raise RuntimeError("youtube upload init did not return upload URL")
+
+    with video_file.open("rb") as fh:
+        upload = requests.put(
+            upload_url,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "video/mp4",
+                "Content-Length": str(size),
+            },
+            data=fh,
+            timeout=(30, 1800),
+        )
+    if upload.status_code >= 400:
+        raise RuntimeError(f"youtube upload failed: {upload.text[:300]}")
+    return upload.json().get("id") or ""
+
+
+def _youtube_upload_thumbnail(access_token: str, video_id: str, thumbnail_file: Path | None) -> bool:
+    if not thumbnail_file:
+        return False
+    import requests
+    mime = "image/png" if thumbnail_file.suffix.lower() == ".png" else "image/jpeg"
+    with thumbnail_file.open("rb") as fh:
+        response = requests.post(
+            "https://www.googleapis.com/upload/youtube/v3/thumbnails/set",
+            params={"videoId": video_id, "uploadType": "media"},
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": mime},
+            data=fh,
+            timeout=120,
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(f"youtube thumbnail upload failed: {response.text[:300]}")
+    return True
+
+
+def _run_youtube_publish_job(uid: str, project_id: str, job_id: str, payload: dict):
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        job_ref = db.collection("youtubePublishJobs").document(job_id)
+        job_ref.update({
+            "status": "running",
+            "step": "Preparando video y metadata",
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+
+        project_ref = db.collection("projects").document(project_id)
+        project_snap = project_ref.get()
+        if not project_snap.exists:
+            raise RuntimeError("project not found")
+        project = project_snap.to_dict() or {}
+        if project.get("userId") != uid:
+            raise RuntimeError("project access denied")
+
+        channel_id = str(payload.get("channelId") or "").strip()
+        if not channel_id:
+            raise RuntimeError("missing channelId")
+        channel_ref = db.collection("users").document(uid).collection("youtubeChannels").document(channel_id)
+        channel_snap = channel_ref.get()
+        if not channel_snap.exists:
+            raise RuntimeError("YouTube channel is not connected")
+        channel = channel_snap.to_dict() or {}
+        refresh_token = _youtube_decrypt_token(channel.get("refreshTokenEncrypted") or "")
+        access = _youtube_refresh_access_token(refresh_token).get("access_token")
+        if not access:
+            raise RuntimeError("youtube refresh did not return access token")
+
+        video_dir = _youtube_project_video_dir(project)
+        if not video_dir.is_dir():
+            raise RuntimeError("project output folder not found")
+        video_file, _has_subs, _invalid = _pick_valid_final_video(video_dir, min_duration_seconds=1)
+        if not video_file:
+            raise RuntimeError("final video not found")
+        thumb = _youtube_pick_thumbnail(video_dir, int(payload.get("thumbnailIndex") or 0))
+        resource = _build_youtube_video_resource(project_id, project, payload)
+
+        job_ref.update({
+            "step": "Subiendo video a YouTube",
+            "metadata": resource,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        video_id = _youtube_upload_video(access, video_file, resource)
+        if not video_id:
+            raise RuntimeError("YouTube did not return video id")
+
+        thumbnail_uploaded = False
+        if thumb:
+            job_ref.update({
+                "step": "Subiendo miniatura",
+                "youtubeVideoId": video_id,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            })
+            thumbnail_uploaded = _youtube_upload_thumbnail(access, video_id, thumb)
+
+        youtube_url = f"https://studio.youtube.com/video/{video_id}/edit"
+        job_ref.update({
+            "status": "completed",
+            "step": "Listo para revisión en YouTube Studio",
+            "youtubeVideoId": video_id,
+            "youtubeStudioUrl": youtube_url,
+            "thumbnailUploaded": thumbnail_uploaded,
+            "completedAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        project_ref.update({
+            "youtube.lastPublishJobId": job_id,
+            "youtube.lastVideoId": video_id,
+            "youtube.lastStudioUrl": youtube_url,
+            "youtube.lastPublishedAt": firestore.SERVER_TIMESTAMP,
+        })
+    except Exception as exc:
+        try:
+            _ensure_firebase_initialized()
+            from firebase_admin import firestore
+            firestore.client().collection("youtubePublishJobs").document(job_id).update({
+                "status": "error",
+                "step": "Error al publicar",
+                "error": str(exc)[:500],
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            })
+        except Exception:
+            pass
+
+
+@app.get("/youtube/config")
+def youtube_config(request: Request):
+    _require_principal(request, allow_admin=True)
+    return _youtube_config_status()
+
+
+@app.get("/youtube/oauth/start")
+def youtube_oauth_start(request: Request, returnTo: str = "/dashboard"):
+    principal = _require_principal(request)
+    status = _youtube_config_status()
+    if not status["configured"]:
+        return JSONResponse(status_code=503, content={"error": "youtube_oauth_not_configured", **status})
+    return {
+        "authorizationUrl": _youtube_authorization_url(principal["uid"], returnTo),
+        "redirectUri": status["redirectUri"],
+        "scopes": status["scopes"],
+    }
+
+
+@app.get("/youtube/oauth/callback")
+def youtube_oauth_callback(code: str = "", state: str = ""):
+    payload = _youtube_verify_state(state)
+    uid = payload["uid"]
+    return_to = _safe_youtube_return_path(payload.get("returnTo"))
+    tokens = _youtube_request_tokens(code)
+    access_token = tokens.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="youtube oauth did not return access token")
+    refresh_token = tokens.get("refresh_token")
+    channels = _youtube_fetch_channels(access_token)
+
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    db = firestore.client()
+    for channel in channels:
+        ref = db.collection("users").document(uid).collection("youtubeChannels").document(channel["channelId"])
+        existing = ref.get()
+        encrypted_refresh = None
+        if refresh_token:
+            encrypted_refresh = _youtube_encrypt_token(refresh_token)
+        elif existing.exists:
+            encrypted_refresh = (existing.to_dict() or {}).get("refreshTokenEncrypted")
+        if not encrypted_refresh:
+            raise HTTPException(status_code=400, detail="youtube oauth did not return refresh token")
+        ref.set({
+            **channel,
+            "refreshTokenEncrypted": encrypted_refresh,
+            "scopes": list(_YOUTUBE_SCOPES),
+            "connectedAt": firestore.SERVER_TIMESTAMP if not existing.exists else (existing.to_dict() or {}).get("connectedAt", firestore.SERVER_TIMESTAMP),
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+
+    separator = "&" if "?" in return_to else "?"
+    return RedirectResponse(f"{_YOUTUBE_WEB_URL}{return_to}{separator}youtube=connected")
+
+
+@app.get("/youtube/channels")
+def youtube_channels(request: Request):
+    principal = _require_principal(request)
+    status = _youtube_config_status()
+    if not status["configured"]:
+        return {"configured": False, "channels": [], "missing": status["missing"], "redirectUri": status.get("redirectUri")}
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    docs = (
+        firestore.client()
+        .collection("users")
+        .document(principal["uid"])
+        .collection("youtubeChannels")
+        .stream()
+    )
+    return {"configured": True, "channels": [_youtube_public_channel_doc(doc) for doc in docs]}
+
+
+@app.get("/youtube/publish/preview/{project_id}")
+def youtube_publish_preview(project_id: str, request: Request):
+    _require_project_access(request, project_id)
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    snap = firestore.client().collection("projects").document(project_id).get()
+    if not snap.exists:
+        return JSONResponse(status_code=404, content={"error": "project not found"})
+    data = snap.to_dict() or {}
+    pack = _build_youtube_publish_pack(project_id, data)
+    thumbnails = data.get("thumbnails") or []
+    return {
+        "projectId": project_id,
+        "configured": _youtube_config_status()["configured"],
+        "metadata": {
+            "title": pack["title"],
+            "description": pack["description"],
+            "tags": pack["tags"],
+            "tagsCsv": pack["tags_csv"],
+            "hashtags": pack["hashtags"],
+            "pinnedComment": pack["pinned_comment"],
+            "chapters": pack["chapters"],
+        },
+        "thumbnails": thumbnails,
+        "defaults": {"privacyStatus": "private", "categoryId": "22"},
+    }
+
+
+@app.post("/youtube/publish/{project_id}")
+async def youtube_publish(project_id: str, request: Request, background_tasks: BackgroundTasks):
+    principal = _require_project_access(request, project_id)
+    status = _youtube_config_status()
+    if not status["configured"]:
+        return JSONResponse(status_code=503, content={"error": "youtube_oauth_not_configured", **status})
+    payload = await request.json()
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    db = firestore.client()
+    job_ref = db.collection("youtubePublishJobs").document()
+    resource_preview = _build_youtube_video_resource(project_id, db.collection("projects").document(project_id).get().to_dict() or {}, payload)
+    job_ref.set({
+        "uid": principal["uid"],
+        "projectId": project_id,
+        "channelId": payload.get("channelId"),
+        "status": "queued",
+        "step": "En cola para subir a YouTube",
+        "metadata": resource_preview,
+        "createdAt": firestore.SERVER_TIMESTAMP,
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    })
+    background_tasks.add_task(_run_youtube_publish_job, principal["uid"], project_id, job_ref.id, payload)
+    return {"jobId": job_ref.id, "status": "queued", "metadata": resource_preview}
+
+
+@app.get("/youtube/publish/jobs/{job_id}")
+def youtube_publish_job(job_id: str, request: Request):
+    principal = _require_principal(request, allow_admin=True)
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    snap = firestore.client().collection("youtubePublishJobs").document(job_id).get()
+    if not snap.exists:
+        return JSONResponse(status_code=404, content={"error": "job not found"})
+    data = snap.to_dict() or {}
+    if not principal.get("admin") and data.get("uid") != principal["uid"]:
+        raise HTTPException(status_code=403, detail="job access denied")
+    return {"id": snap.id, **data}
 
 
 @app.get("/download/all/{project_id}")
