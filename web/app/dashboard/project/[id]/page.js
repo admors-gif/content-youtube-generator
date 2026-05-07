@@ -376,27 +376,40 @@ export default function ProjectDetailsPage({ params }) {
   const handleDownloadAll = async () => {
     setDownloadAllLoading(true);
     try {
-      const res = await fetch(`/api/download/all/${encodeURIComponent(id)}`, {
-        headers: await authHeaders(user),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        alert(userDeliveryError(data.error || res.statusText));
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${(project.title || id).replace(/[^a-zA-Z0-9_-]/g, "_")}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      const headers = await authHeaders(user);
+      const bearer = headers.Authorization || "";
+      const idToken = bearer.replace(/^Bearer\s+/i, "").trim();
+      if (!idToken) throw new Error("Sesión no disponible");
+
+      const iframeName = `download_all_${Date.now()}`;
+      const iframe = document.createElement("iframe");
+      iframe.name = iframeName;
+      iframe.style.display = "none";
+
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = `/api/download/all/${encodeURIComponent(id)}`;
+      form.target = iframeName;
+      form.style.display = "none";
+
+      const tokenInput = document.createElement("input");
+      tokenInput.type = "hidden";
+      tokenInput.name = "idToken";
+      tokenInput.value = idToken;
+      form.appendChild(tokenInput);
+
+      document.body.appendChild(iframe);
+      document.body.appendChild(form);
+      form.submit();
+
+      window.setTimeout(() => {
+        form.remove();
+        iframe.remove();
+        setDownloadAllLoading(false);
+      }, 5000);
     } catch (err) {
-      alert(userDeliveryError(err.message));
-    } finally {
       setDownloadAllLoading(false);
+      alert(userDeliveryError(err.message));
     }
   };
 

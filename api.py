@@ -2899,12 +2899,11 @@ def _build_youtube_publish_pack(project_id: str, data: dict) -> dict:
 @app.get("/download/all/{project_id}")
 def download_all(project_id: str, request: Request):
     """
-    Streamea un ZIP con TODO el material del proyecto organizado en carpetas:
-    video/, shorts/, thumbnails/, audio/narrations/, images/, luma_clips/,
-    ken_burns/, composites/ + carpeta youtube/ lista para publicación.
+    Streamea un ZIP con el paquete listo para publicacion:
+    video/, shorts/, thumbnails/, audio/, images/ + carpeta youtube/.
 
     Usa zipstream-ng para construir el ZIP on-the-fly (no en memoria),
-    crítico cuando hay 88+ archivos por proyecto y video final de 150-200MB.
+    critico cuando el video final pesa 100MB+.
     """
     _require_project_access(request, project_id, allow_admin=True)
     try:
@@ -2947,33 +2946,22 @@ def download_all(project_id: str, request: Request):
         for mp4 in sorted(video_dir.glob("FINAL_*.mp4")):
             zs.add_path(str(mp4), arcname=f"{folder}/video/{mp4.name}")
 
-        # Audio: master + narraciones individuales
+        # Audio final. Las narraciones individuales y clips intermedios se omiten:
+        # hacen el paquete enorme y no son necesarios para publicar en YouTube.
         add_if(video_dir / "master_audio.mp3", "audio/master.mp3")
-        add_glob(video_dir / "audio", "narration_*.mp3", "audio/narrations")
 
         # Imágenes
         add_glob(video_dir / "images", "*.png", "images")
         add_glob(video_dir / "images", "*.jpg", "images")
-
-        # Clips Luma
-        add_glob(video_dir / "luma_clips", "*.mp4", "luma_clips")
 
         # Material de publicación
         add_glob(video_dir / "shorts", "*.mp4", "shorts")
         add_glob(video_dir / "thumbnails", "*.jpg", "thumbnails")
         add_glob(video_dir / "thumbnails", "*.png", "thumbnails")
 
-        # Ken Burns (carpeta puede ser 'kenburns' o 'ken_burns' según versión)
-        for kb_name in ["kenburns", "ken_burns"]:
-            add_glob(video_dir / kb_name, "*.mp4", "ken_burns")
-
-        # Composites (mezclas intermedias)
-        add_glob(video_dir / "composites", "*.mp4", "composites")
-
         # Otros activos sueltos del root del folder
         add_if(video_dir / "subtitles.ass", "subtitulos.ass")
         add_if(video_dir / "transcript.json", "transcripcion.json")
-        add_if(video_dir / "master_visual.mp4", "master_visual.mp4")
 
         # Guión desde Firestore (no está en disco como .txt)
         script_text = (data.get("script") or {}).get("plain") or ""
