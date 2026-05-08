@@ -3416,6 +3416,218 @@ def _youtube_public_channel_doc(snapshot) -> dict:
     }
 
 
+def _youtube_datetime(value):
+    if not value:
+        return None
+    if hasattr(value, "timestamp"):
+        try:
+            return datetime.fromtimestamp(value.timestamp(), tz=timezone.utc)
+        except Exception:
+            return None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            if raw.endswith("Z"):
+                raw = raw[:-1] + "+00:00"
+            parsed = datetime.fromisoformat(raw)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except Exception:
+            return None
+    return None
+
+
+def _youtube_job_sort_value(job: dict) -> float:
+    dt = _youtube_datetime(job.get("updatedAt") or job.get("createdAt"))
+    return dt.timestamp() if dt else 0.0
+
+
+def _youtube_latest_jobs_by_project(job_docs) -> dict:
+    latest = {}
+    for doc in job_docs:
+        data = doc.to_dict() or {}
+        project_id = data.get("projectId")
+        if not project_id:
+            continue
+        kind = "shorts" if data.get("type") == "shorts" else "video"
+        entry = {"id": doc.id, **data}
+        project_jobs = latest.setdefault(project_id, {})
+        previous = project_jobs.get(kind)
+        if not previous or _youtube_job_sort_value(entry) >= _youtube_job_sort_value(previous):
+            project_jobs[kind] = entry
+    return latest
+
+
+def _youtube_video_publish_at_from_job(job: dict | None) -> str:
+    metadata = (job or {}).get("metadata") or {}
+    status = metadata.get("status") or {}
+    return str(status.get("publishAt") or "").strip()
+
+
+def _youtube_video_privacy_from_job(job: dict | None) -> str:
+    metadata = (job or {}).get("metadata") or {}
+    status = metadata.get("status") or {}
+    return str(status.get("privacyStatus") or "").strip()
+
+
+def _youtube_successful_short_uploads(value) -> list[dict]:
+    uploads = value if isinstance(value, list) else []
+    by_index = {}
+    for item in uploads:
+        if not isinstance(item, dict) or not item.get("youtubeVideoId"):
+            continue
+        try:
+            index = int(item.get("index") or 0)
+        except Exception:
+            index = 0
+        if index <= 0:
+            continue
+        existing = by_index.get(index)
+        if not existing:
+            by_index[index] = item
+            continue
+        old_dt = _youtube_datetime(existing.get("uploadedAt") or existing.get("publishAt"))
+        new_dt = _youtube_datetime(item.get("uploadedAt") or item.get("publishAt"))
+        if (new_dt and not old_dt) or (new_dt and old_dt and new_dt >= old_dt):
+            by_index[index] = item
+    return [by_index[index] for index in sorted(by_index)]
+
+
+def _youtube_future_count(items: list[dict], *, now: datetime) -> int:
+    count = 0
+    for item in items:
+        publish_at = _youtube_datetime(item.get("publishAt"))
+        if publish_at and publish_at > now:
+            count += 1
+    return count
+
+
+def _youtube_publication_overview_row(
+    project_id: str,
+    data: dict,
+    *,
+    latest_video_job: dict | None = None,
+    latest_shorts_job: dict | None = None,
+    channel_titles: dict | None = None,
+    now: datetime | None = None,
+) -> dict:
+    now = now or datetime.now(timezone.utc)
+    channel_titles = channel_titles or {}
+    youtube = data.get("youtube") or {}
+    project_completed = data.get("status") == "completed"
+
+    video_id = youtube.get("lastVideoId") or (latest_video_job or {}).get("youtubeVideoId") or ""
+    studio_url = youtube.get("lastStudioUrl") or (latest_video_job or {}).get("youtubeStudioUrl") or ""
+    publish_at = str(
+        youtube.get("lastScheduledPublishAt")
+        or _youtube_video_publish_at_from_job(latest_video_job)
+        or ""
+    ).strip()
+    publish_dt = _youtube_datetime(publish_at)
+    video_job_status = (latest_video_job or {}).get("status") or ""
+    video_warning = (latest_video_job or {}).get("warning") or ""
+    privacy_status = _youtube_video_privacy_from_job(latest_video_job) or "private"
+
+    if not project_completed:
+        video_status = "not_ready"
+    elif video_job_status in {"queued", "running"}:
+        video_status = "uploading"
+    elif video_job_status == "error" and not video_id:
+        video_status = "error"
+    elif video_id and publish_dt and publish_dt > now:
+        video_status = "scheduled"
+    elif video_id:
+        video_status = "uploaded"
+    else:
+        video_status = "missing"
+
+    shorts_source = data.get("shorts") if isinstance(data.get("shorts"), list) else []
+    total_shorts = len(shorts_source)
+    successful_shorts = _youtube_successful_short_uploads(youtube.get("shortsUploads"))
+    uploaded_shorts = len(successful_shorts)
+    scheduled_shorts = _youtube_future_count(successful_shorts, now=now)
+    shorts_job_status = (latest_shorts_job or {}).get("status") or ""
+    shorts_job_items = (latest_shorts_job or {}).get("items") or []
+    shorts_errors = [
+        item for item in shorts_job_items
+        if isinstance(item, dict) and item.get("status") == "error"
+    ]
+
+    if not project_completed:
+        shorts_status = "not_ready"
+    elif total_shorts <= 0:
+        shorts_status = "none"
+    elif shorts_job_status in {"queued", "running"}:
+        shorts_status = "uploading"
+    elif uploaded_shorts >= total_shorts:
+        shorts_status = "scheduled" if scheduled_shorts else "uploaded"
+    elif shorts_job_status == "error" and uploaded_shorts == 0:
+        shorts_status = "error"
+    elif uploaded_shorts > 0:
+        shorts_status = "partial"
+    else:
+        shorts_status = "missing"
+
+    if not project_completed:
+        next_action = {"kind": "wait", "label": "Esperar producción"}
+    elif video_status in {"missing", "error"}:
+        next_action = {"kind": "publish_video", "label": "Subir video largo"}
+    elif total_shorts > 0 and uploaded_shorts < total_shorts:
+        next_action = {"kind": "publish_shorts", "label": "Publicar Shorts"}
+    elif video_warning or shorts_errors:
+        next_action = {"kind": "review", "label": "Revisar advertencias"}
+    else:
+        next_action = {"kind": "complete", "label": "Completo"}
+
+    channel_id = (
+        (latest_video_job or {}).get("channelId")
+        or (latest_shorts_job or {}).get("channelId")
+        or ""
+    )
+    return {
+        "id": project_id,
+        "title": data.get("title") or "Sin título",
+        "agentId": data.get("agentId") or "",
+        "format": data.get("format") or "",
+        "status": data.get("status") or "",
+        "createdAt": _serialize_firestore_value(data.get("createdAt")),
+        "updatedAt": _serialize_firestore_value(data.get("updatedAt")),
+        "completedAt": _serialize_firestore_value(data.get("productionCompletedAt") or data.get("completedAt")),
+        "channel": {
+            "id": channel_id,
+            "title": channel_titles.get(channel_id, ""),
+        },
+        "video": {
+            "status": video_status,
+            "youtubeVideoId": video_id,
+            "youtubeStudioUrl": studio_url,
+            "privacyStatus": privacy_status,
+            "publishAt": publish_at,
+            "jobId": (latest_video_job or {}).get("id") or youtube.get("lastPublishJobId") or "",
+            "jobStatus": video_job_status,
+            "warning": video_warning,
+            "error": (latest_video_job or {}).get("error") or "",
+            "thumbnailUploaded": (latest_video_job or {}).get("thumbnailUploaded"),
+        },
+        "shorts": {
+            "status": shorts_status,
+            "total": total_shorts,
+            "uploaded": uploaded_shorts,
+            "scheduled": scheduled_shorts,
+            "uploads": _serialize_firestore_value(successful_shorts),
+            "jobId": (latest_shorts_job or {}).get("id") or youtube.get("shortsLastPublishJobId") or "",
+            "jobStatus": shorts_job_status,
+            "warning": (latest_shorts_job or {}).get("warning") or "",
+            "error": (latest_shorts_job or {}).get("error") or "",
+            "errors": _serialize_firestore_value(shorts_errors),
+        },
+        "nextAction": next_action,
+    }
+
+
 def _youtube_thumbnail_candidates(video_dir: Path) -> list[Path]:
     thumbs_dir = video_dir / "thumbnails"
     if not thumbs_dir.is_dir():
@@ -3976,6 +4188,81 @@ def youtube_channels(request: Request):
                 log.warning(f"youtube_channel_refresh_failed uid={principal['uid']} channel_id={doc.id} error={str(exc)[:200]}")
     docs = list(channels_ref.stream()) if refreshed else docs
     return {"configured": True, "channels": [_youtube_public_channel_doc(doc) for doc in docs]}
+
+
+@app.get("/youtube/publications")
+def youtube_publications(request: Request, limit: int = 120):
+    principal = _require_principal(request)
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+
+    limit = max(1, min(int(limit or 120), 250))
+    db = firestore.client()
+    uid = principal["uid"]
+
+    channel_docs = list(db.collection("users").document(uid).collection("youtubeChannels").stream())
+    channels = [_youtube_public_channel_doc(doc) for doc in channel_docs]
+    channel_titles = {
+        channel["channelId"]: channel.get("title") or ""
+        for channel in channels
+    }
+
+    project_docs = list(
+        db.collection("projects")
+        .where("userId", "==", uid)
+        .limit(limit)
+        .stream()
+    )
+    job_docs = list(
+        db.collection("youtubePublishJobs")
+        .where("uid", "==", uid)
+        .limit(500)
+        .stream()
+    )
+    latest_jobs = _youtube_latest_jobs_by_project(job_docs)
+
+    rows = []
+    now = datetime.now(timezone.utc)
+    for doc in project_docs:
+        data = doc.to_dict() or {}
+        project_jobs = latest_jobs.get(doc.id, {})
+        rows.append(_youtube_publication_overview_row(
+            doc.id,
+            data,
+            latest_video_job=project_jobs.get("video"),
+            latest_shorts_job=project_jobs.get("shorts"),
+            channel_titles=channel_titles,
+            now=now,
+        ))
+
+    rows.sort(
+        key=lambda row: (
+            _youtube_datetime(row.get("updatedAt")) or
+            _youtube_datetime(row.get("createdAt")) or
+            datetime.fromtimestamp(0, tz=timezone.utc)
+        ),
+        reverse=True,
+    )
+
+    summary = {
+        "total": len(rows),
+        "completed": sum(1 for row in rows if row.get("status") == "completed"),
+        "needsVideo": sum(1 for row in rows if row.get("video", {}).get("status") in {"missing", "error"}),
+        "needsShorts": sum(1 for row in rows if row.get("shorts", {}).get("status") in {"missing", "partial", "error"}),
+        "scheduled": sum(
+            1 for row in rows
+            if row.get("video", {}).get("status") == "scheduled"
+            or int(row.get("shorts", {}).get("scheduled") or 0) > 0
+        ),
+        "complete": sum(1 for row in rows if row.get("nextAction", {}).get("kind") == "complete"),
+    }
+    return {
+        "configured": _youtube_config_status()["configured"],
+        "channels": channels,
+        "summary": summary,
+        "items": rows,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @app.get("/youtube/publish/preview/{project_id}")

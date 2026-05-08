@@ -22,6 +22,7 @@ import { isAdminUser } from "@/lib/admin";
 const NAV = [
   { id: "dashboard", icon: "dashboard", label: "Dashboard",       href: "/dashboard" },
   { id: "new",       icon: "sparkles",  label: "Nuevo video",     href: "/dashboard/new" },
+  { id: "publications", icon: "listChecks", label: "Publicaciones", href: "/dashboard/publications" },
   { id: "gallery",   icon: "image",     label: "Galería",         href: "/dashboard/gallery" },
   { id: "library",   icon: "film",      label: "Biblioteca",      href: "/dashboard/library" },
   { id: "billing",   icon: "coins",     label: "Plan y créditos", href: "/dashboard/billing" },

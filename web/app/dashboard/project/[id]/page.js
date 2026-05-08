@@ -92,6 +92,7 @@ export default function ProjectDetailsPage({ params }) {
   const [downloadAllLoading, setDownloadAllLoading] = useState(false);
   const [publishModalOpen, setPublishModalOpen] = useState(false);
   const [shortsPublishModalOpen, setShortsPublishModalOpen] = useState(false);
+  const publishIntentHandled = useRef(false);
   const normalizedProgress = useMemo(
     () => normalizeProgressPercent(project),
     [project],
@@ -206,6 +207,23 @@ export default function ProjectDetailsPage({ params }) {
     });
     return () => unsub();
   }, [user, id]);
+
+  useEffect(() => {
+    if (publishIntentHandled.current || typeof window === "undefined") return;
+    if (project?.status !== "completed") return;
+    const intent = new URLSearchParams(window.location.search).get("publish");
+    if (intent === "youtube" || intent === "video") {
+      publishIntentHandled.current = true;
+      const timer = window.setTimeout(() => setPublishModalOpen(true), 0);
+      return () => window.clearTimeout(timer);
+    }
+    if (intent === "shorts") {
+      publishIntentHandled.current = true;
+      const timer = window.setTimeout(() => setShortsPublishModalOpen(true), 0);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [project?.status]);
 
   // Auto-approve: start timer when script is ready
   useEffect(() => {

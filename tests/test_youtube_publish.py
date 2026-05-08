@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import api
 
 
@@ -157,3 +159,58 @@ def test_youtube_short_preflight_blocks_horizontal_or_too_long(tmp_path, monkeyp
 
     assert result["eligible"] is False
     assert "vertical" in result["error"]
+
+
+def test_youtube_publication_overview_marks_missing_uploads():
+    row = api._youtube_publication_overview_row(
+        "project-1",
+        {
+            "title": "No extrañas a esa persona",
+            "status": "completed",
+            "shorts": [
+                {"index": 1, "label": "hook"},
+                {"index": 2, "label": "mid"},
+                {"index": 3, "label": "end"},
+            ],
+        },
+        now=datetime(2026, 5, 7, tzinfo=timezone.utc),
+    )
+
+    assert row["video"]["status"] == "missing"
+    assert row["shorts"]["status"] == "missing"
+    assert row["shorts"]["uploaded"] == 0
+    assert row["nextAction"]["kind"] == "publish_video"
+
+
+def test_youtube_publication_overview_tracks_scheduled_video_and_partial_shorts():
+    row = api._youtube_publication_overview_row(
+        "project-1",
+        {
+            "title": "Esto no es amor",
+            "status": "completed",
+            "shorts": [
+                {"index": 1, "label": "hook"},
+                {"index": 2, "label": "mid"},
+                {"index": 3, "label": "end"},
+            ],
+            "youtube": {
+                "lastVideoId": "abc123",
+                "lastStudioUrl": "https://studio.youtube.com/video/abc123/edit",
+                "lastScheduledPublishAt": "2026-05-08T02:00:00Z",
+                "shortsUploads": [
+                    {
+                        "index": 1,
+                        "youtubeVideoId": "s1",
+                        "publishAt": "2026-05-08T00:00:00Z",
+                    }
+                ],
+            },
+        },
+        now=datetime(2026, 5, 7, tzinfo=timezone.utc),
+    )
+
+    assert row["video"]["status"] == "scheduled"
+    assert row["shorts"]["status"] == "partial"
+    assert row["shorts"]["uploaded"] == 1
+    assert row["shorts"]["scheduled"] == 1
+    assert row["nextAction"]["kind"] == "publish_shorts"

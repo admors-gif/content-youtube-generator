@@ -3,6 +3,15 @@ import { withSentryConfig } from "@sentry/nextjs";
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactCompiler: true,
+  async redirects() {
+    return [
+      {
+        source: "/dashboard/publications.",
+        destination: "/dashboard/publications",
+        permanent: false,
+      },
+    ];
+  },
   images: {
     // Whitelist de dominios desde donde Next.js Image puede optimizar imágenes.
     // Ampliar cuando agreguemos más fuentes de imagen.
