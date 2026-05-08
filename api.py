@@ -613,7 +613,7 @@ def _validate_project_payload(data: dict) -> dict:
     if platform not in {"youtube", "tiktok"}:
         raise HTTPException(status_code=400, detail="invalid platform")
     if platform == "tiktok":
-        if not _flag_enabled("CONTENT_FACTORY_TIKTOK_GENERATION_ENABLED", default=False):
+        if not _flag_enabled("CONTENT_FACTORY_TIKTOK_GENERATION_ENABLED", default=True):
             raise HTTPException(status_code=403, detail="tiktok generation disabled")
         if agent_id not in _TIKTOK_AGENT_IDS:
             raise HTTPException(status_code=400, detail="invalid TikTok agent")

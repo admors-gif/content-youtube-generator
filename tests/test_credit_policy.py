@@ -230,7 +230,7 @@ def test_tiktok_payload_rejects_invalid_duration_profile(monkeypatch):
 
 
 def test_tiktok_payload_respects_generation_flag(monkeypatch):
-    monkeypatch.delenv("CONTENT_FACTORY_TIKTOK_GENERATION_ENABLED", raising=False)
+    monkeypatch.setenv("CONTENT_FACTORY_TIKTOK_GENERATION_ENABLED", "false")
     try:
         api._validate_project_payload({
             "title": "TikTok apagado",
