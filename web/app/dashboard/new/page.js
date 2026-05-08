@@ -34,7 +34,34 @@ const TIER_FILTERS = [
   { id: "creator", label: "Creator" },
 ];
 
-const WELLNESS_FORMATS = new Set(["autohipnosis", "meditacion_larga"]);
+const TIKTOK_GENERATION_ENABLED =
+  process.env.NEXT_PUBLIC_CONTENT_FACTORY_TIKTOK_GENERATION_ENABLED === "true";
+
+const PLATFORM_OPTIONS = [
+  {
+    id: "youtube",
+    label: "YouTube",
+    icon: "film",
+    description: "Videos largos, podcasts, wellness y shorts derivados.",
+  },
+  ...(TIKTOK_GENERATION_ENABLED
+    ? [
+        {
+          id: "tiktok",
+          label: "TikTok",
+          icon: "zap",
+          description: "Piezas verticales nativas con hook, ritmo y caption propio.",
+        },
+      ]
+    : []),
+];
+
+const WELLNESS_FORMATS = new Set([
+  "autohipnosis",
+  "meditacion_larga",
+  "tiktok_autohypnosis",
+  "tiktok_meditation",
+]);
 
 const PERSONALIZATION_LIMITS = {
   preferredName: 40,
@@ -301,15 +328,27 @@ export default function NewProjectPage() {
   const [creditRequestSent, setCreditRequestSent] = useState(false);
 
   /* Filtro de tier (visual del kit, no estaba en legacy pero coexiste) */
+  const [platform, setPlatform] = useState("youtube");
   const [tierFilter, setTierFilter] = useState("all");
   const [durationProfile, setDurationProfile] = useState("60m");
+  const [sourceGenre, setSourceGenre] = useState("psychology");
   const [personalization, setPersonalization] = useState(EMPTY_PERSONALIZATION);
 
   const selectAgent = (agent) => {
     setSelectedAgent(agent);
-    const defaultProfile = agent.durationProfiles?.find((p) => p.id === "60m")
+    const defaultProfile = agent.durationProfiles?.find((p) => p.id === (agent.platform === "tiktok" ? "90s" : "60m"))
       || agent.durationProfiles?.[0];
     if (defaultProfile) setDurationProfile(defaultProfile.id);
+    if (agent.sourceGenres?.length) setSourceGenre(agent.sourceGenres[0].id);
+  };
+
+  const selectPlatform = (nextPlatform) => {
+    if (nextPlatform === "tiktok" && !TIKTOK_GENERATION_ENABLED) return;
+    setPlatform(nextPlatform);
+    setSelectedAgent(null);
+    setRecommendations([]);
+    setRecommendError(null);
+    setDurationProfile(nextPlatform === "tiktok" ? "90s" : "60m");
   };
 
   const updatePersonalization = (field, value) => {
@@ -397,8 +436,12 @@ export default function NewProjectPage() {
           title: topic.trim(),
           agentId: selectedAgent.agentId,
           agentFile: selectedAgent.promptFile,
+          platform,
           ...(selectedAgent.durationProfiles?.length
             ? { durationProfile }
+            : {}),
+          ...(platform === "tiktok" && selectedAgent.sourceGenres?.length
+            ? { sourceGenre }
             : {}),
           ...(personalizationPayload
             ? { personalization: personalizationPayload }
@@ -427,9 +470,11 @@ export default function NewProjectPage() {
   const filteredAgents = useMemo(
     () =>
       SYSTEM_AGENTS.filter(
-        (a) => tierFilter === "all" || a.tier === tierFilter,
+        (a) =>
+          (a.platform || "youtube") === platform &&
+          (tierFilter === "all" || a.tier === tierFilter),
       ),
-    [tierFilter],
+    [platform, tierFilter],
   );
 
   /* Word/char count para textarea */
@@ -526,8 +571,89 @@ export default function NewProjectPage() {
       {/* STEP 1 — Agent Selection */}
       {step === 1 && (
         <>
-          {/* Recommender card */}
           <div
+            className="cf-card cf-fade cf-fade--1"
+            style={{
+              padding: "var(--s-5)",
+              marginBottom: "var(--s-5)",
+            }}
+          >
+            <div
+              style={{
+                font: "var(--t-mono-sm)",
+                color: "var(--paper-mute)",
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+                marginBottom: 12,
+              }}
+            >
+              PLATAFORMA
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: 10,
+              }}
+            >
+              {PLATFORM_OPTIONS.map((option) => {
+                const active = platform === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => selectPlatform(option.id)}
+                    style={{
+                      textAlign: "left",
+                      padding: "14px 16px",
+                      borderRadius: "var(--r-2)",
+                      border: active
+                        ? "1px solid var(--ember)"
+                        : "1px solid var(--rule-1)",
+                      background: active ? "var(--ember-tint)" : "var(--ink-0)",
+                      color: "var(--paper)",
+                      cursor: "pointer",
+                      display: "flex",
+                      gap: 12,
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    <Icon
+                      name={option.icon}
+                      size={18}
+                      style={{ color: active ? "var(--ember)" : "var(--paper-mute)" }}
+                    />
+                    <span>
+                      <span
+                        style={{
+                          display: "block",
+                          fontWeight: 700,
+                          marginBottom: 4,
+                          color: active ? "var(--ember)" : "var(--paper)",
+                        }}
+                      >
+                        {option.label}
+                      </span>
+                      <span
+                        style={{
+                          display: "block",
+                          font: "var(--t-caption)",
+                          color: "var(--paper-dim)",
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {option.description}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Recommender card */}
+          {platform === "youtube" ? (
+            <div
             className="cf-card cf-fade cf-fade--1"
             style={{
               padding: "var(--s-5)",
@@ -635,7 +761,39 @@ export default function NewProjectPage() {
                 SELECCIONAR
               </div>
             )}
-          </div>
+            </div>
+          ) : (
+            <div
+              className="cf-card cf-fade cf-fade--1"
+              style={{
+                padding: "var(--s-5)",
+                marginBottom: "var(--s-6)",
+                borderColor: "rgba(20, 184, 166, 0.35)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  color: "#14B8A6",
+                  font: "var(--t-mono-sm)",
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                  marginBottom: 8,
+                }}
+              >
+                <Icon name="zap" size={16} /> TIKTOK STUDIO
+              </div>
+              <div style={{ color: "var(--paper)", fontWeight: 650, marginBottom: 6 }}>
+                Nuevo módulo vertical nativo
+              </div>
+              <div style={{ font: "var(--t-caption)", color: "var(--paper-dim)", lineHeight: 1.5 }}>
+                Estos agentes no recortan YouTube ni reutilizan Shorts: crean guion,
+                visuales, subtítulos, caption y hashtags pensados para TikTok.
+              </div>
+            </div>
+          )}
 
           {/* Filter strip */}
           <div
@@ -970,10 +1128,47 @@ export default function NewProjectPage() {
                       color: "var(--paper-dim)",
                     }}
                   >
-                    Voz espaciada, ambiente continuo y visuales lentos durante{" "}
-                    {selectedDurationProfile.label}.
+                    {platform === "tiktok"
+                      ? `Formato vertical nativo con hook, beats cortos y render 9:16 de ${selectedDurationProfile.label}.`
+                      : `Voz espaciada, ambiente continuo y visuales lentos durante ${selectedDurationProfile.label}.`}
                   </div>
                 )}
+              </div>
+            )}
+
+            {platform === "tiktok" && selectedAgent.sourceGenres?.length > 0 && (
+              <div style={{ marginBottom: "var(--s-5)" }}>
+                <div
+                  style={{
+                    font: "var(--t-mono-sm)",
+                    color: "var(--paper-mute)",
+                    marginBottom: 10,
+                    letterSpacing: "0.18em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  ADN DE DOMINIO
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {selectedAgent.sourceGenres.map((genre) => {
+                    const active = sourceGenre === genre.id;
+                    return (
+                      <button
+                        key={genre.id}
+                        type="button"
+                        onClick={() => setSourceGenre(genre.id)}
+                        className={`cf-btn cf-btn--sm ${active ? "cf-btn--secondary" : "cf-btn--ghost"}`}
+                        style={
+                          active
+                            ? { borderColor: "#14B8A6", color: "#14B8A6" }
+                            : undefined
+                        }
+                      >
+                        {genre.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
@@ -1174,7 +1369,9 @@ export default function NewProjectPage() {
                 </>
               ) : (
                 <>
-                  {isWellnessSelected
+                  {platform === "tiktok"
+                    ? "Crear TikTok"
+                    : isWellnessSelected
                     ? "Crear sesión"
                     : "Crear documental"}{" "}
                   <Icon name="arrowRight" size={16} />

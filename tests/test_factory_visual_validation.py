@@ -173,6 +173,16 @@ def test_image_workflow_router_uses_seedream_for_short_premium_formats():
         assert workflow["workflow"].name == "seedream_5_lite_t2i_api.json"
 
 
+def test_image_workflow_router_uses_vertical_seedream_for_tiktok():
+    workflow = factory._select_image_workflow("tiktok_podcast")
+
+    assert workflow["provider"] == "seedream"
+    assert workflow["workflow"].name == "seedream_5_lite_t2i_api.json"
+    assert workflow["width"] == 1080
+    assert workflow["height"] == 1920
+    assert "9:16" in workflow["size_preset"]
+
+
 def test_seedream_auth_failure_falls_back_to_flux_once(monkeypatch):
     class FakeClient:
         def __init__(self, *args, **kwargs):

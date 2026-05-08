@@ -8,6 +8,7 @@ __pycache__/
 .codex-tmp/
 codex_tmp_*/
 codex_tmp_*.log
+logs/
 output/pytest-tmp/
 output/clips/*
 output/audio/*

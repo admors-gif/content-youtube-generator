@@ -176,3 +176,71 @@ def test_long_meditation_payload_rejects_invalid_duration_profile():
         assert exc.detail == "invalid durationProfile"
     else:
         raise AssertionError("invalid duration profile should be rejected")
+
+
+def test_tiktok_payload_is_platform_scoped_and_duration_limited(monkeypatch):
+    monkeypatch.setenv("CONTENT_FACTORY_TIKTOK_GENERATION_ENABLED", "true")
+    payload = api._validate_project_payload({
+        "title": "No extrañas a esa persona",
+        "agentId": "agent_tiktok_podcast",
+        "agentFile": "agent_tiktok_podcast.md",
+        "platform": "tiktok",
+        "durationProfile": "3m",
+    })
+
+    assert payload["platform"] == "tiktok"
+    assert payload["format"] == "tiktok_podcast"
+    assert payload["tiktok"]["targetSeconds"] == 180
+    assert payload["generation_options"]["duration_profile"] == "3m"
+    assert payload["generation_options"]["target_seconds"] == 180
+
+
+def test_tiktok_payload_rejects_youtube_agent_mismatch(monkeypatch):
+    monkeypatch.setenv("CONTENT_FACTORY_TIKTOK_GENERATION_ENABLED", "true")
+    try:
+        api._validate_project_payload({
+            "title": "Historia de Roma en TikTok",
+            "agentId": "agent_historico",
+            "agentFile": "agent_historico.md",
+            "platform": "tiktok",
+            "durationProfile": "60s",
+        })
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert exc.detail == "invalid TikTok agent"
+    else:
+        raise AssertionError("TikTok platform should reject YouTube agents")
+
+
+def test_tiktok_payload_rejects_invalid_duration_profile(monkeypatch):
+    monkeypatch.setenv("CONTENT_FACTORY_TIKTOK_GENERATION_ENABLED", "true")
+    try:
+        api._validate_project_payload({
+            "title": "Demasiado largo",
+            "agentId": "agent_tiktok_documentary",
+            "agentFile": "agent_tiktok_documentary.md",
+            "platform": "tiktok",
+            "durationProfile": "30m",
+        })
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert exc.detail == "invalid TikTok durationProfile"
+    else:
+        raise AssertionError("TikTok duration must cap at configured profiles")
+
+
+def test_tiktok_payload_respects_generation_flag(monkeypatch):
+    monkeypatch.delenv("CONTENT_FACTORY_TIKTOK_GENERATION_ENABLED", raising=False)
+    try:
+        api._validate_project_payload({
+            "title": "TikTok apagado",
+            "agentId": "agent_tiktok_documentary",
+            "agentFile": "agent_tiktok_documentary.md",
+            "platform": "tiktok",
+            "durationProfile": "60s",
+        })
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail == "tiktok generation disabled"
+    else:
+        raise AssertionError("TikTok generation must be feature-flagged")

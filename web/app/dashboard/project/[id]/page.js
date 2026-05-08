@@ -60,6 +60,81 @@ import Icon from "@/components/Icon";
 
 const AUTO_APPROVE_SECONDS = 180; // 3 minutes
 
+function TikTokDeliveryPanel({ project }) {
+  const tiktok = project?.tiktok || {};
+  const hashtags = Array.isArray(tiktok.hashtags) ? tiktok.hashtags : [];
+  const isTikTok = project?.platform === "tiktok" || String(project?.format || "").startsWith("tiktok_");
+  if (!project || !isTikTok) return null;
+  return (
+    <section
+      className="cf-card cf-fade cf-fade--1"
+      style={{
+        padding: "var(--s-5)",
+        marginBottom: "var(--s-6)",
+        borderColor: "rgba(20, 184, 166, 0.35)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          font: "var(--t-mono-sm)",
+          color: "#14B8A6",
+          letterSpacing: "0.18em",
+          textTransform: "uppercase",
+          marginBottom: 10,
+        }}
+      >
+        <Icon name="zap" size={16} /> TIKTOK STUDIO
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 14,
+        }}
+      >
+        <div>
+          <div style={{ font: "var(--t-mono-sm)", color: "var(--paper-mute)", marginBottom: 6 }}>
+            CAPTION
+          </div>
+          <div style={{ color: "var(--paper)", lineHeight: 1.5 }}>
+            {tiktok.caption || project.title}
+          </div>
+        </div>
+        <div>
+          <div style={{ font: "var(--t-mono-sm)", color: "var(--paper-mute)", marginBottom: 6 }}>
+            HASHTAGS
+          </div>
+          <div style={{ color: "var(--paper-dim)", lineHeight: 1.6 }}>
+            {hashtags.length ? hashtags.join(" ") : "#TikTok"}
+          </div>
+        </div>
+        <div>
+          <div style={{ font: "var(--t-mono-sm)", color: "var(--paper-mute)", marginBottom: 6 }}>
+            SCORES
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gap: 8,
+              color: "var(--paper)",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            <span>Hook {tiktok.scores?.hookScore ?? "—"}</span>
+            <span>Ret {tiktok.scores?.retentionScore ?? "—"}</span>
+            <span>Claro {tiktok.scores?.clarityScore ?? "—"}</span>
+            <span>Fit {tiktok.scores?.platformFitScore ?? "—"}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function ProjectDetailsPage({ params }) {
   const resolvedParams = React.use(params);
   const { id } = resolvedParams;
@@ -359,7 +434,8 @@ export default function ProjectDetailsPage({ params }) {
   }
 
   const agent = SYSTEM_AGENTS.find((a) => a.agentId === project.agentId);
-  const isWellness = ["autohipnosis", "meditacion_larga"].includes(project.format);
+  const isTikTok = project.platform === "tiktok" || String(project.format || "").startsWith("tiktok_");
+  const isWellness = ["autohipnosis", "meditacion_larga", "tiktok_autohypnosis", "tiktok_meditation"].includes(project.format);
   const isDeliveryRecoverable = Boolean(project.deliveryRecoverableFromDisk);
   const isProcessing =
     normalizedProgress > 0 &&
@@ -436,8 +512,8 @@ export default function ProjectDetailsPage({ params }) {
   };
 
   const TABS = [
-    { id: "script", label: isWellness ? "Sesión y voz" : "Guión y voz" },
-    { id: "scenes", label: isWellness ? "Visuales" : "Escenas" },
+    { id: "script", label: isTikTok ? "Guión vertical" : isWellness ? "Sesión y voz" : "Guión y voz" },
+    { id: "scenes", label: isTikTok ? "Beats visuales" : isWellness ? "Visuales" : "Escenas" },
   ];
 
   return (
@@ -447,24 +523,29 @@ export default function ProjectDetailsPage({ params }) {
         agent={agent}
         onDownloadVideo={handleDownloadVideo}
         onDownloadAll={handleDownloadAll}
-        onPublishYouTube={() => setPublishModalOpen(true)}
+        onPublishYouTube={isTikTok ? null : () => setPublishModalOpen(true)}
         downloadAllLoading={downloadAllLoading}
+        platform={isTikTok ? "tiktok" : "youtube"}
       />
 
-      <YouTubePublishModal
-        open={publishModalOpen}
-        onClose={() => setPublishModalOpen(false)}
-        projectId={id}
-        project={project}
-        user={user}
-      />
+      {!isTikTok && (
+        <YouTubePublishModal
+          open={publishModalOpen}
+          onClose={() => setPublishModalOpen(false)}
+          projectId={id}
+          project={project}
+          user={user}
+        />
+      )}
 
-      <YouTubeShortsPublishModal
-        open={shortsPublishModalOpen}
-        onClose={() => setShortsPublishModalOpen(false)}
-        projectId={id}
-        user={user}
-      />
+      {!isTikTok && (
+        <YouTubeShortsPublishModal
+          open={shortsPublishModalOpen}
+          onClose={() => setShortsPublishModalOpen(false)}
+          projectId={id}
+          user={user}
+        />
+      )}
 
       {isDeliveryRecoverable && (
         <div
@@ -531,14 +612,18 @@ export default function ProjectDetailsPage({ params }) {
         />
       )}
 
-      {project.status === "completed" && (
+      {project.status === "completed" && isTikTok && (
+        <TikTokDeliveryPanel project={project} />
+      )}
+
+      {project.status === "completed" && !isTikTok && (
         <ShortsGrid
           shorts={project.shorts}
           onPublishShorts={() => setShortsPublishModalOpen(true)}
         />
       )}
 
-      {project.status === "completed" && (
+      {project.status === "completed" && !isTikTok && (
         <ThumbnailsGrid thumbnails={project.thumbnails} />
       )}
 

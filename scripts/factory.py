@@ -65,6 +65,12 @@ AUTOHYPNOSIS_MUSIC_DIR = BASE_DIR / "assets" / "audio" / "autohipnosis"
 AUTOHYPNOSIS_DEFAULT_MUSIC_VOLUME_DB = -28.0
 LONG_MEDITATION_FORMAT = "meditacion_larga"
 WELLNESS_FORMATS = {"autohipnosis", LONG_MEDITATION_FORMAT}
+TIKTOK_FORMATS = {
+    "tiktok_documentary",
+    "tiktok_podcast",
+    "tiktok_autohypnosis",
+    "tiktok_meditation",
+}
 LONG_MEDITATION_DEFAULT_MUSIC_VOLUME_DB = -24.0
 LONG_MEDITATION_STATIC_FPS = 6
 
@@ -79,7 +85,7 @@ from luma_video import (
     generate_cinematic_clips, upload_image_to_temp,
     create_generation, poll_generation, download_video
 )
-from generate_subtitles import add_subtitles_to_video
+from generate_subtitles import add_subtitles_to_video, add_tiktok_subtitles_to_video
 from media_validation import validate_media_file
 
 
@@ -146,6 +152,8 @@ def _save_image_jobs(images_dir: Path, jobs: dict) -> None:
 
 def _build_image_prompt(prompt: str, pipeline_format: str = "narrativa", provider: str = "flux") -> str:
     prompt = (prompt or "").strip()
+    if pipeline_format in TIKTOK_FORMATS:
+        return f"{SEEDREAM_IMAGE_PROMPT_PREFIX} vertical 9:16 TikTok-native frame, 1080x1920, clean caption-safe composition. {prompt}".strip()
     if provider == "seedream":
         return f"{SEEDREAM_IMAGE_PROMPT_PREFIX} {prompt}".strip()
     if pipeline_format == "podcast":
@@ -157,6 +165,22 @@ def _build_image_prompt(prompt: str, pipeline_format: str = "narrativa", provide
 
 def _select_image_workflow(pipeline_format: str) -> dict:
     """Select the Comfy workflow without changing documentary/narrative output."""
+    if pipeline_format in TIKTOK_FORMATS:
+        return {
+            "provider": "seedream",
+            "label": "Seedream 5 Lite vertical",
+            "workflow": BASE_DIR / "config" / "seedream_5_lite_t2i_api.json",
+            "prompt_node": "25",
+            "prompt_input": "prompt",
+            "seed_node": "25",
+            "seed_input": "seed",
+            "seed_max": 2147483647,
+            "size_node": "25",
+            "size_preset": "1080x1920 (9:16)",
+            "width": 1080,
+            "height": 1920,
+            "save_node": "26",
+        }
     if pipeline_format in {"podcast", *WELLNESS_FORMATS}:
         return {
             "provider": "seedream",
@@ -813,14 +837,23 @@ def _pad_long_meditation_audio_segments(scenes, audio_dir: Path) -> dict:
 # ============================================================
 # PASO 3A: KEN BURNS — Sincronizado con audio
 # ============================================================
-def apply_ken_burns_all(scenes, images_dir, kenburns_dir, audio_dir, fallback_duration=5):
+def apply_ken_burns_all(
+    scenes,
+    images_dir,
+    kenburns_dir,
+    audio_dir,
+    fallback_duration=5,
+    output_width=1920,
+    output_height=1080,
+    label="Ken Burns Effect (sincronizado con audio)",
+):
     """Aplica Ken Burns con duración sincronizada al audio de cada escena."""
     effects = ["breathe_in", "drift_right", "breathe_out", "drift_left", "drift_up", "drift_down"]
     fps = 30
     stats = {"generated": 0, "skipped": 0, "missing": [], "failed": []}
     
     print("\n" + "=" * 60)
-    print("   PASO 3: Ken Burns Effect (sincronizado con audio)")
+    print(f"   PASO 3: {label}")
     print("=" * 60)
     
     kenburns_dir.mkdir(parents=True, exist_ok=True)
@@ -855,13 +888,14 @@ def apply_ken_burns_all(scenes, images_dir, kenburns_dir, audio_dir, fallback_du
         if tf < fps:  # mínimo 1 segundo
             tf = fps
         
+        output_size = f"{int(output_width)}x{int(output_height)}"
         effects_map = {
-            "breathe_in": f"zoompan=z='1+0.04*on/{tf}':x='trunc(iw/2-(iw/zoom/2))':y='trunc(ih/2-(ih/zoom/2))':d={tf}:s=1920x1080:fps={fps}",
-            "breathe_out": f"zoompan=z='1.04-0.04*on/{tf}':x='trunc(iw/2-(iw/zoom/2))':y='trunc(ih/2-(ih/zoom/2))':d={tf}:s=1920x1080:fps={fps}",
-            "drift_right": f"zoompan=z='1.05':x='trunc(on*(iw-iw/zoom)/{tf})':y='trunc(ih/2-(ih/zoom/2))':d={tf}:s=1920x1080:fps={fps}",
-            "drift_left": f"zoompan=z='1.05':x='trunc(iw-iw/zoom-on*(iw-iw/zoom)/{tf})':y='trunc(ih/2-(ih/zoom/2))':d={tf}:s=1920x1080:fps={fps}",
-            "drift_up": f"zoompan=z='1.05':x='trunc(iw/2-(iw/zoom/2))':y='trunc(ih-ih/zoom-on*(ih-ih/zoom)/{tf})':d={tf}:s=1920x1080:fps={fps}",
-            "drift_down": f"zoompan=z='1.05':x='trunc(iw/2-(iw/zoom/2))':y='trunc(on*(ih-ih/zoom)/{tf})':d={tf}:s=1920x1080:fps={fps}",
+            "breathe_in": f"zoompan=z='1+0.04*on/{tf}':x='trunc(iw/2-(iw/zoom/2))':y='trunc(ih/2-(ih/zoom/2))':d={tf}:s={output_size}:fps={fps}",
+            "breathe_out": f"zoompan=z='1.04-0.04*on/{tf}':x='trunc(iw/2-(iw/zoom/2))':y='trunc(ih/2-(ih/zoom/2))':d={tf}:s={output_size}:fps={fps}",
+            "drift_right": f"zoompan=z='1.05':x='trunc(on*(iw-iw/zoom)/{tf})':y='trunc(ih/2-(ih/zoom/2))':d={tf}:s={output_size}:fps={fps}",
+            "drift_left": f"zoompan=z='1.05':x='trunc(iw-iw/zoom-on*(iw-iw/zoom)/{tf})':y='trunc(ih/2-(ih/zoom/2))':d={tf}:s={output_size}:fps={fps}",
+            "drift_up": f"zoompan=z='1.05':x='trunc(iw/2-(iw/zoom/2))':y='trunc(ih-ih/zoom-on*(ih-ih/zoom)/{tf})':d={tf}:s={output_size}:fps={fps}",
+            "drift_down": f"zoompan=z='1.05':x='trunc(iw/2-(iw/zoom/2))':y='trunc(on*(ih-ih/zoom)/{tf})':d={tf}:s={output_size}:fps={fps}",
         }
         
         zoompan = effects_map.get(effect, effects_map["breathe_in"])
@@ -1004,6 +1038,10 @@ def assemble_final_video(
     format_label=None,
     music_config=None,
     low_motion=False,
+    output_width=1920,
+    output_height=1080,
+    final_filename=None,
+    min_duration_seconds=30,
 ):
     """
     Ensamblaje con sync perfecto:
@@ -1162,7 +1200,7 @@ def assemble_final_video(
     print("   4.4 Merge final...")
     safe_title = project_dir.name
     label = format_label or mode
-    final_video = project_dir / f"FINAL_{label}_{safe_title}.mp4"
+    final_video = project_dir / (final_filename or f"FINAL_{label}_{safe_title}.mp4")
 
     # FIX B7 (2026-05-03): si el video es más corto que el audio, `-shortest`
     # cortaba la narración 1-2s antes del final. Ahora detectamos el déficit
@@ -1210,7 +1248,7 @@ def assemble_final_video(
     if result.returncode == 0 and final_video.exists():
         valid_final, final_dur, validation_error = validate_media_file(
             final_video,
-            min_duration_seconds=30,
+            min_duration_seconds=min_duration_seconds,
         )
         if not valid_final:
             print(f"   [!] Video final invalido: {validation_error}")
@@ -1225,6 +1263,51 @@ def assemble_final_video(
     else:
         print(f"   [!] Error merge: {result.stderr[:300]}")
         return None
+
+
+def write_tiktok_delivery_assets(project_dir: Path, data: dict, final_video: Path | None) -> None:
+    """Material de entrega TikTok separado del paquete YouTube."""
+    tiktok = data.get("tiktok") or {}
+    tiktok_dir = project_dir / "tiktok"
+    tiktok_dir.mkdir(parents=True, exist_ok=True)
+    caption = str(tiktok.get("caption") or data.get("topic") or "").strip()
+    hashtags = tiktok.get("hashtags") or []
+    if isinstance(hashtags, str):
+        hashtags = [h for h in hashtags.split() if h.startswith("#")]
+    metadata = {
+        "platform": "tiktok",
+        "format": data.get("format"),
+        "title": data.get("topic"),
+        "caption": caption,
+        "hashtags": hashtags,
+        "targetSeconds": tiktok.get("target_seconds") or tiktok.get("targetSeconds"),
+        "durationProfile": tiktok.get("duration_profile") or tiktok.get("durationProfile"),
+        "scores": tiktok.get("scores") or {},
+        "finalFile": final_video.name if final_video else None,
+        "render": {"width": 1080, "height": 1920, "aspectRatio": "9:16"},
+        "publishing": {"isAigc": True, "brandedContent": False, "status": "not_configured"},
+    }
+    with open(tiktok_dir / "metadata.json", "w", encoding="utf-8") as f:
+        json.dump(metadata, f, ensure_ascii=False, indent=2)
+    with open(tiktok_dir / "caption.txt", "w", encoding="utf-8") as f:
+        f.write(caption.strip() + "\n")
+    with open(tiktok_dir / "hashtags.txt", "w", encoding="utf-8") as f:
+        f.write(" ".join(hashtags).strip() + "\n")
+    if final_video and final_video.exists():
+        cover_path = tiktok_dir / "cover.jpg"
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-ss", "1",
+                "-i", str(final_video),
+                "-frames:v", "1",
+                "-q:v", "2",
+                str(cover_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
 
 
 # ============================================================
@@ -1293,15 +1376,16 @@ if __name__ == "__main__":
 
     pipeline_format = data.get("format", "narrativa")
     is_long_meditation_format = pipeline_format == LONG_MEDITATION_FORMAT
+    is_tiktok_format = pipeline_format in TIKTOK_FORMATS
 
     # Algunos formatos usan visuales atmosféricos y largos; Luma no aporta
     # suficiente valor frente a visuales lentos y encarece el resultado.
-    if pipeline_format in {"podcast", *WELLNESS_FORMATS} and mode == "cinematico":
+    if pipeline_format in {"podcast", *WELLNESS_FORMATS, *TIKTOK_FORMATS} and mode == "cinematico":
         print(f"⚠️  Format={data.get('format')} detectado — overrideando mode 'cinematico' a 'narrativa'")
         mode = "narrativa"
 
     # Label visible en filename: refleja el formato real, no el modo interno del pipeline.
-    format_label = pipeline_format if pipeline_format in {"podcast", *WELLNESS_FORMATS} else mode
+    format_label = "tiktok" if is_tiktok_format else pipeline_format if pipeline_format in {"podcast", *WELLNESS_FORMATS} else mode
 
     # Determinar título y agente
     # Usar topic para nombre de carpeta (consistente con VPS)
@@ -1377,7 +1461,7 @@ if __name__ == "__main__":
     # ════════════════════════════════════════════════════════
     # Bifurcación por formato: podcast usa dual narration (2 voces alternando
     # por dialogue_block), narrativa/cinematico usa single voice.
-    is_podcast_format = data.get("format") == "podcast"
+    is_podcast_format = data.get("format") in {"podcast", "tiktok_podcast"}
     if is_podcast_format:
         podcast_cfg = data.get("podcast") or {}
         voice_a = (podcast_cfg.get("host_a") or {}).get("voice") or "Salvatore"
@@ -1408,6 +1492,16 @@ if __name__ == "__main__":
     # Ken Burns para formatos narrativos; visuales estáticos para meditación larga.
     if is_long_meditation_format:
         kb_stats = apply_static_meditation_visuals_all(scenes, images_dir, kenburns_dir, audio_dir)
+    elif is_tiktok_format:
+        kb_stats = apply_ken_burns_all(
+            scenes,
+            images_dir,
+            kenburns_dir,
+            audio_dir,
+            output_width=1080,
+            output_height=1920,
+            label="Ken Burns vertical TikTok 9:16",
+        )
     else:
         kb_stats = apply_ken_burns_all(scenes, images_dir, kenburns_dir, audio_dir)
     if kb_stats.get("missing") or kb_stats.get("failed"):
@@ -1433,6 +1527,10 @@ if __name__ == "__main__":
             format_label=format_label,
             music_config=_get_autohypnosis_music_config(data),
             low_motion=is_long_meditation_format,
+            output_width=1080 if is_tiktok_format else 1920,
+            output_height=1920 if is_tiktok_format else 1080,
+            final_filename="FINAL_TIKTOK.mp4" if is_tiktok_format else None,
+            min_duration_seconds=10 if is_tiktok_format else 30,
         )
     
     # ════════════════════════════════════════════════════════
@@ -1444,7 +1542,8 @@ if __name__ == "__main__":
     if final_video and not skip_subs:
         try:
             master_audio = project_dir / "master_audio.mp3"
-            subtitled_video = add_subtitles_to_video(
+            subtitle_fn = add_tiktok_subtitles_to_video if is_tiktok_format else add_subtitles_to_video
+            subtitled_video = subtitle_fn(
                 video_path=final_video,
                 audio_path=master_audio if master_audio.exists() else None
             )
@@ -1453,6 +1552,9 @@ if __name__ == "__main__":
                 final_video = subtitled_video
         except Exception as e:
             print(f"   ⚠️ Subtítulos fallaron (video sin subs disponible): {e}")
+
+    if is_tiktok_format:
+        write_tiktok_delivery_assets(project_dir, data, final_video)
     
     # ════════════════════════════════════════════════════════
     # RESUMEN FINAL

@@ -1110,6 +1110,328 @@ def _build_podcast_visual_scenes(topic: str, grouped_scenes: list) -> list:
     return visual_scenes
 
 
+TIKTOK_FORMATS = {
+    "tiktok_documentary",
+    "tiktok_podcast",
+    "tiktok_autohypnosis",
+    "tiktok_meditation",
+}
+TIKTOK_FORMAT_BY_AGENT = {
+    "agent_tiktok_documentary.md": "tiktok_documentary",
+    "agent_tiktok_podcast.md": "tiktok_podcast",
+    "agent_tiktok_autohipnosis.md": "tiktok_autohypnosis",
+    "agent_tiktok_meditation.md": "tiktok_meditation",
+}
+TIKTOK_DURATION_PROFILES = {
+    "60s": {"target_seconds": 60, "word_min": 120, "word_max": 170, "visual_min": 3, "visual_max": 5},
+    "90s": {"target_seconds": 90, "word_min": 180, "word_max": 250, "visual_min": 3, "visual_max": 5},
+    "3m": {"target_seconds": 180, "word_min": 350, "word_max": 500, "visual_min": 6, "visual_max": 8},
+    "5m": {"target_seconds": 300, "word_min": 650, "word_max": 850, "visual_min": 8, "visual_max": 12},
+    "10m": {"target_seconds": 600, "word_min": 1200, "word_max": 1500, "visual_min": 12, "visual_max": 18},
+}
+TIKTOK_SOURCE_GENRE_LABELS = {
+    "science": "ciencia",
+    "mystery": "misterio",
+    "true_crime": "true crime",
+    "history": "historia",
+    "finance": "finanzas",
+    "psychology": "psicologia",
+    "business": "negocios",
+    "culture": "cultura",
+}
+TIKTOK_VISUAL_SAFETY_SUFFIX = (
+    " vertical 9:16 composition, TikTok safe zones, subject centered above lower UI area, "
+    "clean negative space for captions, no readable text, no letters, no logos, no watermarks, "
+    "no faces, no people, no hands, no fingers, no microphones, no speakers, no headphones, "
+    "no audio gear, no podcast equipment, no studio equipment."
+)
+TIKTOK_RELATIONSHIP_VISUALS = [
+    ("phone_face_down", "a phone face down on a small wooden table beside a cooled cup of tea and a loose red thread"),
+    ("empty_chair", "one empty chair under a warm lamp with another chair barely visible in cool shadow"),
+    ("mirror_key", "an old mirror reflecting an empty room with a single brass key on a journal below"),
+    ("door_ajar", "a door left slightly open with warm light spilling into a dark hallway"),
+    ("separated_cups", "two ceramic cups far apart on a clean table with amber and teal cinematic lighting"),
+]
+TIKTOK_DOCUMENTARY_VISUALS = [
+    ("archival_object", "a symbolic historical object on a dark table under a narrow beam of light"),
+    ("map_detail", "a macro view of a blank aged map texture with pins and thread but no readable labels"),
+    ("evidence_wall", "a minimalist evidence wall made of blank photographs and lines, no text"),
+    ("lab_shadow", "abstract scientific glass shapes and soft shadows, no medical setting"),
+    ("city_night", "a quiet city window at night with cinematic reflections and deep negative space"),
+]
+TIKTOK_WELLNESS_VISUALS = [
+    ("breathing_light", "soft warm light moving across linen fabric in a quiet room"),
+    ("water_reflection", "slow abstract water reflections on a dark calm surface"),
+    ("window_curtain", "a sheer curtain moving gently near a window with dawn light"),
+    ("single_candle", "a single candle glow reflected on a clean ceramic surface"),
+    ("soft_path", "an empty forest path suggested by soft light and mist"),
+]
+
+
+def _is_tiktok_agent_file(agent_file: str) -> bool:
+    return agent_file in TIKTOK_FORMAT_BY_AGENT
+
+
+def _tiktok_format_from_agent_file(agent_file: str) -> str:
+    return TIKTOK_FORMAT_BY_AGENT.get(agent_file, "tiktok_documentary")
+
+
+def _tiktok_duration_profile(duration_profile: str | None) -> dict:
+    key = (duration_profile or "90s").strip().lower().replace(" ", "")
+    aliases = {"60": "60s", "1m": "60s", "90": "90s", "3": "3m", "180": "3m", "5": "5m", "300": "5m", "10": "10m", "600": "10m"}
+    key = aliases.get(key, key)
+    profile = TIKTOK_DURATION_PROFILES.get(key) or TIKTOK_DURATION_PROFILES["90s"]
+    return {"id": key if key in TIKTOK_DURATION_PROFILES else "90s", **profile}
+
+
+def _extract_json_object(content: str) -> dict:
+    clean = (content or "").strip()
+    if clean.startswith("```"):
+        parts = clean.split("```")
+        clean = parts[1] if len(parts) > 1 else parts[0]
+        if clean.strip().startswith("json"):
+            clean = clean.strip()[4:]
+    clean = clean.strip()
+    try:
+        return json.loads(clean)
+    except Exception:
+        start = clean.find("{")
+        end = clean.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(clean[start:end + 1])
+        raise
+
+
+def _tiktok_base_system_prompt(agent_file: str) -> str:
+    base = load_prompt("agent_tiktok_studio.md")
+    specific = load_prompt(agent_file)
+    return f"{base}\n\n---\n\n{specific}"
+
+
+def _tiktok_hashtags(topic: str, tiktok_format: str) -> list:
+    base = ["#TikTok", "#ContenidoEnEspañol"]
+    if tiktok_format == "tiktok_podcast":
+        base = ["#EstoNoEsAmor", "#ApegoEmocional", "#AmorPropio", "#Relaciones", "#Podcast"]
+    elif tiktok_format == "tiktok_documentary":
+        base = ["#MiniDocumental", "#Historia", "#DatosCuriosos", "#AprendeEnTikTok"]
+    elif tiktok_format == "tiktok_autohypnosis":
+        base = ["#Autohipnosis", "#Calma", "#AmorPropio", "#Bienestar"]
+    elif tiktok_format == "tiktok_meditation":
+        base = ["#Meditacion", "#Respira", "#Calma", "#Bienestar"]
+    for tag in _topic_tags(topic):
+        candidate = "#" + tag[:24].title().replace("_", "")
+        if candidate not in base:
+            base.append(candidate)
+    return base[:8]
+
+
+def _score_tiktok_script(script: str, profile: dict) -> dict:
+    words = len((script or "").split())
+    word_min = profile["word_min"]
+    word_max = profile["word_max"]
+    in_range = word_min <= words <= word_max
+    has_question = "?" in (script or "")
+    first_line = (script or "").strip().splitlines()[0] if (script or "").strip() else ""
+    hook_len = len(first_line.split())
+    hook_score = 86 if 4 <= hook_len <= 18 else 74
+    retention_score = 88 if in_range else max(60, 88 - abs(words - ((word_min + word_max) // 2)) // 10)
+    clarity_score = 88 if words <= word_max + 80 else 76
+    platform_score = 90 if has_question or "comenta" in script.lower() or "parte 2" in script.lower() else 82
+    return {
+        "hookScore": min(100, hook_score),
+        "retentionScore": min(100, retention_score),
+        "clarityScore": min(100, clarity_score),
+        "platformFitScore": min(100, platform_score),
+    }
+
+
+def _fallback_tiktok_script(topic: str, tiktok_format: str, profile: dict, source_genre: str) -> dict:
+    if tiktok_format == "tiktok_podcast":
+        script = (
+            f"LUCIA: Si todavia piensas en {topic}, tal vez no estas extrañando amor.\n"
+            "MATEO: Estas extrañando una version de ti que vivia esperando una señal.\n"
+            "LUCIA: Y eso duele, porque el apego no se siente como dependencia al principio. Se siente como esperanza.\n"
+            "MATEO: Pero si cada mensaje te calma y cada silencio te destruye, no estas en paz. Estas en abstinencia emocional.\n"
+            "LUCIA: La pregunta no es si esa persona vuelve. La pregunta es que parte de ti se va cada vez que la esperas.\n"
+            "MATEO: Comenta \"me elijo\" si quieres una parte 2 sobre como empezar a soltar sin odiar."
+        )
+    elif tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
+        script = (
+            "Detente un momento. Inhala lento.\n\n"
+            f"Hoy no necesitas resolver todo sobre {topic}. Solo necesitas volver a tu cuerpo.\n\n"
+            "Suelta los hombros. Afloja la mandibula. Permite que el aire entre sin forzarlo.\n\n"
+            "Repite en silencio: estoy aqui, estoy a salvo, puedo elegir con calma.\n\n"
+            "Cuando estes listo, abre los ojos suavemente y guarda este momento para volver a el."
+        )
+    else:
+        label = TIKTOK_SOURCE_GENRE_LABELS.get(source_genre, "historia")
+        script = (
+            f"Lo mas inquietante de {topic} no es lo que todos cuentan.\n\n"
+            f"Es la pequeña decision que casi nadie mira, y que cambio toda la historia.\n\n"
+            f"En {label}, los grandes giros rara vez empiezan con explosiones. Empiezan con una advertencia ignorada, una apuesta demasiado grande o una persona que creyo tener mas tiempo.\n\n"
+            "Y cuando por fin todos se dan cuenta, ya es tarde.\n\n"
+            "Si quieres parte 2, comenta la palabra clave y lo desarmo paso a paso."
+        )
+    return {
+        "script": script,
+        "beats": [],
+        "caption": f"{topic}. Guarda este video y comenta si quieres parte 2.",
+        "hashtags": _tiktok_hashtags(topic, tiktok_format),
+        "scores": _score_tiktok_script(script, profile),
+    }
+
+
+def _generate_tiktok_script_common(
+    topic: str,
+    agent_file: str,
+    project_id: str = None,
+    *,
+    duration_profile: str | None = None,
+    source_genre: str = "psychology",
+    personalization: dict | None = None,
+) -> dict:
+    tiktok_format = _tiktok_format_from_agent_file(agent_file)
+    profile = _tiktok_duration_profile(duration_profile)
+    genre_label = TIKTOK_SOURCE_GENRE_LABELS.get(source_genre, "psicologia")
+    system_prompt = _tiktok_base_system_prompt(agent_file)
+    personalization = personalization or {}
+    prompt_payload = {
+        "topic": topic,
+        "format": tiktok_format,
+        "durationProfile": profile["id"],
+        "targetSeconds": profile["target_seconds"],
+        "wordRange": [profile["word_min"], profile["word_max"]],
+        "sourceGenre": genre_label,
+        "personalization": personalization,
+    }
+    user_prompt = (
+        "Crea un guion nativo para TikTok con este contrato.\n"
+        "Responde SOLO JSON valido con las claves: script, beats, caption, hashtags, scores.\n"
+        "scores debe incluir hookScore, retentionScore, clarityScore y platformFitScore.\n"
+        "El guion debe respetar el rango de palabras y no exceder 10 minutos.\n\n"
+        f"CONTRATO:\n{json.dumps(prompt_payload, ensure_ascii=False, indent=2)}"
+    )
+
+    print(f"\n⚡ MOTOR 1: Generando guion TikTok ({tiktok_format}, {profile['id']})...")
+    if project_id:
+        update_progress(project_id, f"⚡ Escribiendo TikTok {profile['id']}...", 15, {"status": "scripting"})
+
+    data = None
+    try:
+        if claude_client:
+            response = claude_client.messages.create(
+                model=CLAUDE_MODEL_SCRIPT,
+                max_tokens=7000,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            data = _extract_json_object(response.content[0].text)
+        elif openai_client:
+            response = openai_client.chat.completions.create(
+                model=GPT_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+                max_completion_tokens=7000,
+            )
+            data = _extract_json_object(response.choices[0].message.content)
+    except Exception as e:
+        print(f"   ⚠️  TikTok script fallback por error: {e}")
+
+    if not isinstance(data, dict) or not str(data.get("script") or "").strip():
+        data = _fallback_tiktok_script(topic, tiktok_format, profile, source_genre)
+
+    script = str(data.get("script") or "").strip()
+    hashtags = data.get("hashtags") or _tiktok_hashtags(topic, tiktok_format)
+    if isinstance(hashtags, str):
+        hashtags = [h for h in hashtags.split() if h.startswith("#")]
+    scores = data.get("scores") if isinstance(data.get("scores"), dict) else {}
+    scores = {**_score_tiktok_script(script, profile), **scores}
+    metadata = {
+        "format": tiktok_format,
+        "platform": "tiktok",
+        "duration_profile": profile["id"],
+        "target_seconds": profile["target_seconds"],
+        "word_range": [profile["word_min"], profile["word_max"]],
+        "source_genre": source_genre,
+        "caption": str(data.get("caption") or f"{topic}. Comenta si quieres parte 2.").strip(),
+        "hashtags": hashtags[:10],
+        "scores": scores,
+        "personalization": {"enabled": bool(personalization), "fields": sorted(personalization.keys())},
+    }
+    print(f"   ✅ TikTok guion: {len(script.split())} palabras | scores {scores}")
+    return {"script": script, "metadata": metadata}
+
+
+def generate_tiktok_script(topic: str, agent_file: str = "agent_tiktok_documentary.md", project_id: str = None, **kwargs) -> dict:
+    return _generate_tiktok_script_common(topic, agent_file, project_id, **kwargs)
+
+
+def generate_tiktok_podcast_script(topic: str, agent_file: str = "agent_tiktok_podcast.md", project_id: str = None, **kwargs) -> dict:
+    return _generate_tiktok_script_common(topic, agent_file, project_id, **kwargs)
+
+
+def generate_tiktok_wellness_script(topic: str, agent_file: str, project_id: str = None, **kwargs) -> dict:
+    return _generate_tiktok_script_common(topic, agent_file, project_id, **kwargs)
+
+
+def _build_tiktok_visual_scenes(topic: str, script_text: str, profile: dict, tiktok_format: str, source_genre: str = "psychology") -> list:
+    target_count = profile["visual_max"]
+    if tiktok_format == "tiktok_podcast":
+        blocks = _parse_podcast_script(script_text)
+        grouped = _group_blocks_into_scenes(
+            blocks,
+            target_scene_count=profile["visual_max"],
+            max_scene_count=profile["visual_max"],
+        )
+        segments = grouped or [{"narration": script_text, "narration_text": script_text, "dialogue_blocks": blocks}]
+        visual_bank = TIKTOK_RELATIONSHIP_VISUALS
+        identity = "intimate relationship-healing editorial photography, warm amber light, restrained teal shadows"
+    elif tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
+        segments = [
+            {"narration": seg, "narration_text": seg}
+            for seg in _split_text_into_balanced_segments(script_text, profile["visual_max"])
+        ]
+        visual_bank = TIKTOK_WELLNESS_VISUALS
+        identity = "premium calm wellness visual identity, soft cinematic light, gentle negative space"
+    else:
+        segments = [
+            {"narration": seg, "narration_text": seg}
+            for seg in _split_text_into_balanced_segments(script_text, profile["visual_max"])
+        ]
+        visual_bank = TIKTOK_DOCUMENTARY_VISUALS
+        identity = f"premium vertical mini-documentary visual identity, {TIKTOK_SOURCE_GENRE_LABELS.get(source_genre, 'story')} mood"
+
+    if not segments:
+        segments = [{"narration": script_text, "narration_text": script_text}]
+    max_count = min(profile["visual_max"], max(profile["visual_min"], len(segments)))
+    scenes = []
+    for i, segment in enumerate(segments[:max_count]):
+        category, subject = visual_bank[i % len(visual_bank)]
+        prompt = (
+            f"{identity}. Photorealistic cinematic vertical frame of {subject}, "
+            f"theme focus: {topic}, varied premium composition, shallow depth of field, 8k."
+            f"{TIKTOK_VISUAL_SAFETY_SUFFIX}"
+        )
+        scene = {
+            "scene_number": i + 1,
+            "narration_text": segment.get("narration_text") or segment.get("narration") or "",
+            "narration": segment.get("narration") or segment.get("narration_text") or "",
+            "prompt": prompt,
+            "tags": [category, "vertical", "tiktok"] + _topic_tags(topic),
+            "visual_category": category,
+            "platform": "tiktok",
+            "aspect_ratio": "9:16",
+            "safe_zone": "center subject above lower TikTok UI; leave clean caption space",
+        }
+        if segment.get("dialogue_blocks"):
+            scene["dialogue_blocks"] = segment["dialogue_blocks"]
+        scenes.append(scene)
+    return scenes
+
+
 def _split_text_into_balanced_segments(text: str, target_segments: int) -> list:
     """
     Divide texto largo en segmentos balanceados preservando el orden y sin
@@ -1912,18 +2234,52 @@ def run_full_pipeline(
     is_podcast = agent_file.startswith("agent_podcast_")
     is_autohypnosis = agent_file == "agent_autohipnosis.md"
     is_long_meditation = agent_file == "agent_meditacion_larga.md"
+    is_tiktok = _is_tiktok_agent_file(agent_file)
+    tiktok_format = _tiktok_format_from_agent_file(agent_file) if is_tiktok else ""
+    tiktok_profile = _tiktok_duration_profile(generation_options.get("duration_profile")) if is_tiktok else None
+    tiktok_source_genre = generation_options.get("source_genre") or "psychology"
     if is_podcast:
         print("🎙️  Modo PODCAST detectado — pipeline conversacional con 2 voces")
     if is_autohypnosis:
         print("🌙 Modo AUTOHIPNOSIS detectado — sesión guiada con visuales contemplativos")
     if is_long_meditation:
         print("🌌 Modo MEDITACION LARGA detectado — duracion extendida con bajo costo")
+    if is_tiktok:
+        print(f"⚡ Modo TIKTOK detectado — {tiktok_format} vertical {tiktok_profile['id']}")
 
     try:
         update_progress(project_id, "Escribiendo la estructura narrativa...", 10, {"status": "scripting"})
 
         # PASO 1: Generar guión (formatos especiales usan generador propio)
-        if is_podcast:
+        if is_tiktok:
+            if tiktok_format == "tiktok_podcast":
+                result = generate_tiktok_podcast_script(
+                    topic,
+                    agent_file,
+                    project_id,
+                    duration_profile=tiktok_profile["id"],
+                    source_genre=tiktok_source_genre,
+                    personalization=personalization_options,
+                )
+            elif tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
+                result = generate_tiktok_wellness_script(
+                    topic,
+                    agent_file,
+                    project_id,
+                    duration_profile=tiktok_profile["id"],
+                    source_genre=tiktok_source_genre,
+                    personalization=personalization_options,
+                )
+            else:
+                result = generate_tiktok_script(
+                    topic,
+                    agent_file,
+                    project_id,
+                    duration_profile=tiktok_profile["id"],
+                    source_genre=tiktok_source_genre,
+                    personalization=personalization_options,
+                )
+        elif is_podcast:
             result = generate_podcast_script(topic, agent_file, project_id)
         elif is_autohypnosis:
             result = generate_autohypnosis_script(
@@ -1949,10 +2305,12 @@ def run_full_pipeline(
 
         # PASO 2: Agregar etiquetas de emoción (tagger especializado para podcast
         # respeta densidades por speaker)
-        if is_autohypnosis or is_long_meditation:
+        if is_tiktok and tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
+            tagged_script = _normalize_autohypnosis_delivery(script)
+        elif is_autohypnosis or is_long_meditation:
             tagged_script = _normalize_autohypnosis_delivery(script)
         else:
-            emotion_prompt_file = "emotion_tagger_podcast.md" if is_podcast else "emotion_tagger.md"
+            emotion_prompt_file = "emotion_tagger_podcast.md" if (is_podcast or tiktok_format == "tiktok_podcast") else "emotion_tagger.md"
             tagged_script = add_emotion_tags(script, prompt_file=emotion_prompt_file)
 
         # Para podcast, parseamos el guión en bloques de diálogo y agrupamos
@@ -1972,7 +2330,17 @@ def run_full_pipeline(
         update_progress(project_id, "Diseñando escenas visuales...", 60, {"status": "prompting"})
 
         # PASO 3: Generar prompts de video (estética por formato)
-        if is_podcast:
+        if is_tiktok:
+            video_scenes = _build_tiktok_visual_scenes(
+                topic,
+                tagged_script,
+                tiktok_profile,
+                tiktok_format,
+                source_genre=tiktok_source_genre,
+            )
+            print(f"   ⚡ TikTok visual: {len(video_scenes)} escenas verticales "
+                  f"(profile={tiktok_profile['id']}, format={tiktok_format})")
+        elif is_podcast:
             video_scenes = _build_podcast_visual_scenes(topic, podcast_scenes_grouped)
             print(f"   🎬 Podcast visual: {len(video_scenes)} escenas macro "
                   f"(target={PODCAST_TARGET_VISUAL_SCENES}, max={PODCAST_MAX_VISUAL_SCENES})")
@@ -2029,7 +2397,8 @@ def run_full_pipeline(
         full_result = {
             "topic": topic,
             "agent": agent_file,
-            "format": "podcast" if is_podcast else LONG_MEDITATION_FORMAT if is_long_meditation else "autohipnosis" if is_autohypnosis else "narrativa",
+            "platform": "tiktok" if is_tiktok else "youtube",
+            "format": tiktok_format if is_tiktok else "podcast" if is_podcast else LONG_MEDITATION_FORMAT if is_long_meditation else "autohipnosis" if is_autohypnosis else "narrativa",
             "script_plain": script,
             "script_tagged": tagged_script,
             "video_scenes": video_scenes,
@@ -2065,6 +2434,34 @@ def run_full_pipeline(
                 "host_b": {"name": "Lucía", "voice": "Lina"},
                 "total_blocks": len(podcast_blocks),
             }
+        if is_tiktok:
+            full_result["tiktok"] = {
+                "format": tiktok_format,
+                "duration_profile": result["metadata"].get("duration_profile"),
+                "target_seconds": result["metadata"].get("target_seconds"),
+                "word_range": result["metadata"].get("word_range"),
+                "source_genre": result["metadata"].get("source_genre"),
+                "caption": result["metadata"].get("caption"),
+                "hashtags": result["metadata"].get("hashtags"),
+                "scores": result["metadata"].get("scores"),
+                "safe_zones": {
+                    "render": "1080x1920",
+                    "subtitle_margin_bottom": 360,
+                    "right_ui_clearance": 180,
+                },
+                "publishing": {
+                    "enabled": False,
+                    "reason": "tiktok_oauth_phase_pending",
+                },
+            }
+            if tiktok_format == "tiktok_podcast":
+                full_result["podcast"] = {
+                    "show_name": PODCAST_SHOW_NAME,
+                    "host_a": {"name": "Mateo", "voice": "Will"},
+                    "host_b": {"name": "Lucía", "voice": "Lina"},
+                    "total_blocks": len(_parse_podcast_script(tagged_script)),
+                    "platform": "tiktok",
+                }
         if is_autohypnosis:
             full_result["autohipnosis"] = {
                 "voice": "Lorenzo",
@@ -2119,8 +2516,10 @@ def run_full_pipeline(
             try:
                 words = len(script.split())
                 # Podcast/autohipnosis son más pausados que narrativa.
-                wpm = 130 if is_podcast else LONG_MEDITATION_ESTIMATED_WPM if is_long_meditation else AUTOHYPNOSIS_ESTIMATED_WPM if is_autohypnosis else 150
+                wpm = 135 if is_tiktok else 130 if is_podcast else LONG_MEDITATION_ESTIMATED_WPM if is_long_meditation else AUTOHYPNOSIS_ESTIMATED_WPM if is_autohypnosis else 150
                 estimated_minutes = round(words / wpm, 1)
+                if is_tiktok:
+                    estimated_minutes = round((result["metadata"].get("target_seconds") or tiktok_profile["target_seconds"]) / 60, 1)
                 if is_long_meditation:
                     estimated_minutes = result["metadata"].get("target_duration_minutes") or estimated_minutes
                 firestore_payload = {
@@ -2143,6 +2542,18 @@ def run_full_pipeline(
                 if is_podcast:
                     firestore_payload["format"] = "podcast"
                     firestore_payload["podcast"] = full_result["podcast"]
+                if is_tiktok:
+                    firestore_payload["platform"] = "tiktok"
+                    firestore_payload["format"] = tiktok_format
+                    firestore_payload["tiktok"] = full_result["tiktok"]
+                    firestore_payload["script.targetSeconds"] = result["metadata"].get("target_seconds")
+                    firestore_payload["script.durationProfile"] = result["metadata"].get("duration_profile")
+                    if tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
+                        firestore_payload["personalization"] = _normalize_personalization_payload(
+                            personalization_options
+                        )
+                    if tiktok_format == "tiktok_podcast" and full_result.get("podcast"):
+                        firestore_payload["podcast"] = full_result["podcast"]
                 if is_autohypnosis:
                     firestore_payload["format"] = "autohipnosis"
                     firestore_payload["autohipnosis"] = full_result["autohipnosis"]

@@ -22,6 +22,7 @@ const STATUS_META = {
   error: { label: "Error", cls: "cf-badge--bad" },
   scheduled: { label: "Programado", cls: "cf-badge--starter" },
   uploaded: { label: "Subido", cls: "cf-badge--ok" },
+  ready: { label: "Listo", cls: "cf-badge--ok" },
   none: { label: "Sin Shorts", cls: "cf-badge--neutral" },
   partial: { label: "Parcial", cls: "cf-badge--warn" },
 };
@@ -97,6 +98,7 @@ function PublicationRow({ item, index }) {
   const video = item.video || {};
   const shorts = item.shorts || {};
   const nextAction = item.nextAction || {};
+  const isTikTok = item.platform === "tiktok";
   const shortsStudioUrl = (shorts.uploads || []).find((upload) => upload.youtubeStudioUrl)?.youtubeStudioUrl;
 
   return (
@@ -121,7 +123,7 @@ function PublicationRow({ item, index }) {
           }}
         >
           <span className="cf-badge cf-badge--neutral">
-            {(item.format || "video").replace(/_/g, " ")}
+            {isTikTok ? "TikTok" : (item.format || "video").replace(/_/g, " ")}
           </span>
           {item.channel?.title && (
             <span className="cf-mono-sm" style={{ color: "var(--paper-mute)" }}>
@@ -146,7 +148,7 @@ function PublicationRow({ item, index }) {
 
       <div>
         <div className="cf-mono-sm" style={{ marginBottom: 8 }}>
-          VIDEO LARGO
+          {isTikTok ? "VIDEO TIKTOK" : "VIDEO LARGO"}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <StatusBadge status={video.status} />
@@ -166,10 +168,11 @@ function PublicationRow({ item, index }) {
 
       <div>
         <div className="cf-mono-sm" style={{ marginBottom: 8 }}>
-          SHORTS
+          {isTikTok ? "PUBLICACIÓN" : "SHORTS"}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <StatusBadge status={shorts.status} />
+          <StatusBadge status={isTikTok ? "ready" : shorts.status} />
+          {isTikTok && <span className="cf-badge cf-badge--neutral">Nativo</span>}
           {shorts.total > 0 && (
             <span className="cf-badge cf-badge--neutral">
               {shorts.uploaded}/{shorts.total}
@@ -218,7 +221,7 @@ function PublicationRow({ item, index }) {
           href={actionHref(item)}
           style={{ textDecoration: "none" }}
         >
-          <Icon name={actionIcon(nextAction.kind)} size={14} />
+          <Icon name={isTikTok ? "zap" : actionIcon(nextAction.kind)} size={14} />
           {nextAction.label || "Abrir"}
         </Link>
       </div>
@@ -278,7 +281,7 @@ export default function PublicationsPage() {
     <div style={{ paddingBottom: "var(--s-7)" }}>
       <header className="cf-fade" style={{ marginBottom: "var(--s-7)" }}>
         <div className="cf-mono-sm" style={{ color: "var(--ember)", marginBottom: 8 }}>
-          YOUTUBE STUDIO
+          CENTRO MULTIPLATAFORMA
         </div>
         <div
           style={{

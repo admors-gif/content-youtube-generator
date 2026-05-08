@@ -1,6 +1,8 @@
 from scripts.generate_content import (
     _build_podcast_visual_scenes,
+    _build_tiktok_visual_scenes,
     _group_blocks_into_scenes,
+    _tiktok_duration_profile,
 )
 
 
@@ -112,3 +114,25 @@ def test_podcast_visual_prompts_block_audio_gear_people_and_generated_text():
     ]
     for prompt in prompts:
         assert all(rule in prompt for rule in required_guardrails)
+
+
+def test_tiktok_visual_prompts_are_vertical_and_safe():
+    profile = _tiktok_duration_profile("90s")
+    scenes = _build_tiktok_visual_scenes(
+        "No extrañas a esa persona: extrañas cómo te hacía sentir",
+        "LUCIA: No extrañas amor.\nMATEO: Extrañas una versión de ti esperando una señal.",
+        profile,
+        "tiktok_podcast",
+        source_genre="psychology",
+    )
+    prompts = [scene["prompt"].lower() for scene in scenes]
+
+    assert 1 <= len(scenes) <= profile["visual_max"]
+    assert all(scene["aspect_ratio"] == "9:16" for scene in scenes)
+    assert all("vertical 9:16" in prompt for prompt in prompts)
+    assert all("no readable text" in prompt for prompt in prompts)
+    assert all("no hands" in prompt for prompt in prompts)
+    assert all("no faces" in prompt for prompt in prompts)
+    assert all("no microphones" in prompt for prompt in prompts)
+    assert all("no speakers" in prompt for prompt in prompts)
+    assert all("no headphones" in prompt for prompt in prompts)

@@ -26,9 +26,12 @@ export default function ScenesTab({ project }) {
     "subtitling",
     "publishing",
   ].includes(project.status);
-  const isWellness = ["autohipnosis", "meditacion_larga"].includes(project.format);
+  const isTikTok = project.platform === "tiktok" || String(project.format || "").startsWith("tiktok_");
+  const isWellness = ["autohipnosis", "meditacion_larga", "tiktok_autohypnosis", "tiktok_meditation"].includes(project.format);
   const itemLabel = isWellness
     ? `visual${totalScenes === 1 ? "" : "es"}`
+    : isTikTok
+      ? `beat${totalScenes === 1 ? "" : "s"}`
     : `escena${totalScenes === 1 ? "" : "s"}`;
 
   if (totalScenes === 0) {
@@ -67,7 +70,7 @@ export default function ScenesTab({ project }) {
             textTransform: "uppercase",
           }}
         >
-          {isWellness ? "DISEÑANDO VISUALES" : "DIRIGIENDO ESCENAS"}
+          {isTikTok ? "DISEÑANDO BEATS" : isWellness ? "DISEÑANDO VISUALES" : "DIRIGIENDO ESCENAS"}
         </div>
         <h3
           style={{
@@ -80,7 +83,7 @@ export default function ScenesTab({ project }) {
             letterSpacing: "-0.02em",
           }}
         >
-          {isWellness ? "Visuales en preparación" : "Storyboard en preparación"}
+          {isTikTok ? "Beats verticales en preparación" : isWellness ? "Visuales en preparación" : "Storyboard en preparación"}
         </h3>
         <p
           style={{
@@ -90,7 +93,9 @@ export default function ScenesTab({ project }) {
             lineHeight: 1.5,
           }}
         >
-          {isWellness
+          {isTikTok
+            ? "Estamos creando visuales verticales 9:16 con espacio seguro para subtítulos."
+            : isWellness
             ? "Estamos preparando visuales lentos y calmados para sostener la sesión."
             : "El director de fotografía está dividiendo tu guión en prompts visuales cada 5 segundos."}
         </p>
@@ -119,7 +124,7 @@ export default function ScenesTab({ project }) {
               textTransform: "uppercase",
             }}
           >
-            {isWellness ? "VISUALES" : "STORYBOARD"}
+            {isTikTok ? "BEATS VERTICALES" : isWellness ? "VISUALES" : "STORYBOARD"}
           </div>
           <div
             style={{
@@ -207,8 +212,8 @@ export default function ScenesTab({ project }) {
               {/* Thumbnail */}
               <div
                 style={{
-                  width: 120,
-                  height: 68,
+                  width: isTikTok ? 76 : 120,
+                  height: isTikTok ? 136 : 68,
                   borderRadius: "var(--r-1)",
                   border: `1px solid ${isOk ? "var(--rule-2)" : "var(--rule-1)"}`,
                   flex: "none",
@@ -225,7 +230,7 @@ export default function ScenesTab({ project }) {
                     src={scene.imageUrl}
                     alt={`Escena ${idx + 1}`}
                     fill
-                    sizes="120px"
+                    sizes={isTikTok ? "76px" : "120px"}
                     style={{ objectFit: "cover" }}
                     loading="lazy"
                     unoptimized={!/^https:\/\//.test(scene.imageUrl)}

@@ -25,6 +25,7 @@ export default function ProjectHeader({
   onDownloadAll,
   onPublishYouTube,
   downloadAllLoading = false,
+  platform = "youtube",
 }) {
   const color = agent?.color || "var(--ember)";
   const mono = getMonogram(project.agentId);
@@ -167,16 +168,24 @@ export default function ProjectHeader({
               {downloadAllLoading ? "Preparando ZIP" : "Material completo"}
             </button>
             <button
-              onClick={onPublishYouTube}
+              onClick={platform === "tiktok" ? undefined : onPublishYouTube}
+              disabled={platform === "tiktok"}
               className="cf-btn cf-btn--ghost"
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 8,
+                opacity: platform === "tiktok" ? 0.65 : 1,
+                cursor: platform === "tiktok" ? "not-allowed" : "pointer",
               }}
-              title="Revisar metadata y subir como privado o programado"
+              title={
+                platform === "tiktok"
+                  ? "Publicación TikTok vendrá en una fase separada"
+                  : "Revisar metadata y subir como privado o programado"
+              }
             >
-              <Icon name="uploadCloud" size={16} /> Publicar en YouTube
+              <Icon name={platform === "tiktok" ? "zap" : "uploadCloud"} size={16} />{" "}
+              {platform === "tiktok" ? "TikTok listo" : "Publicar en YouTube"}
             </button>
           </div>
         )}

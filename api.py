@@ -29,6 +29,7 @@ FIREBASE_STORAGE_BUCKET = os.environ.get(
     "FIREBASE_STORAGE_BUCKET",
     "content-factory-5cbcb.firebasestorage.app",
 )
+BASE_DIR = Path(__file__).resolve().parent
 
 # ── Observabilidad ────────────────────────────────────────────────────────────
 # 1) Sentry: captura errores no-handleados con stack trace.
@@ -154,13 +155,25 @@ app.add_middleware(
 
 def _ensure_firebase_initialized():
     """Inicializa firebase_admin con storageBucket si no está activo. Idempotente."""
+    import json
     import firebase_admin
     from firebase_admin import credentials
     try:
         firebase_admin.get_app()
     except ValueError:
-        cred_path = "/app/firebase-admin.json"
-        if not os.path.exists(cred_path):
+        inline_credentials = os.environ.get("FIREBASE_ADMIN_CREDENTIALS", "").strip()
+        if inline_credentials:
+            cred = credentials.Certificate(json.loads(inline_credentials))
+            firebase_admin.initialize_app(cred, {"storageBucket": FIREBASE_STORAGE_BUCKET})
+            return
+
+        credential_candidates = [
+            os.environ.get("FIREBASE_ADMIN_CREDENTIALS_PATH", "").strip(),
+            "/app/firebase-admin.json",
+            str(BASE_DIR / "firebase-admin.json"),
+        ]
+        cred_path = next((path for path in credential_candidates if path and os.path.exists(path)), "")
+        if not cred_path:
             raise RuntimeError("firebase-admin.json no encontrado")
         cred = credentials.Certificate(cred_path)
         firebase_admin.initialize_app(cred, {"storageBucket": FIREBASE_STORAGE_BUCKET})
@@ -218,7 +231,15 @@ def _require_principal(
         return {"admin": False, "uid": uid, "token": decoded}
     except HTTPException:
         raise
-    except Exception:
+    except Exception as exc:
+        try:
+            log.warning(
+                "firebase_auth_verify_failed",
+                error_type=type(exc).__name__,
+                error=str(exc)[:300],
+            )
+        except Exception:
+            pass
         raise HTTPException(status_code=401, detail="invalid auth token")
 
 
@@ -447,12 +468,72 @@ def _assert_production_capacity(db):
     return capacity
 
 
-_WELLNESS_AGENT_IDS = {"agent_autohipnosis", "agent_meditacion_larga"}
+_TIKTOK_AGENT_IDS = {
+    "agent_tiktok_documentary",
+    "agent_tiktok_podcast",
+    "agent_tiktok_autohipnosis",
+    "agent_tiktok_meditation",
+}
+_TIKTOK_FORMAT_BY_AGENT = {
+    "agent_tiktok_documentary": "tiktok_documentary",
+    "agent_tiktok_podcast": "tiktok_podcast",
+    "agent_tiktok_autohipnosis": "tiktok_autohypnosis",
+    "agent_tiktok_meditation": "tiktok_meditation",
+}
+_TIKTOK_DURATION_ALIASES = {
+    "60": "60s",
+    "60s": "60s",
+    "1m": "60s",
+    "90": "90s",
+    "90s": "90s",
+    "3": "3m",
+    "3m": "3m",
+    "180": "3m",
+    "180s": "3m",
+    "5": "5m",
+    "5m": "5m",
+    "300": "5m",
+    "300s": "5m",
+    "10": "10m",
+    "10m": "10m",
+    "600": "10m",
+    "600s": "10m",
+}
+_TIKTOK_DURATION_SECONDS = {
+    "60s": 60,
+    "90s": 90,
+    "3m": 180,
+    "5m": 300,
+    "10m": 600,
+}
+_TIKTOK_SOURCE_GENRES = {
+    "science",
+    "mystery",
+    "true_crime",
+    "history",
+    "finance",
+    "psychology",
+    "business",
+    "culture",
+}
+_WELLNESS_AGENT_IDS = {
+    "agent_autohipnosis",
+    "agent_meditacion_larga",
+    "agent_tiktok_autohipnosis",
+    "agent_tiktok_meditation",
+}
 _PERSONALIZATION_LIMITS = {
     "preferred_name": 40,
     "purpose": 500,
     "anchor_phrase": 180,
 }
+
+
+def _flag_enabled(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on", "enabled"}
 
 
 def _clean_personalization_text(value, *, max_chars: int, field_name: str) -> str:
@@ -526,13 +607,55 @@ def _validate_project_payload(data: dict) -> dict:
     if agent_file[:-3] != agent_id:
         raise HTTPException(status_code=400, detail="agent mismatch")
 
+    requested_platform = (data.get("platform") or "").strip().lower()
+    inferred_platform = "tiktok" if agent_id in _TIKTOK_AGENT_IDS else "youtube"
+    platform = requested_platform or inferred_platform
+    if platform not in {"youtube", "tiktok"}:
+        raise HTTPException(status_code=400, detail="invalid platform")
+    if platform == "tiktok":
+        if not _flag_enabled("CONTENT_FACTORY_TIKTOK_GENERATION_ENABLED", default=False):
+            raise HTTPException(status_code=403, detail="tiktok generation disabled")
+        if agent_id not in _TIKTOK_AGENT_IDS:
+            raise HTTPException(status_code=400, detail="invalid TikTok agent")
+    elif agent_id in _TIKTOK_AGENT_IDS:
+        raise HTTPException(status_code=400, detail="TikTok agent requires TikTok platform")
+
     duration_profile = (data.get("durationProfile") or data.get("duration_profile") or "").strip().lower()
     allowed_duration_profiles = {"30m", "60m", "180m"}
     generation_options = {}
     personalization = _validate_personalization_payload(data, agent_id=agent_id)
     if personalization:
         generation_options["personalization"] = personalization
-    if agent_id == "agent_meditacion_larga":
+    project_format = _TIKTOK_FORMAT_BY_AGENT.get(agent_id, "")
+    tiktok_payload = {}
+    if platform == "tiktok":
+        duration_key = duration_profile.replace(" ", "") or "90s"
+        duration_profile = _TIKTOK_DURATION_ALIASES.get(duration_key, duration_key)
+        if duration_profile not in _TIKTOK_DURATION_SECONDS:
+            raise HTTPException(status_code=400, detail="invalid TikTok durationProfile")
+        source_genre = (
+            data.get("sourceGenre")
+            or data.get("source_genre")
+            or data.get("genre")
+            or "psychology"
+        )
+        source_genre = str(source_genre).strip().lower().replace("-", "_")
+        if source_genre not in _TIKTOK_SOURCE_GENRES:
+            source_genre = "psychology"
+        tiktok_payload = {
+            "format": project_format,
+            "durationProfile": duration_profile,
+            "targetSeconds": _TIKTOK_DURATION_SECONDS[duration_profile],
+            "sourceGenre": source_genre,
+        }
+        generation_options.update({
+            "platform": "tiktok",
+            "format": project_format,
+            "duration_profile": duration_profile,
+            "source_genre": source_genre,
+            "target_seconds": _TIKTOK_DURATION_SECONDS[duration_profile],
+        })
+    elif agent_id == "agent_meditacion_larga":
         aliases = {
             "30": "30m",
             "30m": "30m",
@@ -553,6 +676,9 @@ def _validate_project_payload(data: dict) -> dict:
         "title": title,
         "agent_id": agent_id,
         "agent_file": agent_file,
+        "platform": platform,
+        "format": project_format,
+        "tiktok": tiktok_payload,
         "personalization": personalization,
         "generation_options": generation_options,
     }
@@ -2884,6 +3010,12 @@ def _is_podcast_project(data: dict) -> bool:
     return (data.get("agentId") or data.get("agent")) == "agent_podcast_general" or data.get("format") == "podcast"
 
 
+def _is_tiktok_project(data: dict) -> bool:
+    fmt = data.get("format") or ""
+    agent = data.get("agentId") or data.get("agent") or ""
+    return data.get("platform") == "tiktok" or fmt in set(_TIKTOK_FORMAT_BY_AGENT.values()) or agent in _TIKTOK_AGENT_IDS
+
+
 def _youtube_base_description(data: dict, title: str) -> str:
     seo = data.get("seo_metadata") or {}
     description = " ".join(str(seo.get("description") or "").split())
@@ -3518,6 +3650,47 @@ def _youtube_publication_overview_row(
     channel_titles = channel_titles or {}
     youtube = data.get("youtube") or {}
     project_completed = data.get("status") == "completed"
+    if _is_tiktok_project(data):
+        tiktok = data.get("tiktok") or {}
+        video_status = "ready" if project_completed else "not_ready"
+        return {
+            "id": project_id,
+            "platform": "tiktok",
+            "title": data.get("title") or "Sin título",
+            "agentId": data.get("agentId") or "",
+            "format": data.get("format") or "",
+            "status": data.get("status") or "",
+            "createdAt": _serialize_firestore_value(data.get("createdAt")),
+            "updatedAt": _serialize_firestore_value(data.get("updatedAt")),
+            "completedAt": _serialize_firestore_value(data.get("productionCompletedAt") or data.get("completedAt")),
+            "channel": {"id": "", "title": "TikTok"},
+            "video": {
+                "status": video_status,
+                "youtubeVideoId": "",
+                "youtubeStudioUrl": "",
+                "privacyStatus": "",
+                "publishAt": "",
+                "jobId": "",
+                "jobStatus": tiktok.get("status") or "",
+                "warning": "" if project_completed else "Producción pendiente",
+                "error": "",
+                "thumbnailUploaded": None,
+            },
+            "shorts": {
+                "status": "none",
+                "total": 0,
+                "uploaded": 0,
+                "scheduled": 0,
+                "uploads": [],
+                "jobId": "",
+                "jobStatus": "",
+                "warning": "",
+                "error": "",
+                "errors": [],
+            },
+            "nextAction": {"kind": "open", "label": "Abrir TikTok"} if project_completed else {"kind": "wait", "label": "Esperar producción"},
+            "tiktok": _serialize_firestore_value(tiktok),
+        }
 
     video_id = youtube.get("lastVideoId") or (latest_video_job or {}).get("youtubeVideoId") or ""
     studio_url = youtube.get("lastStudioUrl") or (latest_video_job or {}).get("youtubeStudioUrl") or ""
@@ -3591,6 +3764,7 @@ def _youtube_publication_overview_row(
         "id": project_id,
         "title": data.get("title") or "Sin título",
         "agentId": data.get("agentId") or "",
+        "platform": "youtube",
         "format": data.get("format") or "",
         "status": data.get("status") or "",
         "createdAt": _serialize_firestore_value(data.get("createdAt")),
@@ -4438,7 +4612,7 @@ def youtube_publish_job(job_id: str, request: Request):
 def download_all(project_id: str, request: Request):
     """
     Streamea un ZIP con el paquete listo para publicacion:
-    video/, shorts/, thumbnails/, audio/, images/ + carpeta youtube/.
+    video/, shorts/, thumbnails/, audio/, images/ + carpetas youtube/ y tiktok/.
 
     Usa zipstream-ng para construir el ZIP on-the-fly (no en memoria),
     critico cuando el video final pesa 100MB+.
@@ -4496,9 +4670,13 @@ def download_all(project_id: str, request: Request):
         add_glob(video_dir / "shorts", "*.mp4", "shorts")
         add_glob(video_dir / "thumbnails", "*.jpg", "thumbnails")
         add_glob(video_dir / "thumbnails", "*.png", "thumbnails")
+        add_glob(video_dir / "tiktok", "*.json", "tiktok")
+        add_glob(video_dir / "tiktok", "*.txt", "tiktok")
+        add_glob(video_dir / "tiktok", "*.jpg", "tiktok")
 
         # Otros activos sueltos del root del folder
         add_if(video_dir / "subtitles.ass", "subtitulos.ass")
+        add_if(video_dir / "subtitles_tiktok.ass", "subtitulos_tiktok.ass")
         add_if(video_dir / "transcript.json", "transcripcion.json")
 
         # Guión desde Firestore (no está en disco como .txt)
@@ -4531,6 +4709,7 @@ def download_all(project_id: str, request: Request):
             "id": project_id,
             "title": title,
             "agentId": data.get("agentId"),
+            "platform": data.get("platform") or "youtube",
             "format": data.get("format"),
             "createdAt": str(data.get("createdAt")),
             "completedAt": str(data.get("completedAt")),
@@ -4540,6 +4719,7 @@ def download_all(project_id: str, request: Request):
             "viralityScore": data.get("viralityScore"),
             "seo_metadata": data.get("seo_metadata"),
             "youtube": publish_pack,
+            "tiktok": data.get("tiktok") or {},
             "scenesCount": len(data.get("scenes") or []),
             "downloadedAt": datetime.now(timezone.utc).isoformat(),
         }
@@ -4978,6 +5158,9 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
                 "creditsRemaining": max(0, counts["remaining"] - 1),
                 "agentId": payload["agent_id"],
                 "agentFile": payload["agent_file"],
+                "platform": payload.get("platform") or "youtube",
+                "format": payload.get("format") or "",
+                "tiktok": payload.get("tiktok") or {},
                 "personalization": payload.get("personalization") or {},
                 "generationOptions": payload.get("generation_options") or {},
             }
@@ -5051,6 +5234,8 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
                 "title": payload["title"],
                 "agentId": payload["agent_id"],
                 "agentFile": payload["agent_file"],
+                "platform": payload.get("platform") or "youtube",
+                "format": payload.get("format") or "",
                 "status": "draft",
                 "progress": {
                     "currentStep": 0,
@@ -5069,6 +5254,7 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
                 "voice": {"style": "narrative", "speed": 1.0, "pitch": 0},
                 "output": {},
                 "seo": {},
+                "tiktok": payload.get("tiktok") or {},
                 "costs": {"creditCost": 1},
                 "personalization": payload.get("personalization") or {},
                 "generationOptions": payload.get("generation_options") or {},
@@ -5747,6 +5933,8 @@ def run_production(project_id):
         title = project.get("title", "video_sin_titulo")
         scenes = project.get("scenes", [])
         agent_id = project.get("agentId", "")
+        project_format = project.get("format") or ""
+        is_tiktok_project = _is_tiktok_project(project)
 
         if not scenes:
             update_progress(0, "Error: No hay escenas visuales", "error")
@@ -5762,15 +5950,15 @@ def run_production(project_id):
         # dual TTS; autohipnosis necesita preservar su etiqueta de formato para
         # visuales y filename.
         is_podcast_project = (
-            project.get("format") == "podcast"
+            project_format in {"podcast", "tiktok_podcast"}
             or (agent_id or "").startswith("agent_podcast_")
         )
         is_autohypnosis_project = (
-            project.get("format") == "autohipnosis"
+            project_format == "autohipnosis"
             or agent_id == "agent_autohipnosis"
         )
         is_long_meditation_project = (
-            project.get("format") == "meditacion_larga"
+            project_format == "meditacion_larga"
             or agent_id == "agent_meditacion_larga"
         )
 
@@ -5796,10 +5984,23 @@ def run_production(project_id):
             "project_id": project_id,
             "output_folder": safe_title,
             "agent": agent_id,
+            "platform": "tiktok" if is_tiktok_project else "youtube",
             "video_scenes": factory_scenes,
             "seo_metadata": project.get("seo_metadata", {"title": title}),
         }
-        if is_podcast_project:
+        if is_tiktok_project:
+            temp_json["format"] = project_format
+            temp_json["tiktok"] = project.get("tiktok") or {}
+            if project_format == "tiktok_podcast":
+                temp_json["podcast"] = project.get("podcast", {
+                    "show_name": "Esto no es amor",
+                    "host_a": {"name": "Mateo", "voice": "Will"},
+                    "host_b": {"name": "Lucía", "voice": "Lina"},
+                    "platform": "tiktok",
+                })
+            elif project_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
+                temp_json["autohipnosis"] = project.get("autohipnosis") or {}
+        elif is_podcast_project:
             temp_json["format"] = "podcast"
             # Reusa la podcast config persistida en Firestore (host_a/host_b voices, etc.)
             # Defaults actualizados 2026-05-03: Will + Lina (eleven_v3 con audio
@@ -5880,7 +6081,7 @@ def run_production(project_id):
             # finally que mata subprocess + monitor thread aunque haya
             # excepción (SoftTimeLimitExceeded, KeyboardInterrupt, etc.).
             returncode, stderr_tail = _run_factory_subprocess(
-                ["python", "scripts/factory.py", temp_path, "--mode", "cinematico", "--images-only"],
+                ["python", "scripts/factory.py", temp_path, "--mode", "narrativa" if is_tiktok_project else "cinematico", "--images-only"],
                 monitor_thread=monitor_thread,
                 stop_event=stop_monitoring,
                 timeout=7200,
@@ -5972,8 +6173,10 @@ def run_production(project_id):
         # de 3600 → 7200 (cinematico con 99 escenas tarda hasta 1h25m).
         factory_cmd = [
             "python", "scripts/factory.py", temp_path,
-            "--mode", "cinematico", "--luma-scenes", "8", "--skip-images",
+            "--mode", "narrativa" if is_tiktok_project else "cinematico", "--skip-images",
         ]
+        if not is_tiktok_project:
+            factory_cmd.extend(["--luma-scenes", "8"])
         if is_long_meditation_project:
             factory_cmd.append("--skip-subs")
         returncode, stderr_tail = _run_factory_subprocess(
@@ -6002,7 +6205,10 @@ def run_production(project_id):
             if final_candidate:
                 try:
                     sys.path.insert(0, "/app/scripts")
-                    from generate_subtitles import add_subtitles_to_video
+                    if is_tiktok_project:
+                        from generate_subtitles import add_tiktok_subtitles_to_video as _add_subtitles
+                    else:
+                        from generate_subtitles import add_subtitles_to_video as _add_subtitles
 
                     master_audio = video_dir / "master_audio.mp3"
                     if not master_audio.exists():
@@ -6012,7 +6218,7 @@ def run_production(project_id):
                         print("   ⚠️ Sin audio maestro válido — saltando subtítulos")
                     else:
                         print(f"   🎤 Audio maestro listo ({master_audio.stat().st_size // 1024} KB) → Whisper")
-                        subtitled = add_subtitles_to_video(
+                        subtitled = _add_subtitles(
                             video_path=final_candidate,
                             audio_path=master_audio,
                         )
@@ -6094,7 +6300,7 @@ def run_production(project_id):
         # Generar shorts vertical 9:16 (3 momentos del video final)
         # No bloqueante: si falla, el video largo ya está completado.
         shorts_results = []
-        if final_path and storage_info and not is_long_meditation_project:
+        if final_path and storage_info and not is_long_meditation_project and not is_tiktok_project:
             try:
                 update_progress(97, "Creando versiones cortas...", "publishing")
                 shorts_results = build_shorts_for_project(video_dir, project_id)
@@ -6109,7 +6315,7 @@ def run_production(project_id):
 
         # Generar thumbnails (3 variantes a partir de imágenes existentes)
         thumbnails_results = []
-        if storage_info:
+        if storage_info and not is_tiktok_project:
             try:
                 update_progress(99, "Diseñando miniaturas...", "publishing")
                 project_title = project.get("title", "")
@@ -6129,7 +6335,9 @@ def run_production(project_id):
                 except Exception:
                     pass
 
-        if is_long_meditation_project:
+        if is_tiktok_project:
+            status_msg = "Tu TikTok está listo"
+        elif is_long_meditation_project:
             status_msg = "Tu sesión está lista"
         else:
             status_msg = "Tu video está listo" if not has_subs else "Tu video con subtítulos está listo"
@@ -6154,6 +6362,11 @@ def run_production(project_id):
             update_payload["shorts"] = shorts_results
         if thumbnails_results:
             update_payload["thumbnails"] = thumbnails_results
+        if is_tiktok_project:
+            update_payload["platform"] = "tiktok"
+            update_payload["format"] = project_format
+            update_payload["tiktok.status"] = "ready"
+            update_payload["tiktok.delivery.finalFile"] = Path(final_path).name
 
         doc_ref.update(update_payload)
 

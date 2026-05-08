@@ -36,6 +36,20 @@ STYLE_CONFIG = {
     "shadow_depth": 2,               # Sombra sutil
     "margin_v": 60,                  # Margen inferior
     "bold": -1,                      # Bold activado
+    "play_res_x": 1920,
+    "play_res_y": 1080,
+    "alignment": 2,
+}
+
+TIKTOK_STYLE_CONFIG = {
+    **STYLE_CONFIG,
+    "font_size": 70,
+    "outline_width": 4,
+    "shadow_depth": 3,
+    "margin_v": 360,
+    "play_res_x": 1080,
+    "play_res_y": 1920,
+    "alignment": 2,
 }
 
 # Fonts fallback si Montserrat no está instalada
@@ -186,14 +200,14 @@ def generate_ass_subtitles(words: list, output_path: Path, style: dict = None) -
     ass_header = f"""[Script Info]
 Title: Content Factory Subtitles
 ScriptType: v4.00+
-PlayResX: 1920
-PlayResY: 1080
+PlayResX: {s.get('play_res_x', 1920)}
+PlayResY: {s.get('play_res_y', 1080)}
 WrapStyle: 0
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{s['font_name']},{s['font_size']},{s['primary_color']},&H000000FF,{s['outline_color']},{s['shadow_color']},{s['bold']},0,0,0,100,100,1,0,1,{s['outline_width']},{s['shadow_depth']},2,40,40,{s['margin_v']},1
+Style: Default,{s['font_name']},{s['font_size']},{s['primary_color']},&H000000FF,{s['outline_color']},{s['shadow_color']},{s['bold']},0,0,0,100,100,1,0,1,{s['outline_width']},{s['shadow_depth']},{s.get('alignment', 2)},40,40,{s['margin_v']},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -330,6 +344,8 @@ def add_subtitles_to_video(
     video_path: Path,
     audio_path: Path = None,
     output_path: Path = None,
+    style: dict = None,
+    ass_filename: str = "subtitles.ass",
 ) -> Path:
     """
     Pipeline completo: Audio → Whisper → ASS → Burn-in
@@ -380,8 +396,8 @@ def add_subtitles_to_video(
     print(f"   💾 Transcripción guardada: {transcript_path.name}")
     
     # 3. Generar ASS
-    ass_path = project_dir / "subtitles.ass"
-    ass_file = generate_ass_subtitles(result["words"], ass_path)
+    ass_path = project_dir / ass_filename
+    ass_file = generate_ass_subtitles(result["words"], ass_path, style=style)
     if not ass_file:
         return None
     
@@ -394,6 +410,21 @@ def add_subtitles_to_video(
         temp_audio.unlink()
     
     return subtitled_video
+
+
+def add_tiktok_subtitles_to_video(
+    video_path: Path,
+    audio_path: Path = None,
+    output_path: Path = None,
+) -> Path:
+    """Subtítulos verticales con margen inferior seguro para la UI de TikTok."""
+    return add_subtitles_to_video(
+        video_path=video_path,
+        audio_path=audio_path,
+        output_path=output_path,
+        style=TIKTOK_STYLE_CONFIG,
+        ass_filename="subtitles_tiktok.ass",
+    )
 
 
 # ============================================================
