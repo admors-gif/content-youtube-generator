@@ -1140,17 +1140,19 @@ TIKTOK_SOURCE_GENRE_LABELS = {
     "culture": "cultura",
 }
 TIKTOK_VISUAL_SAFETY_SUFFIX = (
-    " vertical 9:16 composition, TikTok safe zones, subject centered above lower UI area, "
-    "clean negative space for captions, no readable text, no letters, no logos, no watermarks, "
-    "no faces, no people, no hands, no fingers, no microphones, no speakers, no headphones, "
-    "no audio gear, no podcast equipment, no studio equipment."
+    " vertical 9:16 composition, TikTok safe zones, natural proportions, no stretched objects, "
+    "one clear focal metaphor, clean negative space for captions, high contrast, no readable text, "
+    "no letters, no logos, no watermarks, no detailed faces, no realistic close-up faces, "
+    "no visible hands, no fingers, no microphones, no speakers, no headphones, no audio gear, "
+    "no podcast equipment, no studio equipment, no phones as main subject, no cups, no shoes, "
+    "no random hallway, no random doors, no clutter, no tabletop product photography."
 )
 TIKTOK_RELATIONSHIP_VISUALS = [
-    ("phone_face_down", "a phone face down on a small wooden table beside a cooled cup of tea and a loose red thread"),
-    ("empty_chair", "one empty chair under a warm lamp with another chair barely visible in cool shadow"),
-    ("mirror_key", "an old mirror reflecting an empty room with a single brass key on a journal below"),
-    ("door_ajar", "a door left slightly open with warm light spilling into a dark hallway"),
-    ("separated_cups", "two ceramic cups far apart on a clean table with amber and teal cinematic lighting"),
+    ("bound_heart", "a glowing cracked heart symbol bound by tense crimson threads, suspended in smoky black space"),
+    ("fading_silhouette", "one shadowy side-profile silhouette dissolving into gray smoke and crimson light, no facial details"),
+    ("fractured_reflection", "a fractured emotional reflection repairing itself with thin crimson light, abstract mirror symbolism"),
+    ("red_thread_tension", "a single red thread pulled tight around an abstract heart fracture, minimal noir composition"),
+    ("distant_silhouette", "two distant shadow silhouettes separated by smoky glass and a soft crimson glow"),
 ]
 TIKTOK_DOCUMENTARY_VISUALS = [
     ("archival_object", "a symbolic historical object on a dark table under a narrow beam of light"),
@@ -1245,6 +1247,52 @@ def _score_tiktok_script(script: str, profile: dict) -> dict:
     }
 
 
+def _relationship_visual_context(topic: str) -> dict:
+    """Brand lens for Esto No Es Amor TikTok visuals."""
+    lower = (topic or "").lower()
+    if any(word in lower for word in ["ghosting", "desaparece", "desaparec", "silencio"]):
+        return {
+            "theme": "ghosting and emotional disappearance",
+            "emotion": "confusion, rejection, unresolved longing",
+            "metaphor": "a silhouette dissolving into smoke while a cracked heart shape remains in crimson light",
+        }
+    if any(word in lower for word in ["abandono", "aferras", "se va", "irse"]):
+        return {
+            "theme": "abandonment wound and fear of being left",
+            "emotion": "vulnerability, anxiety, attachment panic",
+            "metaphor": "one shadow silhouette being left behind as a red thread stretches and begins to break",
+        }
+    if any(word in lower for word in ["autoestima", "mereces", "menos", "eliges", "elige", "elegirte"]):
+        return {
+            "theme": "self-worth after confusing intensity with love",
+            "emotion": "reconstruction, dignity, quiet strength",
+            "metaphor": "a fractured reflection slowly repairing with a subtle crimson inner glow",
+        }
+    if any(word in lower for word in ["obsesion", "obsesión", "obsesionas", "obsesionarse"]):
+        return {
+            "theme": "obsession with someone who does not choose you",
+            "emotion": "fixation, rejection, inner emptiness",
+            "metaphor": "a small glowing cracked heart pulled toward a distant unreachable red light",
+        }
+    if any(word in lower for word in ["química", "quimica", "compatibilidad"]):
+        return {
+            "theme": "chemistry mistaken for compatibility",
+            "emotion": "attraction, instability, emotional confusion",
+            "metaphor": "red sparks around two distant silhouettes separated by fine fracture lines",
+        }
+    if any(word in lower for word in ["soltar", "dejar ir", "duelo", "paz"]):
+        return {
+            "theme": "letting go and healing after attachment",
+            "emotion": "painful release, grief, calm recovery",
+            "metaphor": "red threads breaking softly around a cracked heart releasing smoke and dim light",
+        }
+    return {
+        "theme": "emotional attachment mistaken for love",
+        "emotion": "anxiety, dependency, longing, introspection",
+        "metaphor": "a glowing cracked heart bound by crimson threads in a dark noir atmosphere",
+    }
+
+
 def _fallback_tiktok_script(topic: str, tiktok_format: str, profile: dict, source_genre: str) -> dict:
     if tiktok_format == "tiktok_podcast":
         script = (
@@ -1307,8 +1355,11 @@ def _generate_tiktok_script_common(
     user_prompt = (
         "Crea un guion nativo para TikTok con este contrato.\n"
         "Responde SOLO JSON valido con las claves: script, beats, caption, hashtags, scores.\n"
+        "beats debe ser una lista de objetos con label, purpose y timeRange aproximado.\n"
         "scores debe incluir hookScore, retentionScore, clarityScore y platformFitScore.\n"
-        "El guion debe respetar el rango de palabras y no exceder 10 minutos.\n\n"
+        "El guion debe respetar el rango de palabras y no exceder 10 minutos.\n"
+        "Para TikTok podcast, el guion debe alternar LUCIA y MATEO con turnos breves, hook inmediato, "
+        "giro emocional antes de la mitad y cierre con comentario/guardado/parte 2.\n\n"
         f"CONTRATO:\n{json.dumps(prompt_payload, ensure_ascii=False, indent=2)}"
     )
 
@@ -1388,7 +1439,12 @@ def _build_tiktok_visual_scenes(topic: str, script_text: str, profile: dict, tik
         )
         segments = grouped or [{"narration": script_text, "narration_text": script_text, "dialogue_blocks": blocks}]
         visual_bank = TIKTOK_RELATIONSHIP_VISUALS
-        identity = "intimate relationship-healing editorial photography, warm amber light, restrained teal shadows"
+        identity = (
+            "Esto No Es Amor visual identity: dark emotional noir, cinematic conceptual cover art, "
+            "deep black background, crimson glow, off-white highlights, smoky gray atmosphere, "
+            "elegant minimal composition for people healing from attachment wounds"
+        )
+        relationship_context = _relationship_visual_context(topic)
     elif tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
         segments = [
             {"narration": seg, "narration_text": seg}
@@ -1410,11 +1466,24 @@ def _build_tiktok_visual_scenes(topic: str, script_text: str, profile: dict, tik
     scenes = []
     for i, segment in enumerate(segments[:max_count]):
         category, subject = visual_bank[i % len(visual_bank)]
-        prompt = (
-            f"{identity}. Photorealistic cinematic vertical frame of {subject}, "
-            f"theme focus: {topic}, varied premium composition, shallow depth of field, 8k."
-            f"{TIKTOK_VISUAL_SAFETY_SUFFIX}"
-        )
+        if tiktok_format == "tiktok_podcast":
+            prompt = (
+                f"{identity}. Create a vertical conceptual thumbnail-style cover image, not a literal scene. "
+                f"Episode theme: {relationship_context['theme']}. "
+                f"Core emotional message: not everything that feels intense is love; sometimes it is a wound asking to be seen. "
+                f"Central emotion: {relationship_context['emotion']}. "
+                f"Main visual metaphor: {relationship_context['metaphor']}. "
+                f"Visual variation for this beat: {subject}. "
+                f"Use silhouettes, side profiles, shadow figures, cracked heart symbolism, crimson threads, smoke, "
+                f"fractures and negative space. Make the image readable in one second, emotionally intense, "
+                f"minimal, elegant and psychologically clear. {TIKTOK_VISUAL_SAFETY_SUFFIX}"
+            )
+        else:
+            prompt = (
+                f"{identity}. Photorealistic cinematic vertical frame of {subject}, "
+                f"theme focus: {topic}, varied premium composition, shallow depth of field, 8k."
+                f"{TIKTOK_VISUAL_SAFETY_SUFFIX}"
+            )
         scene = {
             "scene_number": i + 1,
             "narration_text": segment.get("narration_text") or segment.get("narration") or "",

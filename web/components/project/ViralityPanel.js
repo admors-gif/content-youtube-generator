@@ -1,5 +1,5 @@
 "use client";
-import { computeViralityScore } from "@/lib/virality";
+import { computeTikTokScore, computeViralityScore } from "@/lib/virality";
 
 /**
  * ViralityPanel — Editorial Cinematic v2.
@@ -165,10 +165,13 @@ function getWellnessVerdict(overall) {
 
 export default function ViralityPanel({ text, format }) {
   const isWellness = ["autohipnosis", "meditacion_larga"].includes(format);
+  const isTikTok = String(format || "").startsWith("tiktok_");
   const isLongMeditation = format === "meditacion_larga";
-  const score = isWellness
-    ? computeWellnessScore(text)
-    : computeViralityScore(text);
+  const score = isTikTok
+    ? computeTikTokScore(text, format)
+    : isWellness
+      ? computeWellnessScore(text)
+      : computeViralityScore(text);
   if (!score) return null;
 
   const verdict = isWellness
@@ -191,7 +194,9 @@ export default function ViralityPanel({ text, format }) {
           ? isLongMeditation
             ? "ÍNDICE DE DESCANSO"
             : "ÍNDICE DE CALMA"
-          : "ÍNDICE DE VIRALIDAD"}
+          : isTikTok
+            ? "ÍNDICE TIKTOK"
+            : "ÍNDICE DE VIRALIDAD"}
       </div>
 
       <div
@@ -256,7 +261,9 @@ export default function ViralityPanel({ text, format }) {
               ? isLongMeditation
                 ? "sesión larga"
                 : "sesión guiada"
-              : `${score.hooks} hook${score.hooks === 1 ? "" : "s"} detectado${score.hooks === 1 ? "" : "s"}`}
+              : isTikTok
+                ? "retención vertical"
+                : `${score.hooks} hook${score.hooks === 1 ? "" : "s"} detectado${score.hooks === 1 ? "" : "s"}`}
           </div>
         </div>
       </div>
@@ -274,8 +281,8 @@ export default function ViralityPanel({ text, format }) {
           <>
             <ScoreBar label="Hooks" value={score.hookScore} />
             <ScoreBar label="Emoción" value={score.emotionScore} />
-            <ScoreBar label="Ritmo" value={score.pacingScore} />
-            <ScoreBar label="Estructura" value={score.structureScore} />
+            <ScoreBar label={isTikTok ? "Ritmo vertical" : "Ritmo"} value={score.pacingScore} />
+            <ScoreBar label={isTikTok ? "Beats" : "Estructura"} value={score.structureScore} />
             <ScoreBar label="Retención" value={score.retentionScore} />
           </>
         )}

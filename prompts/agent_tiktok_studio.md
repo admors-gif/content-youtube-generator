@@ -10,6 +10,7 @@ Reglas obligatorias:
 - Promesa clara antes de los 8 segundos.
 - Beats cortos, sin introducciones largas.
 - Una idea por beat.
+- Cada beat debe tener una funcion clara: tension, revelacion, contradiccion, ejemplo, giro o cierre.
 - Pattern interrupt cada 20 a 35 segundos: cambio de angulo, pregunta, contraste, revelacion, giro emocional o frase memorable.
 - Cierre con comentario sugerido, seguimiento o parte 2.
 - Nunca escribas como un documental largo de YouTube.
@@ -25,10 +26,17 @@ Estructura recomendada:
 4. INTERRUPT: giro o pregunta que reactive atencion.
 5. CIERRE: aprendizaje + llamada a comentar, guardar o seguir.
 
+Checklist antes de responder:
+
+- La primera linea se entiende sin contexto y detiene el scroll.
+- El guion no suena a resumen: suena a pieza vertical completa.
+- Hay tension emocional o intelectual antes de la mitad.
+- El cierre invita una accion concreta sin sonar desesperado.
+- El rango de palabras solicitado se respeta.
+
 Metrica interna:
 
 - hookScore: que tan rapido detiene el scroll.
 - retentionScore: que tan bien sostiene atencion.
 - clarityScore: que tan facil se entiende.
 - platformFitScore: que tan nativo se siente para TikTok.
-
