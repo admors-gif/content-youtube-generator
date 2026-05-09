@@ -22,6 +22,7 @@ DEFAULT_CATEGORY = "all"
 MAX_MANUAL_LIMIT = 12
 MAX_AGENT_LIMIT = 5
 RADAR_CACHE_TTL_SECONDS = 3600
+RADAR_CACHE_VERSION = "v2"
 
 HIGH_RISK_TERMS = {
     "acusacion",
@@ -98,6 +99,7 @@ def cache_key(
 ) -> str:
     raw = "|".join(
         [
+            RADAR_CACHE_VERSION,
             normalize_text(scope or "global"),
             normalize_text(agent_id or "all"),
             normalize_text(market or DEFAULT_MARKET),
@@ -130,9 +132,10 @@ def build_news_queries(
     max_queries: int = 5,
 ) -> list[str]:
     market_hint = "Mexico y Latinoamerica" if normalize_text(market) in {"mx", "latam", "mexico"} else market
-    queries = [f"{q} {market_hint}" for q in NEWS_QUERIES]
+    language_hint = "en espanol fuentes de Mexico y Latinoamerica" if normalize_text(language) in {"es", "es-mx", "spanish", "espanol"} else f"en {language}"
+    queries = [f"{q} {market_hint} {language_hint}" for q in NEWS_QUERIES]
     if category and category != "all":
-        queries.append(f"{category} noticia viral tendencia {market_hint}")
+        queries.append(f"{category} noticia viral tendencia {market_hint} {language_hint}")
     return queries[: max(1, max_queries)]
 
 
@@ -158,15 +161,16 @@ def build_agent_queries(
     examples = agent.get("exampleTopics") or agent.get("examples") or []
     example_hint = examples[0] if examples else description
     market_hint = "Mexico Latinoamerica" if normalize_text(market) in {"mx", "latam"} else market
+    language_hint = "en espanol para audiencia latina" if normalize_text(language) in {"es", "es-mx", "spanish", "espanol"} else f"en {language}"
     base = f"{name} {description}".strip()
     queries = [
-        f"tendencias actuales para video de YouTube sobre {base} {market_hint}",
-        f"temas populares preguntas historias virales {base} {market_hint}",
+        f"tendencias actuales para video de YouTube sobre {base} {market_hint} {language_hint}",
+        f"temas populares preguntas historias virales {base} {market_hint} {language_hint}",
     ]
     if example_hint:
-        queries.append(f"ideas relacionadas con {example_hint} tendencia video documental")
+        queries.append(f"ideas relacionadas con {example_hint} tendencia video documental {language_hint}")
     if category and category != "all":
-        queries.append(f"{category} {name} tema actual video viral")
+        queries.append(f"{category} {name} tema actual video viral {language_hint}")
     return queries[: max(1, max_queries)]
 
 

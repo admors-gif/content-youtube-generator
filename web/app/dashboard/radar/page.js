@@ -91,9 +91,22 @@ function CandidateCard({ item, selected, saving, creating, onSelect, onSave, onC
   return (
     <article
       className="cf-card"
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
       style={{
         padding: "var(--s-5)",
         borderColor: selected ? "var(--ember)" : "var(--rule-1)",
+        cursor: "pointer",
+        boxShadow: selected ? "var(--shadow-ember)" : "var(--shadow-1)",
+        transition: "border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out)",
       }}
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
@@ -128,6 +141,7 @@ function CandidateCard({ item, selected, saving, creating, onSelect, onSave, onC
               target="_blank"
               rel="noreferrer"
               className="cf-badge cf-badge--neutral"
+              onClick={(event) => event.stopPropagation()}
               style={{ textDecoration: "none", maxWidth: "100%" }}
             >
               {source.domain || source.title}
@@ -137,13 +151,23 @@ function CandidateCard({ item, selected, saving, creating, onSelect, onSave, onC
       )}
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
-        <button className="cf-btn cf-btn--ghost cf-btn--sm" onClick={onSelect} type="button">
+        <button
+          className="cf-btn cf-btn--ghost cf-btn--sm"
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelect();
+          }}
+          type="button"
+        >
           <Icon name="eye" size={14} />
-          Detalle
+          {selected ? "Seleccionado" : "Detalle"}
         </button>
         <button
           className="cf-btn cf-btn--secondary cf-btn--sm"
-          onClick={onSave}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSave();
+          }}
           type="button"
           disabled={saving || item.status === "saved" || item.status === "project_created"}
         >
@@ -152,7 +176,10 @@ function CandidateCard({ item, selected, saving, creating, onSelect, onSave, onC
         </button>
         <button
           className="cf-btn cf-btn--primary cf-btn--sm"
-          onClick={onCreate}
+          onClick={(event) => {
+            event.stopPropagation();
+            onCreate();
+          }}
           type="button"
           disabled={createDisabled}
           title={item.riskLevel === "high" ? "Requiere revision editorial antes de crear proyecto" : ""}

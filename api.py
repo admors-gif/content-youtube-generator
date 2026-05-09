@@ -2918,16 +2918,26 @@ def _radar_search_tavily(query: str) -> dict:
         import requests
         timeout = max(2, min(12, _safe_int(os.environ.get("CONTENT_FACTORY_RADAR_TAVILY_TIMEOUT_SECONDS"), 5)))
         search_depth = os.environ.get("CONTENT_FACTORY_RADAR_TAVILY_DEPTH", "basic").strip() or "basic"
+        lower_query = query.lower()
+        tavily_payload = {
+            "api_key": api_key,
+            "query": query,
+            "search_depth": search_depth,
+            "max_results": 5,
+            "include_answer": "basic",
+            "include_raw_content": False,
+            "time_range": "day" if any(token in lower_query for token in ["hoy", "today", "dia", "día"]) else "week",
+        }
+        if any(token in lower_query for token in ["noticia", "noticias", "viral hoy", "ultima hora", "última hora"]):
+            tavily_payload["topic"] = "news"
+            tavily_payload["days"] = 7
+        else:
+            tavily_payload["topic"] = "general"
+            if any(token in lower_query for token in ["mexico", "méxico", "latinoamerica", "latinoamérica"]):
+                tavily_payload["country"] = "mexico"
         resp = requests.post(
             "https://api.tavily.com/search",
-            json={
-                "api_key": api_key,
-                "query": query,
-                "search_depth": search_depth,
-                "max_results": 5,
-                "include_answer": True,
-                "include_raw_content": False,
-            },
+            json=tavily_payload,
             timeout=timeout,
         )
         resp.raise_for_status()
