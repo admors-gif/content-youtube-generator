@@ -63,6 +63,11 @@ jobs:
           CONTENT_FACTORY_WEB_URL: ${{ secrets.CONTENT_FACTORY_WEB_URL }}
           CONTENT_FACTORY_YOUTUBE_STATE_SECRET: ${{ secrets.CONTENT_FACTORY_YOUTUBE_STATE_SECRET }}
           CONTENT_FACTORY_YOUTUBE_TOKEN_SECRET: ${{ secrets.CONTENT_FACTORY_YOUTUBE_TOKEN_SECRET }}
+          TIKTOK_CLIENT_KEY: ${{ secrets.TIKTOK_CLIENT_KEY }}
+          TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
+          TIKTOK_OAUTH_REDIRECT_URI: ${{ secrets.TIKTOK_OAUTH_REDIRECT_URI }}
+          CONTENT_FACTORY_TIKTOK_STATE_SECRET: ${{ secrets.CONTENT_FACTORY_TIKTOK_STATE_SECRET }}
+          CONTENT_FACTORY_TIKTOK_TOKEN_SECRET: ${{ secrets.CONTENT_FACTORY_TIKTOK_TOKEN_SECRET }}
         run: |
           set -euo pipefail
           cd /docker/content-factory
@@ -78,11 +83,16 @@ jobs:
               "CONTENT_FACTORY_WEB_URL",
               "CONTENT_FACTORY_YOUTUBE_STATE_SECRET",
               "CONTENT_FACTORY_YOUTUBE_TOKEN_SECRET",
+              "TIKTOK_CLIENT_KEY",
+              "TIKTOK_CLIENT_SECRET",
+              "TIKTOK_OAUTH_REDIRECT_URI",
+              "CONTENT_FACTORY_TIKTOK_STATE_SECRET",
+              "CONTENT_FACTORY_TIKTOK_TOKEN_SECRET",
           ]
           updates = {name: os.environ.get(name, "").strip() for name in names}
           updates = {name: value for name, value in updates.items() if value}
           if not updates:
-              print("No YouTube runtime secrets configured; leaving .env unchanged")
+              print("No OAuth runtime secrets configured; leaving .env unchanged")
               raise SystemExit(0)
 
           existing = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
@@ -104,7 +114,7 @@ jobs:
                   out.append(f"{key}={value}")
 
           path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
-          print(f"Updated {len(updates)} YouTube runtime env vars in /docker/content-factory/.env")
+          print(f"Updated {len(updates)} OAuth runtime env vars in /docker/content-factory/.env")
           PY
           chmod 600 .env || true
 
