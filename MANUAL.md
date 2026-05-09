@@ -164,6 +164,8 @@ El Radar agrega una etapa anterior a crear videos:
 
 La biblioteca `/dashboard/library` agrupa ideas, proyectos y huecos editoriales por agente. El refresh nocturno corre con GitHub Actions y llama `/admin/radar/refresh-nightly` usando `CONTENT_FACTORY_ADMIN_TOKEN`.
 
+Nota operativa: el Radar manual global esta limitado a un set prioritario de agentes y timeout corto de Tavily para evitar bloquear la API. La cobertura completa de agentes queda para el refresh nocturno cacheado.
+
 ---
 
 ## 4. APIs y proveedores externos

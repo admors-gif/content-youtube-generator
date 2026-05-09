@@ -1,6 +1,7 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 import subprocess
 import os
 import sys
@@ -2723,6 +2724,17 @@ _RADAR_EXTRA_AGENTS = [
     },
 ]
 
+_RADAR_PRIORITY_AGENT_IDS = [
+    RADAR_NEWS_AGENT_ID,
+    "agent_podcast_general",
+    "agent_tiktok_podcast",
+    "agent_tiktok_documentary",
+    "agent_meditacion_larga",
+    "agent_autohipnosis",
+    "agent_tecnologia",
+    "agent_finanzas",
+]
+
 
 def _radar_is_enabled() -> bool:
     return _flag_enabled("CONTENT_FACTORY_RADAR_ENABLED", default=True)
@@ -2903,15 +2915,23 @@ def _radar_search_tavily(query: str) -> dict:
     if not api_key:
         return {}
     try:
-        from tavily import TavilyClient
-        client = TavilyClient(api_key=api_key)
-        return client.search(
-            query=query,
-            search_depth="advanced",
-            max_results=5,
-            include_answer=True,
-            include_raw_content=False,
+        import requests
+        timeout = max(2, min(12, _safe_int(os.environ.get("CONTENT_FACTORY_RADAR_TAVILY_TIMEOUT_SECONDS"), 5)))
+        search_depth = os.environ.get("CONTENT_FACTORY_RADAR_TAVILY_DEPTH", "basic").strip() or "basic"
+        resp = requests.post(
+            "https://api.tavily.com/search",
+            json={
+                "api_key": api_key,
+                "query": query,
+                "search_depth": search_depth,
+                "max_results": 5,
+                "include_answer": True,
+                "include_raw_content": False,
+            },
+            timeout=timeout,
         )
+        resp.raise_for_status()
+        return resp.json()
     except Exception as exc:
         try:
             log.warning("radar_tavily_failed", query=query[:120], error=str(exc)[:200])
@@ -2978,6 +2998,23 @@ def _radar_run_discovery(db, uid: str, params: dict, *, mode: str) -> dict:
     else:
         agents = _radar_agent_catalog()
     agents = [agent for agent in agents if agent]
+    if mode == "manual" and params["scope"] == "global":
+        max_agents = max(
+            1,
+            min(
+                len(agents),
+                _safe_int(os.environ.get("CONTENT_FACTORY_RADAR_MANUAL_GLOBAL_AGENT_LIMIT"), 6),
+            ),
+        )
+        priority = {agent_id: index for index, agent_id in enumerate(_RADAR_PRIORITY_AGENT_IDS)}
+        agents = sorted(
+            agents,
+            key=lambda agent: (
+                priority.get(agent.get("agentId"), len(priority) + 100),
+                agent.get("name") or "",
+            ),
+        )[:max_agents]
+        params = {**params, "queryLimit": min(params.get("queryLimit") or 1, 1)}
 
     existing_hashes, existing_titles = _radar_existing_sets(db, uid)
     all_items = []
@@ -3423,10 +3460,10 @@ async def radar_run(request: Request):
         from firebase_admin import firestore
         db = firestore.client()
         if not params["force"]:
-            cached = _radar_cached_run(db, params)
+            cached = await run_in_threadpool(_radar_cached_run, db, params)
             if cached:
                 return cached
-        return _radar_run_discovery(db, principal["uid"], params, mode="manual")
+        return await run_in_threadpool(_radar_run_discovery, db, principal["uid"], params, mode="manual")
     except HTTPException:
         raise
     except Exception as exc:
@@ -3699,8 +3736,8 @@ async def radar_refresh_nightly(request: Request):
         _ensure_firebase_initialized()
         from firebase_admin import firestore
         db = firestore.client()
-        cached = None if params["force"] else _radar_cached_run(db, params)
-        result = cached or _radar_run_discovery(db, principal["uid"], params, mode="nightly")
+        cached = None if params["force"] else await run_in_threadpool(_radar_cached_run, db, params)
+        result = cached or await run_in_threadpool(_radar_run_discovery, db, principal["uid"], params, mode="nightly")
         saved = 0
         for item in result.get("items") or []:
             try:

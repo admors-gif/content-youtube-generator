@@ -135,8 +135,10 @@ Noticias ponderan mas actualidad y fuentes. Wellness penaliza promesas medicas. 
 - TTL: 60 minutos.
 - `limit` manual maximo: 12.
 - `limit` por agente maximo: 5.
+- corrida manual global: maximo 6 agentes prioritarios por default para evitar timeout de API.
 - refresh nocturno: maximo 2 queries Tavily por agente y 5 candidatos por agente.
 - LLM ranking global queda apagado por default salvo `CONTENT_FACTORY_RADAR_LLM_GLOBAL=true`.
+- Tavily usa timeout corto (`CONTENT_FACTORY_RADAR_TAVILY_TIMEOUT_SECONDS`, default 5s) y profundidad `basic` por default para mantener la UI responsiva.
 
 Si Tavily no esta disponible, el motor devuelve ideas fallback por agente para mantener la UI util sin romper.
 
