@@ -1,0 +1,23 @@
+name: Radar nightly refresh
+
+on:
+  schedule:
+    - cron: "35 8 * * *"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Refresh editorial radar
+        env:
+          API_BASE: ${{ secrets.CONTENT_FACTORY_API_BASE || 'https://api.valtyk.com' }}
+          ADMIN_TOKEN: ${{ secrets.CONTENT_FACTORY_ADMIN_TOKEN }}
+        run: |
+          test -n "$ADMIN_TOKEN"
+          curl -fsS \
+            -X POST "$API_BASE/admin/radar/refresh-nightly" \
+            -H "x-admin-token: $ADMIN_TOKEN" \
+            -H "content-type: application/json" \
+            --data '{"force":false,"market":"mx","language":"es","category":"all","window":"today","limit":5,"queryLimit":2}'

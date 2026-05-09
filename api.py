@@ -25,6 +25,26 @@ from scripts.sentry_observability import (
     tag_sentry_project as _tag_sentry_project,
 )
 from scripts.brand_profiles import DEFAULT_BRAND_PROFILE_ID, brand_profile_snapshot
+from scripts.radar import (
+    DEFAULT_CATEGORY as RADAR_DEFAULT_CATEGORY,
+    DEFAULT_LANGUAGE as RADAR_DEFAULT_LANGUAGE,
+    DEFAULT_MARKET as RADAR_DEFAULT_MARKET,
+    DEFAULT_WINDOW as RADAR_DEFAULT_WINDOW,
+    MAX_AGENT_LIMIT as RADAR_MAX_AGENT_LIMIT,
+    MAX_MANUAL_LIMIT as RADAR_MAX_MANUAL_LIMIT,
+    NEWS_AGENT_ID as RADAR_NEWS_AGENT_ID,
+    RADAR_CACHE_TTL_SECONDS,
+    apply_llm_ranking as _radar_apply_llm_ranking,
+    build_agent_queries as _radar_build_agent_queries,
+    build_ranking_prompt as _radar_build_ranking_prompt,
+    cache_key as _radar_cache_key,
+    canonical_title_key as _radar_canonical_title_key,
+    compact_text as _radar_compact_text,
+    dedupe_candidates as _radar_dedupe_candidates,
+    fallback_candidates_for_agent as _radar_fallback_candidates_for_agent,
+    parse_ranking_response as _radar_parse_ranking_response,
+    tavily_results_to_candidates as _radar_tavily_results_to_candidates,
+)
 
 FIREBASE_STORAGE_BUCKET = os.environ.get(
     "FIREBASE_STORAGE_BUCKET",
@@ -584,6 +604,40 @@ def _validate_personalization_payload(data: dict, *, agent_id: str) -> dict:
     return {**payload, "enabled": True}
 
 
+def _clean_radar_context_payload(raw) -> dict:
+    if not isinstance(raw, dict):
+        return {}
+
+    def _clean(value, limit):
+        text = " ".join(str(value or "").split()).strip()
+        return text[:limit]
+
+    sources = []
+    for source in raw.get("sources") or []:
+        if not isinstance(source, dict):
+            continue
+        url = _clean(source.get("url"), 500)
+        title = _clean(source.get("title"), 180)
+        domain = _clean(source.get("domain"), 120)
+        if url or title or domain:
+            sources.append({"title": title, "url": url, "domain": domain})
+        if len(sources) >= 5:
+            break
+
+    context = {
+        "candidateHash": _clean(raw.get("candidateHash") or raw.get("candidate_hash"), 80),
+        "title": _clean(raw.get("title") or raw.get("headline"), 180),
+        "angle": _clean(raw.get("angle"), 260),
+        "summary": _clean(raw.get("summary"), 900),
+        "whyNow": _clean(raw.get("whyNow") or raw.get("why_now"), 520),
+        "riskLevel": _clean(raw.get("riskLevel") or raw.get("risk_level"), 20),
+        "riskReason": _clean(raw.get("riskReason") or raw.get("risk_reason"), 360),
+        "recommendedFormat": _clean(raw.get("recommendedFormat") or raw.get("recommended_format"), 40),
+        "sources": sources,
+    }
+    return {k: v for k, v in context.items() if v not in ("", [], None)}
+
+
 def _brand_profile_for_project(agent_id: str, data: dict) -> tuple[str, dict]:
     """Return the internal brand profile id and immutable creation snapshot.
 
@@ -643,6 +697,9 @@ def _validate_project_payload(data: dict) -> dict:
     personalization = _validate_personalization_payload(data, agent_id=agent_id)
     if personalization:
         generation_options["personalization"] = personalization
+    radar_context = _clean_radar_context_payload(data.get("radarContext") or data.get("radar_context"))
+    if radar_context:
+        generation_options["radar_context"] = radar_context
     brand_profile_id, brand_profile = _brand_profile_for_project(agent_id, data)
     if brand_profile_id:
         generation_options["brand_profile_id"] = brand_profile_id
@@ -2627,6 +2684,515 @@ _AGENT_CATALOG = """
 [agent_meditacion_larga] Meditación Larga — sesiones de 30 min, 1 h y 3 h para sueño, calma, afirmaciones espaciadas y visuales lentos
 """.strip()
 
+_RADAR_EXTRA_AGENTS = [
+    {
+        "agentId": "agent_tiktok_documentary",
+        "name": "TikTok Documental",
+        "description": "Mini-documentales verticales con hook inmediato, beats cortos y cierre social",
+        "category": "tiktok",
+        "platform": "tiktok",
+        "format": "tiktok_documentary",
+        "promptFile": "agent_tiktok_documentary.md",
+    },
+    {
+        "agentId": "agent_tiktok_podcast",
+        "name": "TikTok Podcast",
+        "description": "Micro-conversaciones verticales para Esto no es amor sobre apego, limites y amor propio",
+        "category": "tiktok",
+        "platform": "tiktok",
+        "format": "tiktok_podcast",
+        "promptFile": "agent_tiktok_podcast.md",
+    },
+    {
+        "agentId": "agent_tiktok_autohipnosis",
+        "name": "TikTok Autohipnosis",
+        "description": "Autohipnosis vertical breve, segura y calmada sin promesas medicas",
+        "category": "tiktok",
+        "platform": "tiktok",
+        "format": "tiktok_autohypnosis",
+        "promptFile": "agent_tiktok_autohipnosis.md",
+    },
+    {
+        "agentId": "agent_tiktok_meditation",
+        "name": "TikTok Meditación",
+        "description": "Meditaciones verticales cortas para respirar, calmar el cuerpo y volver al presente",
+        "category": "tiktok",
+        "platform": "tiktok",
+        "format": "tiktok_meditation",
+        "promptFile": "agent_tiktok_meditation.md",
+    },
+]
+
+
+def _radar_is_enabled() -> bool:
+    return _flag_enabled("CONTENT_FACTORY_RADAR_ENABLED", default=True)
+
+
+def _radar_require_admin(request: Request, *, allow_local: bool = False) -> dict:
+    if not _radar_is_enabled():
+        raise HTTPException(status_code=404, detail="radar disabled")
+    if not _flag_enabled("CONTENT_FACTORY_RADAR_ADMIN_ONLY", default=True):
+        return _require_principal(request, allow_admin=True, allow_local=allow_local)
+    return _require_admin(request, allow_local=allow_local)
+
+
+def _radar_agent_catalog() -> list[dict]:
+    category_by_id = {
+        "agent_horror": "history",
+        "agent_misterios": "mystery",
+        "agent_biografias": "biography",
+        "agent_ciencia": "science",
+        "agent_finanzas": "finance",
+        "agent_filosofia": "philosophy",
+        "agent_erotico_historico": "romance",
+        "agent_historico": "history",
+        "agent_psicologia_oscura": "psychology",
+        "agent_civilizaciones": "history",
+        "agent_true_crime": "crime",
+        "agent_mitologia": "mythology",
+        "agent_conspiraciones": "mystery",
+        "agent_tecnologia": "technology",
+        "agent_guerras": "history",
+        "agent_espionaje": "mystery",
+        "agent_apocalipsis": "science",
+        "agent_religiones": "religion",
+        "agent_metafisica": "philosophy",
+        "agent_imperios": "history",
+        "agent_arte": "biography",
+        "agent_emprendimiento": "business",
+        "agent_negocios": "business",
+        "agent_liderazgo": "biography",
+        "agent_biblico": "religion",
+        "agent_viajes": "travel",
+        "agent_noticias_virales": "news",
+        "agent_podcast_general": "podcast",
+        "agent_autohipnosis": "wellness",
+        "agent_meditacion_larga": "wellness",
+    }
+    agents = []
+    for line in _AGENT_CATALOG.splitlines():
+        match = re.match(r"\[(?P<id>agent_[^\]]+)\]\s*(?P<name>[^—]+)—\s*(?P<desc>.+)$", line.strip())
+        if not match:
+            continue
+        aid = match.group("id").strip()
+        platform = "tiktok" if aid in _TIKTOK_AGENT_IDS else "youtube"
+        project_format = _TIKTOK_FORMAT_BY_AGENT.get(aid) or ""
+        if aid == "agent_podcast_general":
+            project_format = "podcast"
+        elif aid == "agent_autohipnosis":
+            project_format = "autohipnosis"
+        elif aid == "agent_meditacion_larga":
+            project_format = "meditacion_larga"
+        agents.append({
+            "agentId": aid,
+            "name": match.group("name").strip(),
+            "description": match.group("desc").strip(),
+            "category": category_by_id.get(aid, "general"),
+            "platform": platform,
+            "format": project_format,
+            "promptFile": f"{aid}.md",
+        })
+    known = {agent["agentId"] for agent in agents}
+    agents.extend(agent for agent in _RADAR_EXTRA_AGENTS if agent["agentId"] not in known)
+    return agents
+
+
+def _radar_agent_by_id(agent_id: str) -> dict | None:
+    for agent in _radar_agent_catalog():
+        if agent["agentId"] == agent_id:
+            return agent
+    return None
+
+
+def _radar_request_defaults(data: dict | None) -> dict:
+    data = data or {}
+    scope = str(data.get("scope") or "global").strip().lower()
+    if scope not in {"global", "agent", "news"}:
+        scope = "global"
+    agent_id = str(data.get("agentId") or data.get("agent_id") or "").strip()
+    if scope == "news":
+        agent_id = RADAR_NEWS_AGENT_ID
+    limit = max(1, min(RADAR_MAX_MANUAL_LIMIT, _safe_int(data.get("limit"), 3)))
+    query_limit = max(1, min(5, _safe_int(data.get("queryLimit"), 2)))
+    return {
+        "scope": scope,
+        "agentId": agent_id,
+        "market": str(data.get("market") or RADAR_DEFAULT_MARKET).strip().lower()[:24],
+        "language": str(data.get("language") or RADAR_DEFAULT_LANGUAGE).strip().lower()[:12],
+        "category": str(data.get("category") or RADAR_DEFAULT_CATEGORY).strip().lower()[:48],
+        "window": str(data.get("window") or RADAR_DEFAULT_WINDOW).strip().lower()[:24],
+        "limit": limit,
+        "queryLimit": query_limit,
+        "force": bool(data.get("force")),
+    }
+
+
+def _radar_library_doc_id(uid: str, candidate_hash: str) -> str:
+    raw = f"{uid}|{candidate_hash}"
+    return hashlib.sha1(raw.encode("utf-8", errors="ignore")).hexdigest()[:28]
+
+
+def _radar_firestore_ts_expired(value) -> bool:
+    if not value:
+        return True
+    try:
+        if hasattr(value, "timestamp"):
+            dt = datetime.fromtimestamp(value.timestamp(), tz=timezone.utc)
+        elif isinstance(value, str):
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        else:
+            dt = value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt <= datetime.now(timezone.utc)
+    except Exception:
+        return True
+
+
+def _radar_doc_to_public(doc_id: str, data: dict | None) -> dict:
+    data = data or {}
+    return {
+        "runId": data.get("runId") or doc_id,
+        "cacheKey": data.get("cacheKey") or doc_id,
+        "mode": data.get("mode") or "",
+        "scope": data.get("scope") or "",
+        "agentId": data.get("agentId") or "",
+        "market": data.get("market") or RADAR_DEFAULT_MARKET,
+        "language": data.get("language") or RADAR_DEFAULT_LANGUAGE,
+        "category": data.get("category") or RADAR_DEFAULT_CATEGORY,
+        "window": data.get("window") or RADAR_DEFAULT_WINDOW,
+        "status": data.get("status") or "empty",
+        "items": data.get("items") or [],
+        "itemsCount": len(data.get("items") or []),
+        "generatedAt": _serialize_firestore_value(data.get("generatedAt") or data.get("createdAt")),
+        "expiresAt": _serialize_firestore_value(data.get("expiresAt")),
+        "cached": bool(data.get("cached", False)),
+        "error": data.get("error") or "",
+    }
+
+
+def _radar_existing_sets(db, uid: str) -> tuple[set[str], set[str]]:
+    hashes = set()
+    title_keys = set()
+    try:
+        for doc in db.collection("topicLibrary").stream():
+            data = doc.to_dict() or {}
+            if data.get("userId") not in {uid, "admin"}:
+                continue
+            if data.get("candidateHash"):
+                hashes.add(data["candidateHash"])
+            if data.get("agentId") and data.get("title"):
+                title_keys.add(_radar_canonical_title_key(data["agentId"], data["title"]))
+    except Exception:
+        pass
+    try:
+        for doc in db.collection("projects").where("userId", "==", uid).stream():
+            data = doc.to_dict() or {}
+            if data.get("agentId") and data.get("title"):
+                title_keys.add(_radar_canonical_title_key(data["agentId"], data["title"]))
+            radar_hash = ((data.get("radar") or {}).get("candidateHash") or "")
+            if radar_hash:
+                hashes.add(radar_hash)
+    except Exception:
+        pass
+    return hashes, title_keys
+
+
+def _radar_search_tavily(query: str) -> dict:
+    api_key = os.environ.get("TAVILY_API_KEY", "").strip()
+    if not api_key:
+        return {}
+    try:
+        from tavily import TavilyClient
+        client = TavilyClient(api_key=api_key)
+        return client.search(
+            query=query,
+            search_depth="advanced",
+            max_results=5,
+            include_answer=True,
+            include_raw_content=False,
+        )
+    except Exception as exc:
+        try:
+            log.warning("radar_tavily_failed", query=query[:120], error=str(exc)[:200])
+        except Exception:
+            pass
+        return {}
+
+
+def _radar_rank_with_llm(candidates: list[dict], *, scope: str) -> list[dict]:
+    if not candidates or not os.environ.get("ANTHROPIC_API_KEY"):
+        return candidates
+    if scope == "global" and not _flag_enabled("CONTENT_FACTORY_RADAR_LLM_GLOBAL", default=False):
+        return candidates
+    try:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        resp = client.messages.create(
+            model=os.environ.get("CONTENT_FACTORY_RADAR_MODEL", "claude-haiku-4-5-20251001"),
+            max_tokens=1800,
+            messages=[{"role": "user", "content": _radar_build_ranking_prompt(candidates, scope=scope)}],
+        )
+        ranked = _radar_parse_ranking_response(resp.content[0].text)
+        return _radar_apply_llm_ranking(candidates, ranked)
+    except Exception as exc:
+        try:
+            log.warning("radar_llm_ranking_failed", error=str(exc)[:200])
+        except Exception:
+            pass
+        return candidates
+
+
+def _radar_candidates_for_agent(
+    agent: dict,
+    *,
+    market: str,
+    language: str,
+    category: str,
+    query_limit: int,
+    limit: int,
+) -> list[dict]:
+    candidates = []
+    for query in _radar_build_agent_queries(
+        agent,
+        market=market,
+        language=language,
+        category=category,
+        max_queries=query_limit,
+    ):
+        result = _radar_search_tavily(query)
+        candidates.extend(_radar_tavily_results_to_candidates(agent, query, result, limit=5))
+    if not candidates:
+        candidates = _radar_fallback_candidates_for_agent(agent, limit=limit)
+    return _radar_rank_with_llm(candidates, scope="agent")[:limit]
+
+
+def _radar_run_discovery(db, uid: str, params: dict, *, mode: str) -> dict:
+    if params["scope"] == "agent":
+        agent = _radar_agent_by_id(params["agentId"])
+        if not agent:
+            raise HTTPException(status_code=400, detail="invalid radar agentId")
+        agents = [agent]
+    elif params["scope"] == "news":
+        agents = [_radar_agent_by_id(RADAR_NEWS_AGENT_ID)]
+    else:
+        agents = _radar_agent_catalog()
+    agents = [agent for agent in agents if agent]
+
+    existing_hashes, existing_titles = _radar_existing_sets(db, uid)
+    all_items = []
+    errors = []
+    per_agent_limit = max(1, min(RADAR_MAX_AGENT_LIMIT, params["limit"]))
+    for agent in agents:
+        try:
+            candidates = _radar_candidates_for_agent(
+                agent,
+                market=params["market"],
+                language=params["language"],
+                category=params["category"],
+                query_limit=params["queryLimit"],
+                limit=per_agent_limit * 2,
+            )
+            filtered = _radar_dedupe_candidates(
+                candidates,
+                existing_hashes=existing_hashes,
+                existing_title_keys=existing_titles,
+                limit=per_agent_limit,
+            )
+            for item in filtered:
+                existing_hashes.add(item["candidateHash"])
+                existing_titles.add(_radar_canonical_title_key(item["agentId"], item["title"]))
+            all_items.extend(filtered)
+        except Exception as exc:
+            errors.append({"agentId": agent.get("agentId"), "error": str(exc)[:160]})
+
+    all_items = sorted(all_items, key=lambda item: item.get("editorialScore", 0), reverse=True)
+    generated_at = datetime.now(timezone.utc)
+    expires_at = generated_at + timedelta(seconds=RADAR_CACHE_TTL_SECONDS)
+    cache_id = _radar_cache_key(
+        scope=params["scope"],
+        agent_id=params["agentId"] or "all",
+        market=params["market"],
+        language=params["language"],
+        category=params["category"],
+        window=params["window"],
+    )
+    payload = {
+        "runId": f"{cache_id}-{int(generated_at.timestamp())}",
+        "cacheKey": cache_id,
+        "mode": mode,
+        "scope": params["scope"],
+        "agentId": params["agentId"] or "",
+        "market": params["market"],
+        "language": params["language"],
+        "category": params["category"],
+        "window": params["window"],
+        "status": "ok" if all_items else "empty",
+        "itemsCount": len(all_items),
+        "items": all_items,
+        "errors": errors,
+        "generatedAt": generated_at,
+        "expiresAt": expires_at,
+        "createdAt": generated_at,
+        "updatedAt": generated_at,
+    }
+    db.collection("radarRuns").document(cache_id).set(payload)
+    return _radar_doc_to_public(cache_id, payload)
+
+
+def _radar_cached_run(db, params: dict) -> dict | None:
+    cache_id = _radar_cache_key(
+        scope=params["scope"],
+        agent_id=params["agentId"] or "all",
+        market=params["market"],
+        language=params["language"],
+        category=params["category"],
+        window=params["window"],
+    )
+    snap = db.collection("radarRuns").document(cache_id).get()
+    if not snap.exists:
+        return None
+    data = snap.to_dict() or {}
+    if _radar_firestore_ts_expired(data.get("expiresAt")):
+        return None
+    public = _radar_doc_to_public(snap.id, data)
+    public["cached"] = True
+    return public
+
+
+def _radar_find_candidate(db, uid: str, candidate_hash: str) -> tuple[dict | None, dict | None]:
+    library_id = _radar_library_doc_id(uid, candidate_hash)
+    lib_snap = db.collection("topicLibrary").document(library_id).get()
+    if lib_snap.exists:
+        data = lib_snap.to_dict() or {}
+        candidate = data.get("candidate") or data
+        return candidate, {"id": library_id, **data}
+
+    for lib_doc in db.collection("topicLibrary").stream():
+        data = lib_doc.to_dict() or {}
+        if data.get("userId") not in {uid, "admin"}:
+            continue
+        if data.get("candidateHash") != candidate_hash:
+            continue
+        candidate = data.get("candidate") or data
+        return candidate, {"id": lib_doc.id, **data}
+
+    for run in db.collection("radarRuns").stream():
+        data = run.to_dict() or {}
+        for item in data.get("items") or []:
+            if item.get("candidateHash") == candidate_hash:
+                return item, None
+    return None, None
+
+
+def _radar_context_from_candidate(candidate: dict) -> dict:
+    return _clean_radar_context_payload({
+        "candidateHash": candidate.get("candidateHash"),
+        "title": candidate.get("title") or candidate.get("headline"),
+        "angle": candidate.get("angle"),
+        "summary": candidate.get("summary"),
+        "whyNow": candidate.get("whyNow"),
+        "riskLevel": candidate.get("riskLevel"),
+        "riskReason": candidate.get("riskReason"),
+        "recommendedFormat": candidate.get("recommendedFormat"),
+        "sources": candidate.get("sources") or [],
+    })
+
+
+def _radar_upsert_library_candidate(db, firestore, uid: str, candidate: dict, *, status: str = "saved") -> dict:
+    doc_id = _radar_library_doc_id(uid, candidate["candidateHash"])
+    ref = db.collection("topicLibrary").document(doc_id)
+    snap = ref.get()
+    existing = snap.to_dict() if snap.exists else {}
+    next_status = existing.get("status") if existing.get("status") == "project_created" else status
+    payload = {
+        "userId": uid,
+        "agentId": candidate.get("agentId"),
+        "agentName": candidate.get("agentName"),
+        "agentFile": candidate.get("agentFile"),
+        "platform": candidate.get("platform") or "youtube",
+        "format": candidate.get("format") or "",
+        "title": candidate.get("title"),
+        "angle": candidate.get("angle"),
+        "summary": candidate.get("summary"),
+        "sources": candidate.get("sources") or [],
+        "scores": candidate.get("scores") or {},
+        "editorialScore": candidate.get("editorialScore") or 0,
+        "risk": {
+            "level": candidate.get("riskLevel") or "low",
+            "reason": candidate.get("riskReason") or "",
+        },
+        "recommendedFormat": candidate.get("recommendedFormat") or "youtube_long",
+        "status": next_status,
+        "candidateHash": candidate.get("candidateHash"),
+        "candidate": candidate,
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    }
+    if not existing:
+        payload["createdAt"] = firestore.SERVER_TIMESTAMP
+    ref.set(payload, merge=True)
+    return {"itemId": doc_id, **payload, "createdAt": _serialize_firestore_value(payload.get("createdAt")), "updatedAt": None}
+
+
+def _radar_project_payload_from_candidate(candidate: dict) -> dict:
+    agent_id = candidate.get("agentId")
+    payload = {
+        "title": _radar_compact_text(candidate.get("angle") or candidate.get("title"), 180),
+        "agentId": agent_id,
+        "agentFile": candidate.get("agentFile") or f"{agent_id}.md",
+        "platform": candidate.get("platform") or ("tiktok" if agent_id in _TIKTOK_AGENT_IDS else "youtube"),
+        "radarContext": _radar_context_from_candidate(candidate),
+    }
+    if agent_id in _TIKTOK_AGENT_IDS:
+        payload.setdefault("durationProfile", "90s")
+        category = str(candidate.get("category") or "").lower()
+        payload["sourceGenre"] = category if category in _TIKTOK_SOURCE_GENRES else "psychology"
+    if agent_id == "agent_meditacion_larga":
+        payload.setdefault("durationProfile", "60m")
+    return payload
+
+
+def _library_public_item(doc_id: str, data: dict) -> dict:
+    risk = data.get("risk") or {}
+    return {
+        "itemId": doc_id,
+        "type": "idea",
+        "status": data.get("status") or "suggested",
+        "agentId": data.get("agentId") or "",
+        "agentName": data.get("agentName") or "",
+        "title": data.get("title") or "",
+        "angle": data.get("angle") or "",
+        "summary": data.get("summary") or "",
+        "candidateHash": data.get("candidateHash") or "",
+        "editorialScore": data.get("editorialScore") or (data.get("scores") or {}).get("overall") or 0,
+        "riskLevel": risk.get("level") or data.get("riskLevel") or "low",
+        "riskReason": risk.get("reason") or data.get("riskReason") or "",
+        "recommendedFormat": data.get("recommendedFormat") or "youtube_long",
+        "sources": data.get("sources") or [],
+        "projectId": data.get("projectId") or "",
+        "updatedAt": _serialize_firestore_value(data.get("updatedAt") or data.get("createdAt")),
+    }
+
+
+def _library_public_project(doc_id: str, data: dict) -> dict:
+    shorts = data.get("shorts") or []
+    return {
+        "itemId": doc_id,
+        "type": "project",
+        "status": data.get("status") or "draft",
+        "agentId": data.get("agentId") or "",
+        "agentName": "",
+        "title": data.get("title") or "",
+        "format": data.get("format") or "",
+        "platform": data.get("platform") or "youtube",
+        "projectId": doc_id,
+        "videoUrl": data.get("videoUrl") or "",
+        "hasVideo": bool(data.get("videoUrl") or data.get("videoPath")),
+        "shortsCount": len(shorts) if isinstance(shorts, list) else 0,
+        "createdAt": _serialize_firestore_value(data.get("createdAt")),
+        "updatedAt": _serialize_firestore_value(data.get("completedAt") or data.get("updatedAt") or data.get("createdAt")),
+    }
+
 
 @app.post("/thumbnails/build/{project_id}")
 def thumbnails_build(project_id: str, request: Request, force: bool = False, premium: bool | None = None):
@@ -2845,6 +3411,318 @@ async def recommend_agent(request: Request):
             status_code=500,
             content={"error": str(e)[:200], "recommendations": []},
         )
+
+
+@app.post("/radar/run")
+async def radar_run(request: Request):
+    principal = _radar_require_admin(request)
+    data = await request.json()
+    params = _radar_request_defaults(data)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        if not params["force"]:
+            cached = _radar_cached_run(db, params)
+            if cached:
+                return cached
+        return _radar_run_discovery(db, principal["uid"], params, mode="manual")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200], "items": []})
+
+
+@app.get("/radar/latest")
+def radar_latest(
+    request: Request,
+    scope: str = "global",
+    agentId: str = "",
+    market: str = RADAR_DEFAULT_MARKET,
+    language: str = RADAR_DEFAULT_LANGUAGE,
+    category: str = RADAR_DEFAULT_CATEGORY,
+    window: str = RADAR_DEFAULT_WINDOW,
+):
+    _radar_require_admin(request)
+    params = _radar_request_defaults({
+        "scope": scope,
+        "agentId": agentId,
+        "market": market,
+        "language": language,
+        "category": category,
+        "window": window,
+    })
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        cached = _radar_cached_run(db, params)
+        if cached:
+            return cached
+        return {
+            "runId": "",
+            "cacheKey": _radar_cache_key(
+                scope=params["scope"],
+                agent_id=params["agentId"] or "all",
+                market=params["market"],
+                language=params["language"],
+                category=params["category"],
+                window=params["window"],
+            ),
+            "scope": params["scope"],
+            "agentId": params["agentId"],
+            "market": params["market"],
+            "language": params["language"],
+            "category": params["category"],
+            "window": params["window"],
+            "status": "empty",
+            "items": [],
+            "itemsCount": 0,
+            "cached": False,
+        }
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200], "items": []})
+
+
+@app.post("/radar/candidates/{candidate_hash}/save")
+async def radar_candidate_save(candidate_hash: str, request: Request):
+    principal = _radar_require_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        candidate, _existing = _radar_find_candidate(db, principal["uid"], candidate_hash)
+        if not candidate:
+            raise HTTPException(status_code=404, detail="candidate not found")
+        item = _radar_upsert_library_candidate(db, firestore, principal["uid"], candidate, status="saved")
+        return {"ok": True, "item": _library_public_item(item["itemId"], item)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200]})
+
+
+@app.post("/radar/candidates/{candidate_hash}/create-project")
+async def radar_candidate_create_project(candidate_hash: str, request: Request, background_tasks: BackgroundTasks):
+    principal = _radar_require_admin(request)
+    body = await request.json()
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        candidate, existing = _radar_find_candidate(db, principal["uid"], candidate_hash)
+        if not candidate:
+            raise HTTPException(status_code=404, detail="candidate not found")
+        library_doc_id = _radar_library_doc_id(principal["uid"], candidate_hash)
+        existing_project_id = (existing or {}).get("projectId")
+        if existing_project_id:
+            return {"ok": True, "projectId": existing_project_id, "existing": True}
+        if candidate.get("riskLevel") == "high" and not bool(body.get("allowHighRisk")):
+            raise HTTPException(status_code=409, detail="high risk candidate requires explicit review")
+
+        _radar_upsert_library_candidate(db, firestore, principal["uid"], candidate, status="saved")
+        library_ref = db.collection("topicLibrary").document(library_doc_id)
+
+        @firestore.transactional
+        def _claim_create(transaction):
+            snap = library_ref.get(transaction=transaction)
+            data = snap.to_dict() if snap.exists else {}
+            if data.get("projectId"):
+                return data["projectId"]
+            if data.get("creatingProject"):
+                raise HTTPException(status_code=409, detail="project creation already in progress")
+            transaction.set(library_ref, {
+                "creatingProject": True,
+                "createProjectRequestedAt": firestore.SERVER_TIMESTAMP,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+            return None
+
+        claimed_project_id = _claim_create(db.transaction())
+        if claimed_project_id:
+            return {"ok": True, "projectId": claimed_project_id, "existing": True}
+
+        project_payload = _validate_project_payload(_radar_project_payload_from_candidate(candidate))
+        radar_context = _radar_context_from_candidate(candidate)
+        try:
+            result = _create_project_with_credit(
+                principal=principal,
+                payload=project_payload,
+                background_tasks=background_tasks,
+                project_extra={
+                    "radar": {
+                        "candidateHash": candidate_hash,
+                        "source": "radar",
+                        "riskLevel": candidate.get("riskLevel") or "low",
+                        "recommendedFormat": candidate.get("recommendedFormat") or "",
+                        "createdFromRadarAt": firestore.SERVER_TIMESTAMP,
+                    },
+                    "factCheckRequired": candidate.get("agentId") == RADAR_NEWS_AGENT_ID or candidate.get("riskLevel") != "low",
+                },
+                credit_metadata={"source": "radar", "candidateHash": candidate_hash},
+                ledger_reason="radar_project_create",
+            )
+        except Exception:
+            try:
+                library_ref.set({
+                    "creatingProject": False,
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                }, merge=True)
+            except Exception:
+                pass
+            raise
+        db.collection("topicLibrary").document(library_doc_id).set({
+            "status": "project_created",
+            "projectId": result["projectId"],
+            "creatingProject": False,
+            "radarContext": radar_context,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+        return {**result, "candidateHash": candidate_hash}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200]})
+
+
+@app.get("/library/agents")
+def library_agents(request: Request):
+    principal = _radar_require_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        agents = {agent["agentId"]: {**agent, "ideas": [], "projects": [], "gaps": []} for agent in _radar_agent_catalog()}
+        for doc in db.collection("topicLibrary").stream():
+            data = doc.to_dict() or {}
+            if data.get("userId") not in {principal["uid"], "admin"}:
+                continue
+            aid = data.get("agentId") or ""
+            if aid not in agents:
+                agents[aid] = {
+                    "agentId": aid,
+                    "name": data.get("agentName") or aid.replace("agent_", "").replace("_", " "),
+                    "description": "",
+                    "category": "",
+                    "platform": "youtube",
+                    "format": "",
+                    "promptFile": f"{aid}.md",
+                    "ideas": [],
+                    "projects": [],
+                    "gaps": [],
+                }
+            agents[aid]["ideas"].append(_library_public_item(doc.id, data))
+
+        for doc in db.collection("projects").where("userId", "==", principal["uid"]).stream():
+            data = doc.to_dict() or {}
+            aid = data.get("agentId") or ""
+            if aid not in agents:
+                agents[aid] = {
+                    "agentId": aid,
+                    "name": aid.replace("agent_", "").replace("_", " "),
+                    "description": "",
+                    "category": "",
+                    "platform": data.get("platform") or "youtube",
+                    "format": data.get("format") or "",
+                    "promptFile": data.get("agentFile") or f"{aid}.md",
+                    "ideas": [],
+                    "projects": [],
+                    "gaps": [],
+                }
+            agents[aid]["projects"].append(_library_public_project(doc.id, data))
+
+        groups = []
+        for group in agents.values():
+            group["ideas"].sort(key=lambda item: item.get("editorialScore", 0), reverse=True)
+            group["projects"].sort(key=lambda item: item.get("updatedAt") or "", reverse=True)
+            saved_without_project = [i for i in group["ideas"] if i.get("status") in {"saved", "suggested"} and not i.get("projectId")]
+            completed_without_shorts = [
+                p for p in group["projects"]
+                if p.get("status") == "completed" and p.get("platform") != "tiktok" and not p.get("shortsCount")
+            ]
+            if saved_without_project:
+                group["gaps"].append(f"{len(saved_without_project)} idea(s) listas sin proyecto")
+            if completed_without_shorts:
+                group["gaps"].append(f"{len(completed_without_shorts)} video(s) sin Shorts registrados")
+            if not group["projects"]:
+                group["gaps"].append("Sin material creado todavia")
+            group["counts"] = {
+                "ideas": len(group["ideas"]),
+                "projects": len(group["projects"]),
+                "completed": sum(1 for p in group["projects"] if p.get("status") == "completed"),
+                "saved": sum(1 for i in group["ideas"] if i.get("status") == "saved"),
+            }
+            if group["ideas"] or group["projects"]:
+                groups.append(group)
+        groups.sort(key=lambda item: (item["counts"]["ideas"] + item["counts"]["projects"], item.get("name", "")), reverse=True)
+        return {"ok": True, "agents": groups, "totalAgents": len(groups)}
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200], "agents": []})
+
+
+@app.post("/library/items/{item_id}/archive")
+def library_archive_item(item_id: str, request: Request):
+    principal = _radar_require_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        ref = db.collection("topicLibrary").document(item_id)
+        snap = ref.get()
+        if not snap.exists:
+            raise HTTPException(status_code=404, detail="library item not found")
+        data = snap.to_dict() or {}
+        if data.get("userId") not in {principal["uid"], "admin"}:
+            raise HTTPException(status_code=403, detail="library item access denied")
+        ref.update({"status": "archived", "updatedAt": firestore.SERVER_TIMESTAMP})
+        return {"ok": True, "itemId": item_id, "status": "archived"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200]})
+
+
+@app.post("/admin/radar/refresh-nightly")
+async def radar_refresh_nightly(request: Request):
+    principal = _radar_require_admin(request, allow_local=True)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    params = _radar_request_defaults({
+        **(body or {}),
+        "scope": "global",
+        "limit": min(RADAR_MAX_AGENT_LIMIT, _safe_int((body or {}).get("limit"), RADAR_MAX_AGENT_LIMIT)),
+        "queryLimit": min(2, _safe_int((body or {}).get("queryLimit"), 2)),
+    })
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        cached = None if params["force"] else _radar_cached_run(db, params)
+        result = cached or _radar_run_discovery(db, principal["uid"], params, mode="nightly")
+        saved = 0
+        for item in result.get("items") or []:
+            try:
+                _radar_upsert_library_candidate(db, firestore, principal["uid"], item, status="suggested")
+                saved += 1
+            except Exception:
+                continue
+        return {**result, "ok": True, "savedSuggestions": saved, "nightly": True}
+    except Exception as exc:
+        try:
+            from firebase_admin import firestore
+            db = firestore.client()
+            db.collection("radarRuns").document("nightly-last-error").set({
+                "status": "error",
+                "mode": "nightly",
+                "error": str(exc)[:300],
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+        except Exception:
+            pass
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200], "items": []})
+
 
 @app.get("/video-url/{project_id}")
 def get_video_url(project_id: str, request: Request):
@@ -6072,6 +6950,162 @@ def _humanize_seconds(s: float) -> str:
     return f"{h}h {(s % 3600) // 60}m"
 
 
+def _create_project_with_credit(
+    *,
+    principal: dict,
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    dry_run: bool = False,
+    project_extra: dict | None = None,
+    credit_metadata: dict | None = None,
+    ledger_reason: str = "project_create",
+) -> dict:
+    uid = principal["uid"]
+    token = principal.get("token") or {}
+
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    db = firestore.client()
+    user_ref = db.collection("users").document(uid)
+    project_ref = db.collection("projects").document()
+
+    if dry_run:
+        user_snap = user_ref.get()
+        if user_snap.exists:
+            counts = _credits_remaining(user_snap.to_dict() or {})
+        else:
+            counts = _credits_remaining({
+                "credits": {"included": 1, "used": 0, "extra": 0},
+            })
+        if counts["remaining"] <= 0:
+            raise HTTPException(status_code=402, detail="insufficient credits")
+        return {
+            "ok": True,
+            "dryRun": True,
+            "wouldCreateProject": True,
+            "wouldChargeCredits": 1,
+            "creditsRemaining": max(0, counts["remaining"] - 1),
+            "agentId": payload["agent_id"],
+            "agentFile": payload["agent_file"],
+            "platform": payload.get("platform") or "youtube",
+            "format": payload.get("format") or "",
+            "tiktok": payload.get("tiktok") or {},
+            "brandProfileId": payload.get("brand_profile_id") or "",
+            "brandProfile": payload.get("brand_profile_snapshot") or {},
+            "personalization": payload.get("personalization") or {},
+            "generationOptions": payload.get("generation_options") or {},
+        }
+
+    @firestore.transactional
+    def _txn(transaction):
+        user_snap = user_ref.get(transaction=transaction)
+        if user_snap.exists:
+            profile = user_snap.to_dict() or {}
+            counts = _credits_remaining(profile)
+            if counts["remaining"] <= 0:
+                raise HTTPException(status_code=402, detail="insufficient credits")
+            after_counts = _balance_after_delta(counts, used_delta=1)
+            transaction.update(user_ref, {
+                "credits.used": firestore.Increment(1),
+                "lastActive": firestore.SERVER_TIMESTAMP,
+            })
+        else:
+            email = token.get("email") or ""
+            display_name = token.get("name") or (email.split("@")[0] if email else "Usuario")
+            profile = {
+                "uid": uid,
+                "email": email,
+                "displayName": display_name,
+                "photoURL": token.get("picture"),
+                "plan": "free",
+                "credits": {"included": 1, "used": 0, "extra": 0},
+                "totalVideosCreated": 0,
+            }
+            counts = _credits_remaining(profile)
+            if counts["remaining"] <= 0:
+                raise HTTPException(status_code=402, detail="insufficient credits")
+            after_counts = _balance_after_delta(counts, used_delta=1)
+            transaction.set(user_ref, {
+                **profile,
+                "credits": {"included": 1, "used": 1, "extra": 0},
+                "createdAt": firestore.SERVER_TIMESTAMP,
+                "lastActive": firestore.SERVER_TIMESTAMP,
+            })
+
+        metadata = {"agentId": payload["agent_id"]}
+        if credit_metadata:
+            metadata.update(credit_metadata)
+        _write_credit_ledger(
+            db,
+            firestore,
+            uid=uid,
+            entry_type="consume",
+            amount=-1,
+            reason=ledger_reason,
+            actor=uid,
+            project_id=project_ref.id,
+            balance_before=counts,
+            balance_after=after_counts,
+            metadata=metadata,
+            transaction=transaction,
+        )
+
+        project_data = {
+            "userId": uid,
+            "title": payload["title"],
+            "agentId": payload["agent_id"],
+            "agentFile": payload["agent_file"],
+            "platform": payload.get("platform") or "youtube",
+            "format": payload.get("format") or "",
+            "status": "draft",
+            "progress": {
+                "currentStep": 0,
+                "totalSteps": 6,
+                "stepName": "Preparando tu proyecto...",
+                "percent": 5,
+            },
+            "script": {
+                "plain": "",
+                "tagged": "",
+                "wordCount": 0,
+                "estimatedMinutes": 0,
+                "approved": False,
+            },
+            "scenes": [],
+            "voice": {"style": "narrative", "speed": 1.0, "pitch": 0},
+            "output": {},
+            "seo": {},
+            "tiktok": payload.get("tiktok") or {},
+            "brandProfileId": payload.get("brand_profile_id") or "",
+            "brandProfile": payload.get("brand_profile_snapshot") or {},
+            "costs": {"creditCost": 1},
+            "personalization": payload.get("personalization") or {},
+            "generationOptions": payload.get("generation_options") or {},
+            "creditCharged": True,
+            "creditChargedAt": firestore.SERVER_TIMESTAMP,
+            "createdAt": firestore.SERVER_TIMESTAMP,
+            "completedAt": None,
+        }
+        if project_extra:
+            project_data.update(project_extra)
+        transaction.set(project_ref, project_data)
+        return counts
+
+    counts = _txn(db.transaction())
+    background_tasks.add_task(
+        run_script,
+        payload["title"],
+        payload["agent_file"],
+        project_ref.id,
+        payload.get("generation_options") or {},
+    )
+    return {
+        "ok": True,
+        "projectId": project_ref.id,
+        "creditsRemaining": max(0, counts["remaining"] - 1),
+    }
+
+
 @app.post("/projects/create")
 async def create_project(request: Request, background_tasks: BackgroundTasks):
     """
@@ -6086,159 +7120,14 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
         "true",
         "yes",
     }
-    uid = principal["uid"]
-    token = principal.get("token") or {}
 
     try:
-        _ensure_firebase_initialized()
-        from firebase_admin import firestore
-        db = firestore.client()
-        user_ref = db.collection("users").document(uid)
-        project_ref = db.collection("projects").document()
-
-        if dry_run:
-            user_snap = user_ref.get()
-            if user_snap.exists:
-                counts = _credits_remaining(user_snap.to_dict() or {})
-            else:
-                counts = _credits_remaining({
-                    "credits": {"included": 1, "used": 0, "extra": 0},
-                })
-            if counts["remaining"] <= 0:
-                raise HTTPException(status_code=402, detail="insufficient credits")
-            return {
-                "ok": True,
-                "dryRun": True,
-                "wouldCreateProject": True,
-                "wouldChargeCredits": 1,
-                "creditsRemaining": max(0, counts["remaining"] - 1),
-                "agentId": payload["agent_id"],
-                "agentFile": payload["agent_file"],
-                "platform": payload.get("platform") or "youtube",
-                "format": payload.get("format") or "",
-                "tiktok": payload.get("tiktok") or {},
-                "brandProfileId": payload.get("brand_profile_id") or "",
-                "brandProfile": payload.get("brand_profile_snapshot") or {},
-                "personalization": payload.get("personalization") or {},
-                "generationOptions": payload.get("generation_options") or {},
-            }
-
-        @firestore.transactional
-        def _txn(transaction):
-            user_snap = user_ref.get(transaction=transaction)
-            if user_snap.exists:
-                profile = user_snap.to_dict() or {}
-                counts = _credits_remaining(profile)
-                if counts["remaining"] <= 0:
-                    raise HTTPException(status_code=402, detail="insufficient credits")
-                after_counts = _balance_after_delta(counts, used_delta=1)
-                transaction.update(user_ref, {
-                    "credits.used": firestore.Increment(1),
-                    "lastActive": firestore.SERVER_TIMESTAMP,
-                })
-                _write_credit_ledger(
-                    db,
-                    firestore,
-                    uid=uid,
-                    entry_type="consume",
-                    amount=-1,
-                    reason="project_create",
-                    actor=uid,
-                    project_id=project_ref.id,
-                    balance_before=counts,
-                    balance_after=after_counts,
-                    metadata={"agentId": payload["agent_id"]},
-                    transaction=transaction,
-                )
-            else:
-                email = token.get("email") or ""
-                display_name = token.get("name") or (email.split("@")[0] if email else "Usuario")
-                profile = {
-                    "uid": uid,
-                    "email": email,
-                    "displayName": display_name,
-                    "photoURL": token.get("picture"),
-                    "plan": "free",
-                    "credits": {"included": 1, "used": 0, "extra": 0},
-                    "totalVideosCreated": 0,
-                }
-                counts = _credits_remaining(profile)
-                if counts["remaining"] <= 0:
-                    raise HTTPException(status_code=402, detail="insufficient credits")
-                after_counts = _balance_after_delta(counts, used_delta=1)
-                transaction.set(user_ref, {
-                    **profile,
-                    "credits": {"included": 1, "used": 1, "extra": 0},
-                    "createdAt": firestore.SERVER_TIMESTAMP,
-                    "lastActive": firestore.SERVER_TIMESTAMP,
-                })
-                _write_credit_ledger(
-                    db,
-                    firestore,
-                    uid=uid,
-                    entry_type="consume",
-                    amount=-1,
-                    reason="project_create",
-                    actor=uid,
-                    project_id=project_ref.id,
-                    balance_before=counts,
-                    balance_after=after_counts,
-                    metadata={"agentId": payload["agent_id"]},
-                    transaction=transaction,
-                )
-
-            project_data = {
-                "userId": uid,
-                "title": payload["title"],
-                "agentId": payload["agent_id"],
-                "agentFile": payload["agent_file"],
-                "platform": payload.get("platform") or "youtube",
-                "format": payload.get("format") or "",
-                "status": "draft",
-                "progress": {
-                    "currentStep": 0,
-                    "totalSteps": 6,
-                    "stepName": "Preparando tu proyecto...",
-                    "percent": 5,
-                },
-                "script": {
-                    "plain": "",
-                    "tagged": "",
-                    "wordCount": 0,
-                    "estimatedMinutes": 0,
-                    "approved": False,
-                },
-                "scenes": [],
-                "voice": {"style": "narrative", "speed": 1.0, "pitch": 0},
-                "output": {},
-                "seo": {},
-                "tiktok": payload.get("tiktok") or {},
-                "brandProfileId": payload.get("brand_profile_id") or "",
-                "brandProfile": payload.get("brand_profile_snapshot") or {},
-                "costs": {"creditCost": 1},
-                "personalization": payload.get("personalization") or {},
-                "generationOptions": payload.get("generation_options") or {},
-                "creditCharged": True,
-                "creditChargedAt": firestore.SERVER_TIMESTAMP,
-                "createdAt": firestore.SERVER_TIMESTAMP,
-                "completedAt": None,
-            }
-            transaction.set(project_ref, project_data)
-            return counts
-
-        counts = _txn(db.transaction())
-        background_tasks.add_task(
-            run_script,
-            payload["title"],
-            payload["agent_file"],
-            project_ref.id,
-            payload.get("generation_options") or {},
+        return _create_project_with_credit(
+            principal=principal,
+            payload=payload,
+            background_tasks=background_tasks,
+            dry_run=dry_run,
         )
-        return {
-            "ok": True,
-            "projectId": project_ref.id,
-            "creditsRemaining": max(0, counts["remaining"] - 1),
-        }
     except HTTPException:
         raise
     except Exception as e:

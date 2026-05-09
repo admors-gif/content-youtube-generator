@@ -28,6 +28,8 @@ const NAV = [
   { id: "billing",   icon: "coins",     label: "Plan y créditos", href: "/dashboard/billing" },
 ];
 
+const RADAR_ENABLED = process.env.NEXT_PUBLIC_CONTENT_FACTORY_RADAR_ENABLED !== "false";
+
 const PLAN_LABELS = {
   free:    { label: "FREE",    badgeClass: "cf-badge--free" },
   starter: { label: "STARTER", badgeClass: "cf-badge--starter" },
@@ -291,8 +293,14 @@ function UserRow({ profile, onSignOut }) {
 export default function Sidebar() {
   const pathname = usePathname();
   const { user, profile, signOut } = useAuth();
-  const navItems = isAdminUser(user, profile)
-    ? [...NAV, { id: "admin", icon: "lock", label: "Admin", href: "/dashboard/admin" }]
+  const admin = isAdminUser(user, profile);
+  const navItems = admin
+    ? [
+        ...NAV.slice(0, 2),
+        ...(RADAR_ENABLED ? [{ id: "radar", icon: "trendingUp", label: "Radar", href: "/dashboard/radar" }] : []),
+        ...NAV.slice(2),
+        { id: "admin", icon: "lock", label: "Admin", href: "/dashboard/admin" },
+      ]
     : NAV;
 
   // active = primer item cuyo href matchea el pathname

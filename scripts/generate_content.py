@@ -224,7 +224,38 @@ def research_topic(topic: str, project_id: str = None) -> str:
 # ============================================================
 # MOTOR 1: GUIÓN NARRATIVO
 # ============================================================
-def generate_script(topic: str, agent_file: str = "agent_erotico_historico.md", project_id: str = None) -> dict:
+def _format_radar_context_for_research(radar_context: dict | None) -> str:
+    if not isinstance(radar_context, dict) or not radar_context:
+        return ""
+    parts = []
+    title = " ".join(str(radar_context.get("title") or "").split()).strip()
+    angle = " ".join(str(radar_context.get("angle") or "").split()).strip()
+    summary = " ".join(str(radar_context.get("summary") or "").split()).strip()
+    why_now = " ".join(str(radar_context.get("whyNow") or "").split()).strip()
+    if title:
+        parts.append(f"TEMA RADAR: {title}")
+    if angle:
+        parts.append(f"ANGULO EDITORIAL: {angle}")
+    if summary:
+        parts.append(f"RESUMEN RADAR: {summary}")
+    if why_now:
+        parts.append(f"POR QUE AHORA: {why_now}")
+    for i, source in enumerate((radar_context.get("sources") or [])[:5], 1):
+        if not isinstance(source, dict):
+            continue
+        src_title = " ".join(str(source.get("title") or "").split()).strip()
+        url = " ".join(str(source.get("url") or "").split()).strip()
+        if src_title or url:
+            parts.append(f"FUENTE RADAR {i}: {src_title}\n({url})")
+    return "\n\n".join(parts)
+
+
+def generate_script(
+    topic: str,
+    agent_file: str = "agent_erotico_historico.md",
+    project_id: str = None,
+    radar_context: dict | None = None,
+) -> dict:
     """
     Genera un guión narrativo completo.
     Incluye investigación web via Tavily cuando está disponible.
@@ -243,7 +274,7 @@ def generate_script(topic: str, agent_file: str = "agent_erotico_historico.md", 
     print(f"   Agente: {agent_name} ({agent_file})")
     
     # ── Paso 0: Investigación Web ──
-    research_context = research_topic(topic, project_id)
+    research_context = _format_radar_context_for_research(radar_context) or research_topic(topic, project_id)
     research_block = ""
     if research_context:
         research_block = f"""\n\n═══ INVESTIGACIÓN WEB ACTUAL ═══
@@ -2416,7 +2447,12 @@ def run_full_pipeline(
                 personalization=personalization_options,
             )
         else:
-            result = generate_script(topic, agent_file)
+            result = generate_script(
+                topic,
+                agent_file,
+                project_id,
+                radar_context=generation_options.get("radar_context"),
+            )
         script = result["script"]
 
         update_progress(project_id, "Afinando ritmo, emoción y voz...", 35, {"status": "scripting"})

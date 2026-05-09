@@ -1,6 +1,6 @@
 # Content Factory - AI Handoff
 
-Ultima revision local: 2026-05-05
+Ultima revision local: 2026-05-09
 
 ## Para empezar una sesion nueva
 
@@ -44,6 +44,44 @@ Infra principal:
 - Storage bucket: `content-factory-5cbcb.firebasestorage.app`.
 
 ## Estado operativo importante
+
+### Radar editorial v1
+
+Implementado en la sesion 2026-05-09:
+
+- Backend admin-only:
+  - `POST /radar/run`
+  - `GET /radar/latest`
+  - `POST /radar/candidates/{candidate_hash}/save`
+  - `POST /radar/candidates/{candidate_hash}/create-project`
+  - `GET /library/agents`
+  - `POST /library/items/{item_id}/archive`
+  - `POST /admin/radar/refresh-nightly`
+- Motor puro en `scripts/radar.py`: queries por agente/noticias, scoring, riesgo, dedupe, fallback y parser de ranking LLM.
+- Frontend:
+  - `/dashboard/radar` para descubrir ideas/noticias, ver fuentes/riesgo/score, guardar y crear proyecto.
+  - `/dashboard/library` reemplaza stub por biblioteca real agrupada por agente.
+  - Sidebar muestra Radar solo a admins y solo si `NEXT_PUBLIC_CONTENT_FACTORY_RADAR_ENABLED !== "false"`.
+- Proyecto desde Radar reutiliza la transaccion de creditos de `/projects/create`; no produce ni publica video.
+- `scripts/generate_content.py` acepta `generationOptions.radar_context` para alimentar el guion con fuentes/angulo curado.
+- Workflow nocturno: `.github/workflows/radar-nightly.yml`.
+- Documentacion: `docs/news-radar-v1.md` y `MANUAL.md`.
+
+Flags:
+
+- Backend: `CONTENT_FACTORY_RADAR_ENABLED`, `CONTENT_FACTORY_RADAR_ADMIN_ONLY`, `CONTENT_FACTORY_ADMIN_TOKEN`.
+- Frontend: `NEXT_PUBLIC_CONTENT_FACTORY_RADAR_ENABLED`.
+
+Pruebas agregadas:
+
+- `tests/test_radar.py`
+
+Verificacion pendiente en entorno completo:
+
+- `pytest tests/test_radar.py`
+- `cd web && npm run lint`
+- `cd web && npm run build`
+- `workflow_dispatch` del Radar nocturno cuando los secrets esten confirmados.
 
 Segun `MANUAL.md`:
 

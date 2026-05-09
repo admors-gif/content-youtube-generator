@@ -2,8 +2,8 @@
 
 > **Documento vivo.** Se actualiza cada vez que pasa algo significativo en el proyecto. Sirve como blueprint reproducible y referencia técnica completa. Si alguien (incluido tú en 6 meses) quiere reproducir el proyecto desde cero, este documento debe tener todo lo necesario.
 
-**Última actualización:** 2026-05-01
-**Versión del manual:** 0.1 (en construcción durante la migración a deploy via GitHub Actions)
+**Última actualización:** 2026-05-09
+**Versión del manual:** 0.2 (incluye Radar editorial admin-only)
 **Repo:** `https://github.com/admors-gif/content-youtube-generator`
 **Tag de rollback:** `pre-migration-2026-05-01` (commit `099a25f`)
 
@@ -150,6 +150,20 @@
 
 Frontend escucha el cambio (real-time Firestore) y muestra el botón de descarga apuntando a la URL firmada de Firebase Storage.
 
+### Radar editorial admin-only
+
+El Radar agrega una etapa anterior a crear videos:
+
+1. Admin abre `/dashboard/radar`.
+2. Backend ejecuta `POST /radar/run` o lee `GET /radar/latest`.
+3. `scripts/radar.py` genera queries por agente, consulta Tavily si hay API key y normaliza candidatos.
+4. Se calcula score editorial, riesgo y formato recomendado.
+5. La UI permite guardar la idea en `topicLibrary` o crear proyecto.
+6. Crear proyecto desde Radar reutiliza la transaccion de creditos de `/projects/create`.
+7. El proyecto queda en `draft` y no se produce/publica automaticamente.
+
+La biblioteca `/dashboard/library` agrupa ideas, proyectos y huecos editoriales por agente. El refresh nocturno corre con GitHub Actions y llama `/admin/radar/refresh-nightly` usando `CONTENT_FACTORY_ADMIN_TOKEN`.
+
 ---
 
 ## 4. APIs y proveedores externos
@@ -187,6 +201,9 @@ LUMA_API_KEY=luma-...              # Clips cinemáticos
 IMGBB_API_KEY=...                  # Hosting temporal de imágenes
 TAVILY_API_KEY=tvly-dev-...        # Investigación web
 FIREBASE_CREDENTIALS=ewog...       # Service account JSON (base64 o raw)
+CONTENT_FACTORY_RADAR_ENABLED=true # Radar editorial admin-only
+CONTENT_FACTORY_RADAR_ADMIN_ONLY=true
+CONTENT_FACTORY_ADMIN_TOKEN=...    # Usado por refresh nocturno GitHub Actions
 ```
 
 ### Frontend (`web/.env.local`)
@@ -200,6 +217,7 @@ NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=903561262290
 NEXT_PUBLIC_FIREBASE_APP_ID=1:903561262290:web:...
 NEXT_PUBLIC_N8N_WEBHOOK_URL=https://n8n.valtyk.com/webhook/content-factory-trigger
 NEXT_PUBLIC_VPS_API_URL=https://api.valtyk.com   # ← migrado a HTTPS via NPM
+NEXT_PUBLIC_CONTENT_FACTORY_RADAR_ENABLED=true    # Muestra Radar a admins
 ```
 
 ### GitHub repo secrets (para Actions)
@@ -207,6 +225,20 @@ Configurados en `Settings → Secrets and variables → Actions`:
 - `VPS_SSH_KEY` — llave privada SSH del usuario `deploy` del VPS
 - `VPS_HOST` — `187.77.30.158`
 - `VPS_USER` — `deploy` (no root, por seguridad)
+- `CONTENT_FACTORY_ADMIN_TOKEN` — token admin para jobs internos como Radar nocturno
+- `CONTENT_FACTORY_API_BASE` — opcional; default del workflow Radar: `https://api.valtyk.com`
+
+### Endpoints Radar
+
+Todos requieren admin:
+
+- `POST /radar/run` — ejecuta descubrimiento manual con cache opcional.
+- `GET /radar/latest` — devuelve ultimo cache valido.
+- `POST /radar/candidates/{candidate_hash}/save` — guarda una idea.
+- `POST /radar/candidates/{candidate_hash}/create-project` — crea proyecto y cobra 1 credito.
+- `GET /library/agents` — biblioteca agrupada por agente.
+- `POST /library/items/{item_id}/archive` — archiva una idea.
+- `POST /admin/radar/refresh-nightly` — refresh programado desde GitHub Actions.
 
 ---
 
@@ -232,7 +264,8 @@ C:\Users\admor\Downloads\Content You tube Generator\
 │   ├── download_and_kenburns.py  # Ken Burns en imágenes
 │   ├── assemble_video.py         # Ensamblaje FFmpeg
 │   ├── generate_subtitles.py     # Whisper + ASS + burn-in
-│   └── generate_master_audio.py  # Concatenar narraciones
+│   ├── generate_master_audio.py  # Concatenar narraciones
+│   └── radar.py                  # Radar editorial: discovery, scoring, dedupe
 │
 ├── web/                          # Frontend Next.js (deployado en Vercel)
 │   ├── package.json
@@ -243,6 +276,8 @@ C:\Users\admor\Downloads\Content You tube Generator\
 │   │   ├── dashboard/
 │   │   │   ├── page.js           # Lista de proyectos
 │   │   │   ├── new/page.js       # Crear video
+│   │   │   ├── radar/page.js     # Radar admin de ideas/noticias
+│   │   │   ├── library/page.js   # Biblioteca por agente
 │   │   │   └── project/[id]/page.js  # Página principal del proyecto
 │   │   └── api/
 │   │       └── download/
