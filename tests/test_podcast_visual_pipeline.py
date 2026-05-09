@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from scripts.generate_content import (
     _build_podcast_visual_scenes,
     _build_tiktok_visual_scenes,
@@ -37,7 +39,7 @@ def test_podcast_dialogue_blocks_are_preserved_when_capped():
     assert [b["text"] for b in preserved] == [b["text"] for b in blocks]
 
 
-def test_podcast_visual_prompts_are_object_led_and_text_safe():
+def test_podcast_visual_prompts_are_conceptual_and_text_safe():
     grouped = _group_blocks_into_scenes(
         _dialogue_blocks(30),
         target_scene_count=12,
@@ -48,7 +50,10 @@ def test_podcast_visual_prompts_are_object_led_and_text_safe():
     prompts = [scene["prompt"].lower() for scene in scenes]
 
     assert scenes
-    assert all("object-led" in prompt or "empty-room" in prompt for prompt in prompts)
+    assert all("esto no es amor visual identity" in prompt for prompt in prompts)
+    assert all("conceptual emotional cover" in prompt for prompt in prompts)
+    assert all("one central symbolic metaphor" in prompt for prompt in prompts)
+    assert all("16:9 horizontal" in prompt for prompt in prompts)
     assert all("no readable text" in prompt for prompt in prompts)
     assert not any("hands outside" in prompt for prompt in prompts)
     assert not any("fingers not visible" in prompt for prompt in prompts)
@@ -70,16 +75,21 @@ def test_esto_no_es_amor_prompts_use_channel_specific_relationship_motifs():
     prompts = [scene["prompt"].lower() for scene in scenes]
     combined = " ".join(prompts)
 
-    assert any("phone face down" in prompt for prompt in prompts)
-    assert any("two chairs" in prompt for prompt in prompts)
-    assert any("loose red thread" in prompt for prompt in prompts)
-    assert any("empty mirror" in prompt for prompt in prompts)
+    assert any("glowing cracked heart" in prompt for prompt in prompts)
+    assert any("crimson threads" in prompt for prompt in prompts)
+    assert any("side-profile silhouette" in prompt for prompt in prompts)
+    assert any("fractured emotional reflection" in prompt for prompt in prompts)
     assert "attachment mistaken for love" in combined
-    assert "esto no es amor" not in combined
+    assert "esto no es amor visual identity" in combined
     assert "symbolic object related to" not in combined
     assert "podcast mood" not in combined
     assert "listening chair" not in combined
     assert "studio environment" not in combined
+    assert "phone face down" not in combined
+    assert "coffee cups" not in combined
+    assert "pair of shoes" not in combined
+    assert "shoes separated" not in combined
+    assert "door left slightly ajar" not in combined
 
 
 def test_podcast_visual_prompts_block_audio_gear_people_and_generated_text():
@@ -98,9 +108,7 @@ def test_podcast_visual_prompts_block_audio_gear_people_and_generated_text():
     required_guardrails = [
         "no readable text",
         "no pseudo-text",
-        "no people",
-        "no faces",
-        "no hands",
+        "no visible hands",
         "no fingers",
         "no microphones",
         "no speakers",
@@ -108,12 +116,26 @@ def test_podcast_visual_prompts_block_audio_gear_people_and_generated_text():
         "no audio gear",
         "no podcast equipment",
         "no studio equipment",
-        "no cameras",
-        "no laptops",
-        "no waveform graphics",
+        "no phones as main subject",
+        "no cups",
+        "no shoes",
+        "no random hallway",
+        "no random doors",
+        "no detailed faces",
+        "no realistic close-up faces",
     ]
     for prompt in prompts:
         assert all(rule in prompt for rule in required_guardrails)
+
+
+def test_tiktok_podcast_prompt_requires_natural_brand_ctas():
+    prompt = Path("prompts/agent_tiktok_podcast.md").read_text(encoding="utf-8").lower()
+
+    assert "cta de marca" in prompt
+    assert "parte organica de la conversacion" in prompt
+    assert "guarda esto para cuando vuelvas a confundir ansiedad con amor" in prompt
+    assert "comenta 'apego'" in prompt
+    assert "mandaselo a alguien que necesita dejar de esperar un mensaje" in prompt
 
 
 def test_tiktok_visual_prompts_are_vertical_and_safe():

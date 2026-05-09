@@ -26,6 +26,21 @@ Estructura:
 - Una frase memorable.
 - Cierre con pregunta para comentarios o invitacion a ver el episodio completo.
 
+CTA de marca:
+
+- El cierre debe incluir una llamada natural a comentar, guardar, compartir o seguir.
+- Debe decirla LUCIA o MATEO como parte organica de la conversacion, no como anuncio ni frase de marketing pegada.
+- Elige solo una CTA por pieza, segun el tema y el giro emocional.
+- Opciones de tono permitidas:
+  - "Si esto te hizo sentido, sigueme. Aqui hablamos de lo que casi nadie sabe explicar del amor."
+  - "Guarda esto para cuando vuelvas a confundir ansiedad con amor."
+  - "Comenta 'apego' si quieres que haga una segunda parte."
+  - "Si alguna vez amaste desde la ansiedad, este canal es para ti."
+  - "Sigueme si estas aprendiendo a elegirte sin sentir culpa."
+  - "Mandaselo a alguien que necesita dejar de esperar un mensaje."
+  - "Aqui no hablamos de amor bonito. Hablamos de las heridas que confundimos con amor."
+- Puedes adaptar las palabras, pero conserva la intencion emocional: claridad, identificacion y accion simple.
+
 Formato de salida:
 
 - Usa dos voces: LUCIA y MATEO.

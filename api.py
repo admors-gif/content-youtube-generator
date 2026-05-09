@@ -6335,6 +6335,20 @@ def run_production(project_id):
                 except Exception:
                     pass
 
+        tiktok_cover_file = video_dir / "tiktok" / "cover.jpg"
+        tiktok_cover_result = None
+        if storage_info and is_tiktok_project:
+            if tiktok_cover_file.is_file():
+                tiktok_cover_result = _upload_video_to_storage(
+                    tiktok_cover_file,
+                    f"{project_id}/tiktok",
+                    content_type="image/jpeg",
+                )
+                if tiktok_cover_result:
+                    print("   ✅ Portada TikTok subida a Storage", flush=True)
+                else:
+                    print("   ⚠️ Portada TikTok creada pero no se pudo subir a Storage", flush=True)
+
         if is_tiktok_project:
             status_msg = "Tu TikTok está listo"
         elif is_long_meditation_project:
@@ -6367,6 +6381,11 @@ def run_production(project_id):
             update_payload["format"] = project_format
             update_payload["tiktok.status"] = "ready"
             update_payload["tiktok.delivery.finalFile"] = Path(final_path).name
+            if tiktok_cover_file.is_file():
+                update_payload["tiktok.delivery.coverFile"] = "cover.jpg"
+            if tiktok_cover_result:
+                update_payload["tiktok.delivery.coverStoragePath"] = tiktok_cover_result["gs_path"]
+                update_payload["tiktok.delivery.coverUrl"] = tiktok_cover_result["signed_url"]
 
         doc_ref.update(update_payload)
 

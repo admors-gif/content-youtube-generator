@@ -1,3 +1,4 @@
+import json
 import shutil
 from pathlib import Path
 
@@ -181,6 +182,68 @@ def test_image_workflow_router_uses_vertical_seedream_for_tiktok():
     assert workflow["width"] == 1080
     assert workflow["height"] == 1920
     assert "9:16" in workflow["size_preset"]
+
+
+def test_tiktok_delivery_cover_uses_first_scene_image(tmp_path):
+    from PIL import Image
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    first = images_dir / "scene_001.png"
+    Image.new("RGB", (900, 1600), (20, 20, 24)).save(first)
+
+    factory.write_tiktok_delivery_assets(
+        tmp_path,
+        {
+            "format": "tiktok_podcast",
+            "topic": "Esto no es amor, es apego",
+            "tiktok": {
+                "caption": "Caption lista",
+                "hashtags": ["#EstoNoEsAmor", "#ApegoEmocional"],
+                "scores": {"hookScore": 88},
+            },
+        },
+        final_video=None,
+    )
+
+    cover = tmp_path / "tiktok" / "cover.jpg"
+    metadata = json.loads((tmp_path / "tiktok" / "metadata.json").read_text(encoding="utf-8"))
+
+    assert cover.is_file()
+    with Image.open(cover) as img:
+        assert img.size == (1080, 1920)
+        assert img.format == "JPEG"
+    assert metadata["coverFile"] == "cover.jpg"
+    assert metadata["coverSource"] == "first_image"
+
+
+def test_tiktok_delivery_cover_falls_back_to_video_frame(monkeypatch, tmp_path):
+    from PIL import Image
+
+    final_video = tmp_path / "FINAL_TIKTOK.mp4"
+    final_video.write_bytes(b"fake")
+
+    def fake_fallback(_final_video, cover_path):
+        Image.new("RGB", (1080, 1920), (0, 0, 0)).save(cover_path)
+        return True
+
+    monkeypatch.setattr(factory, "_render_tiktok_cover_fallback_from_video", fake_fallback)
+
+    factory.write_tiktok_delivery_assets(
+        tmp_path,
+        {
+            "format": "tiktok_podcast",
+            "topic": "Fallback de portada",
+            "tiktok": {"hashtags": ["#TikTok"]},
+        },
+        final_video=final_video,
+    )
+
+    metadata = json.loads((tmp_path / "tiktok" / "metadata.json").read_text(encoding="utf-8"))
+
+    assert (tmp_path / "tiktok" / "cover.jpg").is_file()
+    assert metadata["coverFile"] == "cover.jpg"
+    assert metadata["coverSource"] == "video_frame"
 
 
 def test_seedream_auth_failure_falls_back_to_flux_once(monkeypatch):

@@ -721,69 +721,73 @@ PODCAST_TARGET_VISUAL_SCENES = 12
 PODCAST_MAX_VISUAL_SCENES = 15
 
 PODCAST_VISUAL_IDENTITY = (
-    "Relationship-healing visual identity: intimate emotional imagery, "
-    "warm amber practical light against restrained teal shadows, quiet editorial "
-    "still-life compositions, emotional but not melodramatic."
+    "Esto No Es Amor visual identity: dark, elegant, emotionally intense noir podcast cover image, "
+    "black background, deep crimson glow, off-white highlights, smoky gray atmosphere, cinematic texture. "
+    "Create a conceptual emotional cover with one central symbolic metaphor, not a literal podcast scene. "
+    "The image should feel like attachment, rejection, anxiety, heartbreak, self-worth, and healing."
 )
 
 PODCAST_VISUAL_SAFETY_SUFFIX = (
-    " Object-led or empty-room composition, clean blank surfaces, "
-    "do not render the episode title, no readable text, no letters, no pseudo-text, "
-    "no brand logos, no watermarks, no people, no faces, no silhouettes, no hands, "
-    "no fingers, no arms, no microphones, no speakers, no headphones, no audio gear, "
-    "no podcast equipment, no studio equipment, no cameras, no laptops, no waveform graphics."
+    " 16:9 horizontal thumbnail-friendly composition, one clear focal metaphor, high contrast, "
+    "clean negative space for later text overlay, no readable text, no letters, no pseudo-text, "
+    "no brand logos, no watermarks, no microphones, no speakers, no headphones, no audio gear, "
+    "no podcast equipment, no studio equipment, no phones as main subject, no cups, no shoes, "
+    "no random hallway, no random doors, no furniture as main subject, no clutter, no bright pastel colors, "
+    "no smiling happy couple, no romantic stock-photo look, no visible hands, no fingers, no arms, "
+    "no realistic close-up faces, no detailed faces. If a human appears, show only a silhouette, "
+    "side profile, back view, partial shadow, or abstract emotional figure."
 )
 
 PODCAST_VISUAL_TEMPLATES = [
     (
-        "Phone distance",
-        "{identity} Photorealistic cinematic still: a phone face down on a bedside table, blank dark screen, a wilted flower beside it, two coffee cups separated by empty space, theme focus: {focus}, shallow depth of field, premium editorial composition, 16:9, 4k",
-        ["phone", "distance", "attachment"],
+        "Bound cracked heart",
+        "{identity} Main visual metaphor: a glowing cracked heart symbol bound by tense crimson threads in smoky black space, theme focus: {focus}, elegant conceptual art, premium cinematic composition, emotionally clear in one second, 16:9, 8k",
+        ["cracked-heart", "attachment", "threads"],
     ),
     (
-        "Two empty chairs",
-        "{identity} Empty apartment corner with two chairs facing different directions, a single warm floor lamp, deep teal shadows, large negative space between the chairs, theme focus: {focus}, calm cinematic atmosphere, editorial interior photography, 16:9, 4k",
-        ["empty-room", "distance", "chairs"],
+        "Fading side profile",
+        "{identity} Main visual metaphor: one shadowy side-profile silhouette dissolving into gray smoke and a thin crimson rim light, theme focus: {focus}, emotionally distant and unresolved, minimal noir composition, 16:9, 8k",
+        ["silhouette", "distance", "smoke"],
     ),
     (
-        "Loose red thread",
-        "{identity} A loose red thread stretched gently between two ceramic objects on a clean table, slight tension but not breaking, warm amber highlight and cool teal falloff, theme focus: {focus}, minimalist macro photography, premium magazine still life, 16:9, 4k",
-        ["red-thread", "tension", "still-life"],
+        "Fractured reflection",
+        "{identity} Main visual metaphor: a fractured emotional reflection repairing itself with thin crimson light, abstract mirror symbolism without a realistic face, theme focus: {focus}, dark smoky atmosphere, elegant cover composition, 16:9, 8k",
+        ["reflection", "self-worth", "fracture"],
     ),
     (
-        "Empty mirror",
-        "{identity} An empty mirror reflecting only a quiet room, a closed journal and a single key on the table below, soft window light, theme focus: {focus}, introspective editorial still, clean composition, 16:9, 4k",
-        ["mirror", "self-worth", "journal"],
+        "Red thread tension",
+        "{identity} Main visual metaphor: a single red thread pulled tight around an abstract heart fracture, the thread almost breaking, theme focus: {focus}, black negative space, crimson glow, clear emotional tension, 16:9, 8k",
+        ["red-thread", "tension", "heart"],
     ),
     (
-        "Door left ajar",
-        "{identity} Empty hallway with a bedroom door left slightly ajar, warm light spilling through the opening into cool teal shadow, a pair of shoes separated near the threshold, theme focus: {focus}, cinematic quiet tension, 16:9, 4k",
-        ["door", "threshold", "uncertainty"],
+        "Separated silhouettes",
+        "{identity} Main visual metaphor: two distant shadow silhouettes separated by smoky glass and a soft crimson glow, no interaction and no hands, theme focus: {focus}, longing, rejection, and emotional distance, premium noir cover, 16:9, 8k",
+        ["silhouettes", "distance", "glass"],
     ),
     (
-        "Unsent message",
-        "{identity} A phone with a completely blank black screen placed beside a torn envelope with no visible writing, one ceramic cup untouched, soft amber lamp glow, theme focus: {focus}, intimate editorial macro, 16:9, 4k",
-        ["phone", "silence", "message"],
+        "Abandonment wound",
+        "{identity} Main visual metaphor: a dark silhouette left behind while a second figure fades into smoke, with a faint cracked heart shape in crimson light, theme focus: {focus}, vulnerable and psychologically deep, clean composition, 16:9, 8k",
+        ["abandonment", "silhouette", "fade"],
     ),
     (
-        "Worn boundary line",
-        "{identity} A clean tabletop divided by a subtle line of light and shadow, a single flower on one side and a closed notebook on the other, theme focus: {focus}, elegant visual metaphor for boundaries, photorealistic, 16:9, 4k",
-        ["boundary", "flower", "notebook"],
+        "Boundary fracture",
+        "{identity} Main visual metaphor: a dark abstract wall with a thin crimson fracture line forming a boundary between two emotional fields, theme focus: {focus}, elegant psychological symbolism, high contrast, 16:9, 8k",
+        ["boundary", "fracture", "clarity"],
     ),
     (
-        "Separated pillows",
-        "{identity} Quiet bed at night with two pillows separated by a strip of moonlight, bedside lamp off, soft amber reflection in the background, theme focus: {focus}, cinematic domestic stillness, editorial realism, 16:9, 4k",
-        ["bedroom", "distance", "night"],
+        "Chaos versus peace",
+        "{identity} Main visual metaphor: one side of the image shows turbulent crimson smoke, the other side calm black stillness with a small off-white glow, theme focus: {focus}, nervous system confusing chaos with love, 16:9, 8k",
+        ["chaos", "peace", "contrast"],
     ),
     (
-        "Turned photograph",
-        "{identity} A photograph turned face down so no image or text is visible, a small bowl for keys, a closed journal, amber highlight on clean dark wood, theme focus: {focus}, restrained emotional still life, 16:9, 4k",
-        ["memory", "journal", "still-life"],
+        "Unfinished bond",
+        "{identity} Main visual metaphor: an incomplete glowing heart outline dissolving into smoky gray emptiness, theme focus: {focus}, grief for something that never fully existed, minimal emotional cover, 16:9, 8k",
+        ["grief", "unfinished", "heart"],
     ),
     (
         "Return to self",
-        "{identity} A single cup of tea beside a closed notebook near a morning window, warm sunrise edge light, cool teal shadows receding, theme focus: {focus}, calm resolution, premium editorial still life, 16:9, 4k",
-        ["self-worth", "calm", "morning"],
+        "{identity} Main visual metaphor: a shadow figure stepping away from broken crimson threads toward a subtle off-white inner glow, theme focus: {focus}, dark but healing, empowered and reflective, 16:9, 8k",
+        ["self-worth", "healing", "release"],
     ),
 ]
 

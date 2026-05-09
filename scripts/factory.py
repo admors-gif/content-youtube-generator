@@ -44,9 +44,9 @@ GENERAL_IMAGE_PROMPT_PREFIX = (
 )
 
 PODCAST_IMAGE_PROMPT_PREFIX = (
-    "Premium editorial podcast visual, object-led or abstract composition, "
-    "empty-room or still-life framing, clean blank surfaces, no readable text, no logos, "
-    "clean contemporary magazine photography, warm amber and deep teal palette."
+    "Esto No Es Amor noir emotional podcast cover visual, dark elegant cinematic symbolism, "
+    "black and deep crimson palette, off-white highlights, smoky gray atmosphere, one clear "
+    "emotional metaphor, no readable text, no logos, no watermark, no captions."
 )
 
 AUTOHYPNOSIS_IMAGE_PROMPT_PREFIX = (
@@ -154,10 +154,10 @@ def _build_image_prompt(prompt: str, pipeline_format: str = "narrativa", provide
     prompt = (prompt or "").strip()
     if pipeline_format in TIKTOK_FORMATS:
         return f"{SEEDREAM_IMAGE_PROMPT_PREFIX} vertical 9:16 TikTok-native frame, 1080x1920, clean caption-safe composition. {prompt}".strip()
-    if provider == "seedream":
-        return f"{SEEDREAM_IMAGE_PROMPT_PREFIX} {prompt}".strip()
     if pipeline_format == "podcast":
         return f"{PODCAST_IMAGE_PROMPT_PREFIX} {prompt}".strip()
+    if provider == "seedream":
+        return f"{SEEDREAM_IMAGE_PROMPT_PREFIX} {prompt}".strip()
     if pipeline_format in WELLNESS_FORMATS:
         return f"{AUTOHYPNOSIS_IMAGE_PROMPT_PREFIX} {prompt}".strip()
     return f"{GENERAL_IMAGE_PROMPT_PREFIX} {prompt}".strip()
@@ -1265,37 +1265,184 @@ def assemble_final_video(
         return None
 
 
-def write_tiktok_delivery_assets(project_dir: Path, data: dict, final_video: Path | None) -> None:
-    """Material de entrega TikTok separado del paquete YouTube."""
-    tiktok = data.get("tiktok") or {}
-    tiktok_dir = project_dir / "tiktok"
-    tiktok_dir.mkdir(parents=True, exist_ok=True)
-    caption = str(tiktok.get("caption") or data.get("topic") or "").strip()
-    hashtags = tiktok.get("hashtags") or []
-    if isinstance(hashtags, str):
-        hashtags = [h for h in hashtags.split() if h.startswith("#")]
-    metadata = {
-        "platform": "tiktok",
-        "format": data.get("format"),
-        "title": data.get("topic"),
-        "caption": caption,
-        "hashtags": hashtags,
-        "targetSeconds": tiktok.get("target_seconds") or tiktok.get("targetSeconds"),
-        "durationProfile": tiktok.get("duration_profile") or tiktok.get("durationProfile"),
-        "scores": tiktok.get("scores") or {},
-        "finalFile": final_video.name if final_video else None,
-        "render": {"width": 1080, "height": 1920, "aspectRatio": "9:16"},
-        "publishing": {"isAigc": True, "brandedContent": False, "status": "not_configured"},
-    }
-    with open(tiktok_dir / "metadata.json", "w", encoding="utf-8") as f:
-        json.dump(metadata, f, ensure_ascii=False, indent=2)
-    with open(tiktok_dir / "caption.txt", "w", encoding="utf-8") as f:
-        f.write(caption.strip() + "\n")
-    with open(tiktok_dir / "hashtags.txt", "w", encoding="utf-8") as f:
-        f.write(" ".join(hashtags).strip() + "\n")
-    if final_video and final_video.exists():
-        cover_path = tiktok_dir / "cover.jpg"
-        subprocess.run(
+def _tiktok_cover_source_image(project_dir: Path) -> Path | None:
+    images_dir = project_dir / "images"
+    if not images_dir.is_dir():
+        return None
+
+    exts = ("*.jpg", "*.jpeg", "*.png", "*.webp")
+    preferred = []
+    for pattern in exts:
+        preferred.extend(images_dir.glob(f"scene_001*{pattern[1:]}"))
+        preferred.extend(images_dir.glob(f"scene_0001*{pattern[1:]}"))
+    preferred = sorted({p for p in preferred if p.is_file()})
+    if preferred:
+        return preferred[0]
+
+    all_images = []
+    for pattern in exts:
+        all_images.extend(images_dir.glob(pattern))
+    all_images = sorted({p for p in all_images if p.is_file()})
+    return all_images[0] if all_images else None
+
+
+def _tiktok_cover_font_paths() -> list[str]:
+    return [
+        "/usr/share/fonts/truetype/montserrat/Montserrat-Black.ttf",
+        "/usr/share/fonts/truetype/montserrat/Montserrat-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "C:/Windows/Fonts/impact.ttf",
+        "C:/Windows/Fonts/arialbd.ttf",
+    ]
+
+
+def _load_tiktok_cover_font(size: int):
+    from PIL import ImageFont
+    for font_path in _tiktok_cover_font_paths():
+        try:
+            if os.path.exists(font_path):
+                return ImageFont.truetype(font_path, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _wrap_tiktok_cover_title(draw, text: str, font, max_width: int, max_lines: int = 5) -> list[str]:
+    words = [w.strip() for w in (text or "").split() if w.strip()]
+    if not words:
+        return ["TikTok"]
+
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        bbox = draw.textbbox((0, 0), candidate, font=font, stroke_width=6)
+        if current and (bbox[2] - bbox[0]) > max_width:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+
+    if len(lines) <= max_lines:
+        return lines
+
+    merged = lines[:max_lines]
+    merged[-1] = " ".join(lines[max_lines - 1:])
+    return merged
+
+
+def _fit_tiktok_cover_title(draw, title: str, max_width: int, max_height: int):
+    for size in range(86, 40, -4):
+        font = _load_tiktok_cover_font(size)
+        lines = _wrap_tiktok_cover_title(draw, title, font, max_width, max_lines=5)
+        spacing = max(8, size // 8)
+        widths, heights = [], []
+        for line in lines:
+            bbox = draw.textbbox((0, 0), line, font=font, stroke_width=6)
+            widths.append(bbox[2] - bbox[0])
+            heights.append(bbox[3] - bbox[1])
+        total_height = sum(heights) + spacing * (len(lines) - 1)
+        if max(widths or [0]) <= max_width and total_height <= max_height:
+            return font, lines, spacing, widths, heights
+
+    font = _load_tiktok_cover_font(40)
+    lines = _wrap_tiktok_cover_title(draw, title, font, max_width, max_lines=5)
+    spacing = 8
+    widths, heights = [], []
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=font, stroke_width=5)
+        widths.append(bbox[2] - bbox[0])
+        heights.append(bbox[3] - bbox[1])
+    return font, lines, spacing, widths, heights
+
+
+def _cover_resize_image(img, target_w: int, target_h: int):
+    from PIL import Image as PILImage
+    src_w, src_h = img.size
+    if src_w <= 0 or src_h <= 0:
+        return img.resize((target_w, target_h))
+    scale = max(target_w / src_w, target_h / src_h)
+    new_w = max(target_w, int(src_w * scale))
+    new_h = max(target_h, int(src_h * scale))
+    resampling = getattr(PILImage, "Resampling", PILImage)
+    resample = getattr(resampling, "LANCZOS")
+    img = img.resize((new_w, new_h), resample)
+    left = (new_w - target_w) // 2
+    top = (new_h - target_h) // 2
+    return img.crop((left, top, left + target_w, top + target_h))
+
+
+def _render_tiktok_cover_from_image(source_image: Path, title: str, output_path: Path) -> bool:
+    try:
+        from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageOps
+    except ImportError:
+        print("   [!] Pillow no disponible para portada TikTok; usando fallback si existe video")
+        return False
+
+    try:
+        img = Image.open(source_image)
+        img = ImageOps.exif_transpose(img).convert("RGB")
+        img = _cover_resize_image(img, 1080, 1920)
+        img = ImageEnhance.Color(img).enhance(1.12)
+        img = ImageEnhance.Contrast(img).enhance(1.18)
+        img = ImageEnhance.Brightness(img).enhance(0.78)
+        img = ImageEnhance.Sharpness(img).enhance(1.06)
+
+        overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        gd = ImageDraw.Draw(overlay)
+        for y in range(0, 1920, 3):
+            edge = max(0, y - 900)
+            alpha = min(205, int(45 + (edge / 1020) * 165))
+            gd.rectangle((0, y, 1080, y + 2), fill=(0, 0, 0, alpha))
+        gd.rectangle((0, 0, 1080, 220), fill=(0, 0, 0, 115))
+
+        glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        glow_draw = ImageDraw.Draw(glow)
+        glow_draw.ellipse((-180, 1300, 1260, 2180), fill=(170, 0, 32, 70))
+        glow = glow.filter(ImageFilter.GaussianBlur(82))
+        overlay = Image.alpha_composite(overlay, glow)
+        gd = ImageDraw.Draw(overlay)
+        gd.rectangle((70, 1510, 1010, 1524), fill=(195, 18, 47, 225))
+        gd.rectangle((70, 1530, 1010, 1534), fill=(245, 239, 230, 90))
+
+        img_rgba = Image.alpha_composite(img.convert("RGBA"), overlay)
+        draw = ImageDraw.Draw(img_rgba, "RGBA")
+        max_w = 920
+        max_h = 420
+        font, lines, spacing, widths, heights = _fit_tiktok_cover_title(draw, title or "TikTok", max_w, max_h)
+        total_h = sum(heights) + spacing * (len(lines) - 1)
+        y = 1040 + max(0, (max_h - total_h) // 2)
+
+        for idx, line in enumerate(lines):
+            width = widths[idx]
+            x = (1080 - width) // 2
+            fill = (245, 239, 230, 255)
+            if idx == len(lines) - 1 and len(lines) > 1:
+                fill = (255, 65, 96, 255)
+            shadow = Image.new("RGBA", img_rgba.size, (0, 0, 0, 0))
+            sd = ImageDraw.Draw(shadow)
+            sd.text((x + 8, y + 10), line, font=font, fill=(0, 0, 0, 230), stroke_width=12, stroke_fill=(0, 0, 0, 240))
+            shadow = shadow.filter(ImageFilter.GaussianBlur(1.3))
+            img_rgba = Image.alpha_composite(img_rgba, shadow)
+            draw = ImageDraw.Draw(img_rgba, "RGBA")
+            draw.text((x, y), line, font=font, fill=fill, stroke_width=6, stroke_fill=(0, 0, 0, 255))
+            y += heights[idx] + spacing
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        img_rgba.convert("RGB").save(str(output_path), "JPEG", quality=94, optimize=True)
+        return output_path.exists() and output_path.stat().st_size > 0
+    except Exception as exc:
+        print(f"   [!] No se pudo crear portada TikTok desde primera imagen: {exc}")
+        return False
+
+
+def _render_tiktok_cover_fallback_from_video(final_video: Path, cover_path: Path) -> bool:
+    if not final_video or not final_video.exists():
+        return False
+    try:
+        result = subprocess.run(
             [
                 "ffmpeg", "-y",
                 "-ss", "1",
@@ -1308,6 +1455,51 @@ def write_tiktok_delivery_assets(project_dir: Path, data: dict, final_video: Pat
             text=True,
             timeout=60,
         )
+        return result.returncode == 0 and cover_path.exists() and cover_path.stat().st_size > 0
+    except Exception as exc:
+        print(f"   [!] Fallback de portada TikTok falló: {exc}")
+        return False
+
+
+def write_tiktok_delivery_assets(project_dir: Path, data: dict, final_video: Path | None) -> None:
+    """Material de entrega TikTok separado del paquete YouTube."""
+    tiktok = data.get("tiktok") or {}
+    tiktok_dir = project_dir / "tiktok"
+    tiktok_dir.mkdir(parents=True, exist_ok=True)
+    caption = str(tiktok.get("caption") or data.get("topic") or "").strip()
+    hashtags = tiktok.get("hashtags") or []
+    if isinstance(hashtags, str):
+        hashtags = [h for h in hashtags.split() if h.startswith("#")]
+
+    cover_path = tiktok_dir / "cover.jpg"
+    cover_source = None
+    first_image = _tiktok_cover_source_image(project_dir)
+    if first_image and _render_tiktok_cover_from_image(first_image, str(data.get("topic") or ""), cover_path):
+        cover_source = "first_image"
+    elif _render_tiktok_cover_fallback_from_video(final_video, cover_path):
+        cover_source = "video_frame"
+
+    metadata = {
+        "platform": "tiktok",
+        "format": data.get("format"),
+        "title": data.get("topic"),
+        "caption": caption,
+        "hashtags": hashtags,
+        "targetSeconds": tiktok.get("target_seconds") or tiktok.get("targetSeconds"),
+        "durationProfile": tiktok.get("duration_profile") or tiktok.get("durationProfile"),
+        "scores": tiktok.get("scores") or {},
+        "finalFile": final_video.name if final_video else None,
+        "coverFile": "cover.jpg" if cover_path.exists() else None,
+        "coverSource": cover_source,
+        "render": {"width": 1080, "height": 1920, "aspectRatio": "9:16"},
+        "publishing": {"isAigc": True, "brandedContent": False, "status": "not_configured"},
+    }
+    with open(tiktok_dir / "metadata.json", "w", encoding="utf-8") as f:
+        json.dump(metadata, f, ensure_ascii=False, indent=2)
+    with open(tiktok_dir / "caption.txt", "w", encoding="utf-8") as f:
+        f.write(caption.strip() + "\n")
+    with open(tiktok_dir / "hashtags.txt", "w", encoding="utf-8") as f:
+        f.write(" ".join(hashtags).strip() + "\n")
 
 
 # ============================================================

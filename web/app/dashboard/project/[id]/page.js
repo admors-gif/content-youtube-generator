@@ -63,6 +63,8 @@ const AUTO_APPROVE_SECONDS = 180; // 3 minutes
 function TikTokDeliveryPanel({ project }) {
   const tiktok = project?.tiktok || {};
   const hashtags = Array.isArray(tiktok.hashtags) ? tiktok.hashtags : [];
+  const delivery = tiktok.delivery || {};
+  const coverUrl = delivery.coverUrl || tiktok.coverUrl || "";
   const isTikTok = project?.platform === "tiktok" || String(project?.format || "").startsWith("tiktok_");
   if (!project || !isTikTok) return null;
   return (
@@ -91,10 +93,35 @@ function TikTokDeliveryPanel({ project }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gridTemplateColumns: coverUrl
+            ? "minmax(160px, 220px) repeat(auto-fit, minmax(220px, 1fr))"
+            : "repeat(auto-fit, minmax(220px, 1fr))",
           gap: 14,
+          alignItems: "start",
         }}
       >
+        {coverUrl && (
+          <div>
+            <div style={{ font: "var(--t-mono-sm)", color: "var(--paper-mute)", marginBottom: 8 }}>
+              PORTADA
+            </div>
+            <div
+              role="img"
+              aria-label="Portada TikTok"
+              style={{
+                width: "100%",
+                maxWidth: 220,
+                aspectRatio: "9 / 16",
+                borderRadius: 8,
+                border: "1px solid var(--rule-1)",
+                background: "rgba(255,255,255,0.04)",
+                backgroundImage: `url("${coverUrl}")`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+              }}
+            />
+          </div>
+        )}
         <div>
           <div style={{ font: "var(--t-mono-sm)", color: "var(--paper-mute)", marginBottom: 6 }}>
             CAPTION
