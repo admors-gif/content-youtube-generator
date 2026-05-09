@@ -172,6 +172,8 @@ export default function YouTubeShortsPublishModal({ open, onClose, projectId, us
   }, [job?.jobId, job?.status, apiBase, user]);
 
   const selectedRows = useMemo(() => rows.filter((row) => row.selected), [rows]);
+  const studioItems = Array.isArray(job?.items) ? job.items.filter((item) => item.youtubeStudioUrl) : [];
+  const primaryStudioUrl = studioItems[0]?.youtubeStudioUrl || "";
 
   if (!open) return null;
 
@@ -436,6 +438,18 @@ export default function YouTubeShortsPublishModal({ open, onClose, projectId, us
                 <div className="cf-body" style={{ marginTop: 8 }}>{job.step || "En proceso"}</div>
                 {job.error && <div className="cf-caption" style={{ color: "var(--bad)", marginTop: 8 }}>{job.error}</div>}
                 {job.warning && <div className="cf-caption" style={{ color: "var(--warn)", marginTop: 8 }}>{job.warning}</div>}
+                {job.status === "completed" && primaryStudioUrl && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 14 }}>
+                    <a className="cf-btn cf-btn--primary" href={primaryStudioUrl} target="_blank" rel="noreferrer">
+                      <Icon name="externalLink" size={16} /> Abrir YouTube Studio
+                    </a>
+                    <span className="cf-caption">
+                      {studioItems.length === 1
+                        ? "Revisa el Short subido antes de publicarlo."
+                        : `Revisa los ${studioItems.length} Shorts subidos antes de publicarlos.`}
+                    </span>
+                  </div>
+                )}
                 {Array.isArray(job.items) && job.items.length > 0 && (
                   <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
                     {job.items.map((item, idx) => (
