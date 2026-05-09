@@ -166,22 +166,23 @@ def test_image_workflow_router_preserves_documentary_flux_path():
     assert cinematic["workflow"].name == "flux1_krea_dev_api.json"
 
 
-def test_image_workflow_router_uses_seedream_for_short_premium_formats():
+def test_image_workflow_router_uses_flux_for_short_premium_formats():
     for format_key in ["podcast", "autohipnosis", "meditacion_larga"]:
         workflow = factory._select_image_workflow(format_key)
 
-        assert workflow["provider"] == "seedream"
-        assert workflow["workflow"].name == "seedream_5_lite_t2i_api.json"
+        assert workflow["provider"] == "flux"
+        assert workflow["workflow"].name == "flux1_krea_dev_api.json"
+        assert workflow["width"] == 1344
+        assert workflow["height"] == 768
 
 
-def test_image_workflow_router_uses_vertical_seedream_for_tiktok():
+def test_image_workflow_router_uses_vertical_flux_for_tiktok():
     workflow = factory._select_image_workflow("tiktok_podcast")
 
-    assert workflow["provider"] == "seedream"
-    assert workflow["workflow"].name == "seedream_5_lite_t2i_api.json"
-    assert workflow["width"] == 1080
-    assert workflow["height"] == 1920
-    assert "9:16" in workflow["size_preset"]
+    assert workflow["provider"] == "flux"
+    assert workflow["workflow"].name == "flux1_krea_dev_api.json"
+    assert workflow["height"] > workflow["width"]
+    assert abs((workflow["width"] / workflow["height"]) - (9 / 16)) < 0.02
 
 
 def test_tiktok_delivery_cover_uses_first_scene_image(tmp_path):
@@ -246,10 +247,9 @@ def test_tiktok_delivery_cover_falls_back_to_video_frame(monkeypatch, tmp_path):
     assert metadata["coverSource"] == "video_frame"
 
 
-def test_seedream_auth_failure_falls_back_to_flux_once(monkeypatch):
+def test_runtime_image_generation_does_not_route_through_seedream(monkeypatch):
     class FakeClient:
         def __init__(self, *args, **kwargs):
-            self.seedream_posts = 0
             self.flux_posts = 0
 
         def __enter__(self):
@@ -264,23 +264,11 @@ def test_seedream_auth_failure_falls_back_to_flux_once(monkeypatch):
 
         def post(self, url, headers=None, json=None):
             prompt_graph = (json or {}).get("prompt", {})
-            if "25" in prompt_graph:
-                self.seedream_posts += 1
-                return _FakeResponse(payload={"prompt_id": f"seedream-{self.seedream_posts}"})
+            assert "25" not in prompt_graph
             self.flux_posts += 1
             return _FakeResponse(payload={"prompt_id": f"flux-{self.flux_posts}"})
 
         def get(self, url, headers=None, params=None):
-            if "/jobs/seedream-" in url:
-                return _FakeResponse(payload={
-                    "status": "failed",
-                    "execution_error": {
-                        "exception_type": "Exception",
-                        "exception_message": "Unauthorized: Please login first to use this node.",
-                        "node_id": "25",
-                        "node_type": "ByteDanceSeedreamNode",
-                    },
-                })
             if "/jobs/flux-" in url:
                 return _FakeResponse(payload={
                     "status": "completed",
@@ -302,7 +290,7 @@ def test_seedream_auth_failure_falls_back_to_flux_once(monkeypatch):
     monkeypatch.setattr(factory.time, "sleep", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(factory.httpx, "Client", FakeClient)
 
-    images_dir = Path(".test-output") / "seedream-fallback" / "images"
+    images_dir = Path(".test-output") / "flux-only" / "images"
     shutil.rmtree(images_dir.parent, ignore_errors=True)
     try:
         scenes = [
@@ -319,7 +307,6 @@ def test_seedream_auth_failure_falls_back_to_flux_once(monkeypatch):
         shutil.rmtree(images_dir.parent, ignore_errors=True)
 
     assert stats["generated"] == 2
-    assert stats["fallback"] == 2
+    assert stats["fallback"] == 0
     assert stats["failed"] == 0
-    assert calls["client"].seedream_posts == 1
     assert calls["client"].flux_posts == 2

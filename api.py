@@ -24,6 +24,7 @@ from scripts.sentry_observability import (
     sanitize_sentry_event as _sanitize_sentry_event,
     tag_sentry_project as _tag_sentry_project,
 )
+from scripts.brand_profiles import DEFAULT_BRAND_PROFILE_ID, brand_profile_snapshot
 
 FIREBASE_STORAGE_BUCKET = os.environ.get(
     "FIREBASE_STORAGE_BUCKET",
@@ -583,6 +584,22 @@ def _validate_personalization_payload(data: dict, *, agent_id: str) -> dict:
     return {**payload, "enabled": True}
 
 
+def _brand_profile_for_project(agent_id: str, data: dict) -> tuple[str, dict]:
+    """Return the internal brand profile id and immutable creation snapshot.
+
+    V1 only exposes the locked Esto No Es Amor profile for the podcast lines.
+    Other agents can opt into a future profile later without changing legacy
+    YouTube/documentary behavior.
+    """
+    requested = str(data.get("brandProfileId") or data.get("brand_profile_id") or "").strip()
+    should_use_default = agent_id in {"agent_podcast_general", "agent_tiktok_podcast"}
+    if not requested and not should_use_default:
+        return "", {}
+    profile_id = requested or DEFAULT_BRAND_PROFILE_ID
+    snapshot = brand_profile_snapshot(profile_id)
+    return snapshot.get("id") or profile_id, snapshot
+
+
 def _validate_project_payload(data: dict) -> dict:
     title = (data.get("title") or data.get("topic") or "").strip()
     agent_id = (data.get("agentId") or "").strip()
@@ -626,6 +643,10 @@ def _validate_project_payload(data: dict) -> dict:
     personalization = _validate_personalization_payload(data, agent_id=agent_id)
     if personalization:
         generation_options["personalization"] = personalization
+    brand_profile_id, brand_profile = _brand_profile_for_project(agent_id, data)
+    if brand_profile_id:
+        generation_options["brand_profile_id"] = brand_profile_id
+        generation_options["brand_profile_snapshot"] = brand_profile
     project_format = _TIKTOK_FORMAT_BY_AGENT.get(agent_id, "")
     tiktok_payload = {}
     if platform == "tiktok":
@@ -680,6 +701,8 @@ def _validate_project_payload(data: dict) -> dict:
         "format": project_format,
         "tiktok": tiktok_payload,
         "personalization": personalization,
+        "brand_profile_id": brand_profile_id,
+        "brand_profile_snapshot": brand_profile,
         "generation_options": generation_options,
     }
 
@@ -3319,6 +3342,672 @@ def _youtube_fetch_channels(access_token: str) -> list[dict]:
     return [c for c in channels if c.get("channelId")]
 
 
+_TIKTOK_SCOPES = ["user.info.basic", "video.upload"]
+_TIKTOK_WEB_URL = _YOUTUBE_WEB_URL
+_TIKTOK_ACTIVE_JOB_STATUSES = {
+    "queued",
+    "leased",
+    "upload_initialized",
+    "uploading",
+    "inbox_delivered",
+    "needs_review",
+    "completed",
+}
+_TIKTOK_INBOX_PENDING_STATUSES = {
+    "queued",
+    "leased",
+    "upload_initialized",
+    "uploading",
+    "inbox_delivered",
+    "needs_review",
+}
+
+
+def _tiktok_oauth_settings() -> dict:
+    redirect_uri = os.environ.get("TIKTOK_OAUTH_REDIRECT_URI", "").strip()
+    if not redirect_uri:
+        public_api = os.environ.get("VPS_PUBLIC_URL", "").strip().rstrip("/")
+        if public_api:
+            redirect_uri = f"{public_api}/tiktok/oauth/callback"
+    return {
+        "client_key": os.environ.get("TIKTOK_CLIENT_KEY", "").strip(),
+        "client_secret": os.environ.get("TIKTOK_CLIENT_SECRET", "").strip(),
+        "redirect_uri": redirect_uri,
+        "state_secret": (
+            os.environ.get("CONTENT_FACTORY_TIKTOK_STATE_SECRET", "").strip()
+            or _ADMIN_TOKEN
+            or os.environ.get("TIKTOK_CLIENT_SECRET", "").strip()
+        ),
+        "token_secret": (
+            os.environ.get("CONTENT_FACTORY_TIKTOK_TOKEN_SECRET", "").strip()
+            or _ADMIN_TOKEN
+        ),
+    }
+
+
+def _tiktok_config_status() -> dict:
+    settings = _tiktok_oauth_settings()
+    missing = [
+        key
+        for key in ["client_key", "client_secret", "redirect_uri", "state_secret", "token_secret"]
+        if not settings.get(key)
+    ]
+    return {
+        "configured": not missing,
+        "missing": missing,
+        "redirectUri": settings.get("redirect_uri") or None,
+        "scopes": list(_TIKTOK_SCOPES),
+    }
+
+
+def _tiktok_require_config() -> dict:
+    status = _tiktok_config_status()
+    if not status["configured"]:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "tiktok_oauth_not_configured",
+                "missing": status["missing"],
+                "redirectUri": status.get("redirectUri"),
+            },
+        )
+    return _tiktok_oauth_settings()
+
+
+def _safe_tiktok_return_path(value: str | None) -> str:
+    return _safe_youtube_return_path(value)
+
+
+def _tiktok_sign_state(payload: dict) -> str:
+    settings = _tiktok_require_config()
+    body = _youtube_b64(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    sig = hmac.new(settings["state_secret"].encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+    return f"{body}.{_youtube_b64(sig)}"
+
+
+def _tiktok_verify_state(state: str) -> dict:
+    settings = _tiktok_require_config()
+    try:
+        body, sig = state.split(".", 1)
+        expected = hmac.new(settings["state_secret"].encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+        provided = _youtube_unb64(sig)
+        if not hmac.compare_digest(expected, provided):
+            raise ValueError("bad signature")
+        payload = json.loads(_youtube_unb64(body).decode("utf-8"))
+        if int(payload.get("exp", 0)) < int(time.time()):
+            raise ValueError("expired")
+        return payload
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="invalid tiktok oauth state") from exc
+
+
+def _tiktok_fernet():
+    settings = _tiktok_require_config()
+    try:
+        from cryptography.fernet import Fernet
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="cryptography dependency missing") from exc
+    key = base64.urlsafe_b64encode(hashlib.sha256(settings["token_secret"].encode("utf-8")).digest())
+    return Fernet(key)
+
+
+def _tiktok_encrypt_token(value: str) -> str:
+    return _tiktok_fernet().encrypt(value.encode("utf-8")).decode("ascii")
+
+
+def _tiktok_decrypt_token(value: str) -> str:
+    return _tiktok_fernet().decrypt(value.encode("ascii")).decode("utf-8")
+
+
+def _tiktok_authorization_url(uid: str, return_to: str) -> str:
+    settings = _tiktok_require_config()
+    state = _tiktok_sign_state({
+        "uid": uid,
+        "returnTo": _safe_tiktok_return_path(return_to),
+        "nonce": secrets.token_urlsafe(16),
+        "exp": int(time.time()) + 15 * 60,
+    })
+    params = {
+        "client_key": settings["client_key"],
+        "redirect_uri": settings["redirect_uri"],
+        "response_type": "code",
+        "scope": ",".join(_TIKTOK_SCOPES),
+        "state": state,
+    }
+    return "https://www.tiktok.com/v2/auth/authorize/?" + urllib.parse.urlencode(params)
+
+
+def _tiktok_request_tokens(code: str) -> dict:
+    settings = _tiktok_require_config()
+    import requests
+    response = requests.post(
+        "https://open.tiktokapis.com/v2/oauth/token/",
+        data={
+            "client_key": settings["client_key"],
+            "client_secret": settings["client_secret"],
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": settings["redirect_uri"],
+        },
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=400, detail=f"tiktok token exchange failed: {response.text[:200]}")
+    return response.json()
+
+
+def _tiktok_refresh_access_token(refresh_token: str) -> dict:
+    settings = _tiktok_require_config()
+    import requests
+    response = requests.post(
+        "https://open.tiktokapis.com/v2/oauth/token/",
+        data={
+            "client_key": settings["client_key"],
+            "client_secret": settings["client_secret"],
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        },
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"tiktok refresh failed: {response.text[:200]}")
+    return response.json()
+
+
+def _tiktok_fetch_user(access_token: str) -> dict:
+    import requests
+    response = requests.get(
+        "https://open.tiktokapis.com/v2/user/info/",
+        params={"fields": "open_id,union_id,avatar_url,display_name"},
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=400, detail=f"tiktok user lookup failed: {response.text[:200]}")
+    data = response.json().get("data") or {}
+    user = data.get("user") or {}
+    return {
+        "openId": user.get("open_id") or data.get("open_id") or "",
+        "unionId": user.get("union_id") or data.get("union_id") or "",
+        "displayName": user.get("display_name") or "Cuenta TikTok",
+        "avatarUrl": user.get("avatar_url") or "",
+    }
+
+
+def _tiktok_public_account_doc(doc) -> dict:
+    data = doc.to_dict() or {}
+    return {
+        "accountId": doc.id,
+        "openId": data.get("openId") or doc.id,
+        "displayName": data.get("displayName") or "Cuenta TikTok",
+        "avatarUrl": data.get("avatarUrl") or "",
+        "connectedAt": _serialize_firestore_value(data.get("connectedAt")),
+        "updatedAt": _serialize_firestore_value(data.get("updatedAt")),
+        "scopes": data.get("scopes") or list(_TIKTOK_SCOPES),
+    }
+
+
+def _tiktok_final_video_file(video_dir: Path) -> Path | None:
+    candidate = video_dir / "FINAL_TIKTOK.mp4"
+    if candidate.is_file():
+        return candidate
+    candidates = sorted(video_dir.glob("*TIKTOK*.mp4"))
+    for item in candidates:
+        if item.is_file():
+            return item
+    return None
+
+
+def _tiktok_cover_file(video_dir: Path) -> Path | None:
+    candidate = video_dir / "tiktok" / "cover.jpg"
+    return candidate if candidate.is_file() else None
+
+
+def _tiktok_video_file_hash(video_file: Path) -> str:
+    digest = hashlib.sha256()
+    with video_file.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _tiktok_video_preflight(data: dict) -> dict:
+    result = {
+        "eligible": False,
+        "filename": None,
+        "durationSeconds": None,
+        "durationMinutes": None,
+        "width": None,
+        "height": None,
+        "sizeMb": None,
+        "error": "",
+    }
+    try:
+        video_dir = _youtube_project_video_dir(data)
+        video_file = _tiktok_final_video_file(video_dir)
+        if not video_file:
+            return {**result, "error": "FINAL_TIKTOK.mp4 not found"}
+        ok, duration, err = _validate_media_file(video_file, min_duration_seconds=1)
+        width, height = _youtube_video_dimensions(video_file)
+        result.update({
+            "filename": video_file.name,
+            "durationSeconds": round(duration or 0, 2),
+            "durationMinutes": round((duration or 0) / 60, 1),
+            "width": width or None,
+            "height": height or None,
+            "sizeMb": round(video_file.stat().st_size / (1024 * 1024), 1),
+        })
+        if not ok:
+            return {**result, "error": err or "video is not readable"}
+        if duration > 600:
+            return {**result, "error": "TikTok video exceeds 10 minutes"}
+        if not width or not height:
+            return {**result, "error": "video dimensions could not be read"}
+        if height <= width:
+            return {**result, "error": "TikTok video must be vertical"}
+        return {**result, "eligible": True}
+    except Exception as exc:
+        return {**result, "error": str(exc)[:200]}
+
+
+def _tiktok_caption_pack(project_id: str, data: dict, payload: dict | None = None) -> dict:
+    payload = payload or {}
+    title = str(data.get("title") or "TikTok listo").strip()
+    tiktok = data.get("tiktok") or {}
+
+    def _normalize_hashtags(value) -> list[str]:
+        raw = value if isinstance(value, list) else re.split(r"[\s,;]+", str(value or ""))
+        tags = []
+        seen = set()
+        for item in raw:
+            tag = str(item or "").strip()
+            if not tag:
+                continue
+            if not tag.startswith("#"):
+                tag = f"#{tag.lstrip('#')}"
+            key = tag.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            tags.append(tag[:80])
+        return tags
+
+    hashtags = _normalize_hashtags(payload.get("hashtags"))
+    if not hashtags:
+        hashtags = _normalize_hashtags(tiktok.get("hashtags") if isinstance(tiktok.get("hashtags"), list) else [])
+    if not hashtags:
+        hashtags = ["#EstoNoEsAmor", "#ApegoEmocional", "#AmorPropio", "#TikTok"]
+    caption = str(payload.get("caption") or tiktok.get("caption") or title).strip()
+    if not any(str(tag).lower() in caption.lower() for tag in hashtags):
+        caption = f"{caption}\n\n{' '.join(hashtags)}"
+    return {
+        "projectId": project_id,
+        "title": title[:100],
+        "caption": caption[:2200],
+        "hashtags": [str(tag).strip() for tag in hashtags if str(tag).strip().startswith("#")][:12],
+        "coverFile": ((tiktok.get("delivery") or {}).get("coverFile") or "cover.jpg"),
+        "isAigc": True,
+        "brandedContent": False,
+    }
+
+
+def _tiktok_idempotency_key(uid: str, account_id: str, project_id: str, file_hash: str, scheduled_at: str) -> str:
+    raw = "|".join([
+        str(uid or "").strip(),
+        str(account_id or "").strip(),
+        str(project_id or "").strip(),
+        str(file_hash or "").strip(),
+        str(scheduled_at or "").strip(),
+    ])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _tiktok_job_doc_id(idempotency_key: str) -> str:
+    return f"tt_{idempotency_key[:40]}"
+
+
+def _tiktok_scheduled_datetime(value: str | None) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid TikTok scheduledAt")
+
+
+def _tiktok_build_publish_job_payload(uid: str, project_id: str, data: dict, account_id: str, payload: dict | None = None) -> dict:
+    if data.get("status") != "completed":
+        raise HTTPException(status_code=400, detail="TikTok project is not completed")
+    video_dir = _youtube_project_video_dir(data)
+    video_file = _tiktok_final_video_file(video_dir)
+    if not video_file:
+        raise HTTPException(status_code=400, detail="FINAL_TIKTOK.mp4 not found")
+    preflight = _tiktok_video_preflight(data)
+    if not preflight.get("eligible"):
+        raise HTTPException(status_code=400, detail=preflight.get("error") or "TikTok video is not eligible")
+    scheduled_dt = _tiktok_scheduled_datetime((payload or {}).get("scheduledAt"))
+    scheduled_at = scheduled_dt.isoformat() if scheduled_dt else ""
+    file_hash = _tiktok_video_file_hash(video_file)
+    idempotency_key = _tiktok_idempotency_key(uid, account_id, project_id, file_hash, scheduled_at)
+    metadata = _tiktok_caption_pack(project_id, data, payload)
+    cover = _tiktok_cover_file(video_dir)
+    return {
+        "idempotencyKey": idempotency_key,
+        "uid": uid,
+        "projectId": project_id,
+        "accountId": account_id,
+        "status": "queued",
+        "type": "tiktok_inbox",
+        "step": "Programado para enviar a TikTok Inbox" if scheduled_at else "En cola para enviar a TikTok Inbox",
+        "scheduledAt": scheduled_at,
+        "fileHash": file_hash,
+        "video": {
+            "path": str(video_file),
+            "filename": video_file.name,
+            "sizeBytes": video_file.stat().st_size,
+            **preflight,
+        },
+        "cover": {
+            "path": str(cover) if cover else "",
+            "filename": cover.name if cover else "",
+        },
+        "metadata": metadata,
+        "publishId": "",
+        "uploadUrlReceived": False,
+        "retryPolicy": {
+            "autoRetryInitWithoutPublishId": False,
+            "reason": "avoid duplicate TikTok inbox shares",
+        },
+    }
+
+
+def _tiktok_job_is_due(job: dict, *, now: datetime | None = None) -> bool:
+    scheduled = _tiktok_scheduled_datetime(job.get("scheduledAt"))
+    if not scheduled:
+        return True
+    return scheduled <= (now or datetime.now(timezone.utc))
+
+
+def _tiktok_create_or_get_job(db, firestore, job_payload: dict) -> tuple[str, dict, bool]:
+    job_id = _tiktok_job_doc_id(job_payload["idempotencyKey"])
+    job_ref = db.collection("tiktokPublishJobs").document(job_id)
+
+    @firestore.transactional
+    def _txn(transaction):
+        snap = job_ref.get(transaction=transaction)
+        if snap.exists:
+            existing = snap.to_dict() or {}
+            if existing.get("status") in _TIKTOK_ACTIVE_JOB_STATUSES:
+                return job_id, existing, False
+        transaction.set(job_ref, {
+            **job_payload,
+            "createdAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        return job_id, job_payload, True
+
+    return _txn(db.transaction())
+
+
+def _tiktok_count_recent_account_jobs(db, uid: str, account_id: str, statuses: set[str], *, hours: int = 24) -> int:
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    docs = list(
+        db.collection("tiktokPublishJobs")
+        .where("uid", "==", uid)
+        .where("accountId", "==", account_id)
+        .limit(50)
+        .stream()
+    )
+    count = 0
+    for doc in docs:
+        data = doc.to_dict() or {}
+        if data.get("status") not in statuses:
+            continue
+        created = _youtube_datetime(_serialize_firestore_value(data.get("createdAt")))
+        if not created or created >= cutoff:
+            count += 1
+    return count
+
+
+def _tiktok_record_rate_event(db, firestore, uid: str, account_id: str) -> None:
+    db.collection("users").document(uid).collection("tiktokAccounts").document(account_id).collection("rateLimitEvents").document().set({
+        "createdAt": firestore.SERVER_TIMESTAMP,
+    })
+
+
+def _tiktok_rate_limit_count(db, uid: str, account_id: str) -> int:
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+    docs = list(
+        db.collection("users").document(uid)
+        .collection("tiktokAccounts").document(account_id)
+        .collection("rateLimitEvents")
+        .where("createdAt", ">=", cutoff)
+        .limit(6)
+        .stream()
+    )
+    return len(docs)
+
+
+def _tiktok_refresh_account_token(db, firestore, uid: str, account_id: str) -> str:
+    account_ref = db.collection("users").document(uid).collection("tiktokAccounts").document(account_id)
+    snap = account_ref.get()
+    if not snap.exists:
+        raise RuntimeError("TikTok account not connected")
+    account = snap.to_dict() or {}
+    refresh_token = _tiktok_decrypt_token(account.get("refreshTokenEncrypted") or "")
+    token_data = _tiktok_refresh_access_token(refresh_token)
+    access_token = token_data.get("access_token") or ""
+    next_refresh = token_data.get("refresh_token") or refresh_token
+    if not access_token:
+        raise RuntimeError("TikTok refresh did not return access token")
+    account_ref.update({
+        "accessTokenEncrypted": _tiktok_encrypt_token(access_token),
+        "refreshTokenEncrypted": _tiktok_encrypt_token(next_refresh),
+        "accessExpiresAt": datetime.now(timezone.utc) + timedelta(seconds=int(token_data.get("expires_in") or 86400)),
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    })
+    return access_token
+
+
+def _tiktok_init_inbox_upload(access_token: str, video_file: Path) -> dict:
+    import requests
+    size = video_file.stat().st_size
+    chunk_size = min(size, 64 * 1024 * 1024)
+    total_chunks = max(1, (size + chunk_size - 1) // chunk_size)
+    response = requests.post(
+        "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/",
+        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json; charset=UTF-8"},
+        json={
+            "source_info": {
+                "source": "FILE_UPLOAD",
+                "video_size": size,
+                "chunk_size": chunk_size,
+                "total_chunk_count": total_chunks,
+            }
+        },
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"tiktok inbox init failed: {response.text[:300]}")
+    payload = response.json()
+    data = payload.get("data") or {}
+    publish_id = data.get("publish_id") or ""
+    upload_url = data.get("upload_url") or ""
+    if not publish_id or not upload_url:
+        raise RuntimeError(f"tiktok inbox init missing publish_id/upload_url: {str(payload)[:300]}")
+    return {"publishId": publish_id, "uploadUrl": upload_url, "chunkSize": chunk_size, "totalChunks": total_chunks}
+
+
+def _tiktok_upload_file(upload_url: str, video_file: Path, chunk_size: int) -> None:
+    import requests
+    size = video_file.stat().st_size
+    with video_file.open("rb") as fh:
+        start = 0
+        while start < size:
+            data = fh.read(chunk_size)
+            end = start + len(data) - 1
+            response = requests.put(
+                upload_url,
+                headers={
+                    "Content-Type": "video/mp4",
+                    "Content-Length": str(len(data)),
+                    "Content-Range": f"bytes {start}-{end}/{size}",
+                },
+                data=data,
+                timeout=(30, 1800),
+            )
+            if response.status_code >= 400:
+                raise RuntimeError(f"tiktok inbox upload failed: {response.text[:300]}")
+            start = end + 1
+
+
+def _tiktok_fetch_publish_status(access_token: str, publish_id: str) -> dict:
+    import requests
+    response = requests.post(
+        "https://open.tiktokapis.com/v2/post/publish/status/fetch/",
+        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json; charset=UTF-8"},
+        json={"publish_id": publish_id},
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"tiktok status fetch failed: {response.text[:300]}")
+    return response.json().get("data") or {}
+
+
+def _run_tiktok_publish_job(uid: str, job_id: str):
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    db = firestore.client()
+    job_ref = db.collection("tiktokPublishJobs").document(job_id)
+    project_ref = None
+    try:
+        snap = job_ref.get()
+        if not snap.exists:
+            raise RuntimeError("TikTok job not found")
+        job = snap.to_dict() or {}
+        if job.get("uid") != uid:
+            raise RuntimeError("TikTok job access denied")
+        if job.get("status") in {"completed", "cancelled"}:
+            return
+        if not _tiktok_job_is_due(job):
+            return
+
+        job_ref.update({
+            "status": "leased",
+            "step": "Validando video TikTok",
+            "leasedAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+
+        project_id = job.get("projectId") or ""
+        account_id = job.get("accountId") or ""
+        project_ref = db.collection("projects").document(project_id)
+        project_snap = project_ref.get()
+        if not project_snap.exists:
+            raise RuntimeError("project not found")
+        project = project_snap.to_dict() or {}
+        if project.get("userId") != uid:
+            raise RuntimeError("project access denied")
+        preflight = _tiktok_video_preflight(project)
+        if not preflight.get("eligible"):
+            raise RuntimeError(preflight.get("error") or "TikTok video is not eligible")
+
+        pending_count = _tiktok_count_recent_account_jobs(db, uid, account_id, _TIKTOK_INBOX_PENDING_STATUSES)
+        if pending_count > 5:
+            raise RuntimeError("TikTok pending inbox share cap reached; review existing inbox uploads first")
+        if _tiktok_rate_limit_count(db, uid, account_id) >= 6:
+            raise RuntimeError("TikTok rate limit guard: wait before sending another upload")
+
+        access_token = _tiktok_refresh_account_token(db, firestore, uid, account_id)
+        _tiktok_record_rate_event(db, firestore, uid, account_id)
+
+        video_file = Path((job.get("video") or {}).get("path") or "")
+        if not video_file.is_file():
+            raise RuntimeError("TikTok video file missing on worker")
+
+        publish_id = job.get("publishId") or ""
+        if publish_id:
+            status_data = _tiktok_fetch_publish_status(access_token, publish_id)
+            job_ref.update({
+                "status": "needs_review",
+                "step": "TikTok ya recibió el video; revisa el inbox antes de reintentar",
+                "statusData": status_data,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            })
+            return
+
+        job_ref.update({
+            "status": "upload_initialized",
+            "step": "Solicitando upload seguro a TikTok",
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        init_data = _tiktok_init_inbox_upload(access_token, video_file)
+        publish_id = init_data["publishId"]
+        job_ref.update({
+            "publishId": publish_id,
+            "uploadUrlReceived": True,
+            "status": "uploading",
+            "step": "Subiendo video a TikTok Inbox",
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+
+        _tiktok_upload_file(init_data["uploadUrl"], video_file, int(init_data["chunkSize"]))
+        completed_payload = {
+            "status": "completed",
+            "step": "Video enviado a TikTok Inbox; termina la publicacion desde TikTok",
+            "completedAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+        job_ref.update(completed_payload)
+        project_ref.update({
+            "tiktok.publishing.status": "inbox_delivered",
+            "tiktok.publishing.lastJobId": job_id,
+            "tiktok.publishing.lastPublishId": publish_id,
+            "tiktok.publishing.needsReview": True,
+            "tiktok.publishing.updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+    except Exception as exc:
+        raw = str(exc)[:500]
+        snap = job_ref.get()
+        current = snap.to_dict() if snap.exists else {}
+        has_publish_id = bool((current or {}).get("publishId"))
+        uncertain_init = (not has_publish_id) and ("timeout" in raw.lower() or "timed out" in raw.lower())
+        status = "needs_review" if uncertain_init or has_publish_id else "failed"
+        step = (
+            "No se puede confirmar si TikTok recibio el init; revisa antes de reintentar"
+            if uncertain_init
+            else "TikTok recibio un publish_id; revisa status antes de reintentar"
+            if has_publish_id
+            else "Error al enviar a TikTok Inbox"
+        )
+        job_ref.update({
+            "status": status,
+            "step": step,
+            "error": raw,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+
+
+def _enqueue_tiktok_publish_job(uid: str, job_id: str, background_tasks: BackgroundTasks) -> dict:
+    try:
+        from worker_tasks import publish_tiktok_inbox
+        task = publish_tiktok_inbox.delay(uid, job_id)
+        return {"queue": "celery", "taskId": task.id}
+    except Exception as queue_err:
+        try:
+            log.warning("tiktok_publish_queue_unavailable", job_id=job_id, error=str(queue_err)[:200])
+        except TypeError:
+            log.warning(f"tiktok_publish_queue_unavailable job_id={job_id} error={str(queue_err)[:200]}")
+        background_tasks.add_task(_run_tiktok_publish_job, uid, job_id)
+        return {"queue": "api_background", "error": str(queue_err)[:200]}
+
+
 def _youtube_split_tags(value) -> list[str]:
     if isinstance(value, list):
         raw = value
@@ -3593,6 +4282,20 @@ def _youtube_latest_jobs_by_project(job_docs) -> dict:
     return latest
 
 
+def _tiktok_latest_jobs_by_project(job_docs) -> dict:
+    latest = {}
+    for doc in job_docs:
+        data = doc.to_dict() or {}
+        project_id = data.get("projectId")
+        if not project_id:
+            continue
+        entry = {"id": doc.id, **data}
+        previous = latest.get(project_id)
+        if not previous or _youtube_job_sort_value(entry) >= _youtube_job_sort_value(previous):
+            latest[project_id] = entry
+    return latest
+
+
 def _youtube_video_publish_at_from_job(job: dict | None) -> str:
     metadata = (job or {}).get("metadata") or {}
     status = metadata.get("status") or {}
@@ -3643,15 +4346,47 @@ def _youtube_publication_overview_row(
     *,
     latest_video_job: dict | None = None,
     latest_shorts_job: dict | None = None,
+    latest_tiktok_job: dict | None = None,
     channel_titles: dict | None = None,
+    tiktok_account_titles: dict | None = None,
     now: datetime | None = None,
 ) -> dict:
     now = now or datetime.now(timezone.utc)
     channel_titles = channel_titles or {}
+    tiktok_account_titles = tiktok_account_titles or {}
     youtube = data.get("youtube") or {}
     project_completed = data.get("status") == "completed"
     if _is_tiktok_project(data):
         tiktok = data.get("tiktok") or {}
+        latest_tiktok_job = latest_tiktok_job or {}
+        job_status = latest_tiktok_job.get("status") or ((tiktok.get("publishing") or {}).get("status") or "")
+        scheduled_at = str(latest_tiktok_job.get("scheduledAt") or "").strip()
+        scheduled_dt = _youtube_datetime(scheduled_at)
+        if not project_completed:
+            publish_status = "not_ready"
+        elif job_status in {"leased", "upload_initialized", "uploading"}:
+            publish_status = "uploading"
+        elif job_status == "queued" and scheduled_dt and scheduled_dt > now:
+            publish_status = "scheduled"
+        elif job_status in {"completed", "inbox_delivered"}:
+            publish_status = "inbox_delivered"
+        elif job_status == "needs_review":
+            publish_status = "needs_review"
+        elif job_status == "failed":
+            publish_status = "error"
+        else:
+            publish_status = "ready"
+        if not project_completed:
+            next_action = {"kind": "wait", "label": "Esperar producción"}
+        elif publish_status in {"ready", "error"}:
+            next_action = {"kind": "publish_tiktok", "label": "Enviar a TikTok"}
+        elif publish_status == "scheduled":
+            next_action = {"kind": "scheduled", "label": "Programado"}
+        elif publish_status in {"inbox_delivered", "needs_review"}:
+            next_action = {"kind": "review_tiktok", "label": "Abrir TikTok"}
+        else:
+            next_action = {"kind": "wait", "label": "Procesando"}
+        account_id = latest_tiktok_job.get("accountId") or ""
         video_status = "ready" if project_completed else "not_ready"
         return {
             "id": project_id,
@@ -3663,32 +4398,32 @@ def _youtube_publication_overview_row(
             "createdAt": _serialize_firestore_value(data.get("createdAt")),
             "updatedAt": _serialize_firestore_value(data.get("updatedAt")),
             "completedAt": _serialize_firestore_value(data.get("productionCompletedAt") or data.get("completedAt")),
-            "channel": {"id": "", "title": "TikTok"},
+            "channel": {"id": account_id, "title": tiktok_account_titles.get(account_id, "TikTok")},
             "video": {
                 "status": video_status,
                 "youtubeVideoId": "",
                 "youtubeStudioUrl": "",
                 "privacyStatus": "",
                 "publishAt": "",
-                "jobId": "",
-                "jobStatus": tiktok.get("status") or "",
+                "jobId": latest_tiktok_job.get("id") or "",
+                "jobStatus": job_status,
                 "warning": "" if project_completed else "Producción pendiente",
                 "error": "",
                 "thumbnailUploaded": None,
             },
             "shorts": {
-                "status": "none",
+                "status": publish_status,
                 "total": 0,
                 "uploaded": 0,
-                "scheduled": 0,
+                "scheduled": 1 if publish_status == "scheduled" else 0,
                 "uploads": [],
-                "jobId": "",
-                "jobStatus": "",
+                "jobId": latest_tiktok_job.get("id") or "",
+                "jobStatus": job_status,
                 "warning": "",
-                "error": "",
+                "error": latest_tiktok_job.get("error") or "",
                 "errors": [],
             },
-            "nextAction": {"kind": "open", "label": "Abrir TikTok"} if project_completed else {"kind": "wait", "label": "Esperar producción"},
+            "nextAction": next_action,
             "tiktok": _serialize_firestore_value(tiktok),
         }
 
@@ -4364,6 +5099,94 @@ def youtube_channels(request: Request):
     return {"configured": True, "channels": [_youtube_public_channel_doc(doc) for doc in docs]}
 
 
+@app.get("/tiktok/config")
+def tiktok_config(request: Request):
+    _require_principal(request, allow_admin=True)
+    return _tiktok_config_status()
+
+
+@app.get("/tiktok/oauth/status")
+def tiktok_oauth_status():
+    status = _tiktok_config_status()
+    return {
+        "configured": status["configured"],
+        "missing": status["missing"],
+        "redirectUri": status.get("redirectUri"),
+        "scopes": status["scopes"],
+    }
+
+
+@app.get("/tiktok/oauth/start")
+def tiktok_oauth_start(request: Request, returnTo: str = "/dashboard"):
+    principal = _require_principal(request)
+    status = _tiktok_config_status()
+    if not status["configured"]:
+        return JSONResponse(status_code=503, content={"error": "tiktok_oauth_not_configured", **status})
+    return {
+        "authorizationUrl": _tiktok_authorization_url(principal["uid"], returnTo),
+        "redirectUri": status["redirectUri"],
+        "scopes": status["scopes"],
+    }
+
+
+@app.get("/tiktok/oauth/callback")
+def tiktok_oauth_callback(code: str = "", state: str = "", error: str = ""):
+    if error:
+        return RedirectResponse(f"{_TIKTOK_WEB_URL}/dashboard?tiktok=denied")
+    payload = _tiktok_verify_state(state)
+    uid = payload["uid"]
+    return_to = _safe_tiktok_return_path(payload.get("returnTo"))
+    tokens = _tiktok_request_tokens(code)
+    access_token = tokens.get("access_token")
+    refresh_token = tokens.get("refresh_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="tiktok oauth did not return access token")
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="tiktok oauth did not return refresh token")
+    account = _tiktok_fetch_user(access_token)
+    open_id = account.get("openId") or tokens.get("open_id")
+    if not open_id:
+        raise HTTPException(status_code=400, detail="tiktok user lookup did not return open_id")
+
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    db = firestore.client()
+    ref = db.collection("users").document(uid).collection("tiktokAccounts").document(open_id)
+    existing = ref.get()
+    ref.set({
+        **account,
+        "openId": open_id,
+        "accessTokenEncrypted": _tiktok_encrypt_token(access_token),
+        "refreshTokenEncrypted": _tiktok_encrypt_token(refresh_token),
+        "accessExpiresAt": datetime.now(timezone.utc) + timedelta(seconds=int(tokens.get("expires_in") or 86400)),
+        "refreshExpiresAt": datetime.now(timezone.utc) + timedelta(seconds=int(tokens.get("refresh_expires_in") or 31536000)),
+        "scopes": list(_TIKTOK_SCOPES),
+        "connectedAt": firestore.SERVER_TIMESTAMP if not existing.exists else (existing.to_dict() or {}).get("connectedAt", firestore.SERVER_TIMESTAMP),
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    }, merge=True)
+
+    separator = "&" if "?" in return_to else "?"
+    return RedirectResponse(f"{_TIKTOK_WEB_URL}{return_to}{separator}tiktok=connected")
+
+
+@app.get("/tiktok/accounts")
+def tiktok_accounts(request: Request):
+    principal = _require_principal(request)
+    status = _tiktok_config_status()
+    if not status["configured"]:
+        return {"configured": False, "accounts": [], "missing": status["missing"], "redirectUri": status.get("redirectUri")}
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    docs = list(
+        firestore.client()
+        .collection("users")
+        .document(principal["uid"])
+        .collection("tiktokAccounts")
+        .stream()
+    )
+    return {"configured": True, "accounts": [_tiktok_public_account_doc(doc) for doc in docs]}
+
+
 @app.get("/youtube/publications")
 def youtube_publications(request: Request, limit: int = 120):
     principal = _require_principal(request)
@@ -4380,6 +5203,12 @@ def youtube_publications(request: Request, limit: int = 120):
         channel["channelId"]: channel.get("title") or ""
         for channel in channels
     }
+    tiktok_account_docs = list(db.collection("users").document(uid).collection("tiktokAccounts").stream())
+    tiktok_accounts = [_tiktok_public_account_doc(doc) for doc in tiktok_account_docs]
+    tiktok_account_titles = {
+        account["accountId"]: account.get("displayName") or "TikTok"
+        for account in tiktok_accounts
+    }
 
     project_docs = list(
         db.collection("projects")
@@ -4394,6 +5223,13 @@ def youtube_publications(request: Request, limit: int = 120):
         .stream()
     )
     latest_jobs = _youtube_latest_jobs_by_project(job_docs)
+    tiktok_job_docs = list(
+        db.collection("tiktokPublishJobs")
+        .where("uid", "==", uid)
+        .limit(500)
+        .stream()
+    )
+    latest_tiktok_jobs = _tiktok_latest_jobs_by_project(tiktok_job_docs)
 
     rows = []
     now = datetime.now(timezone.utc)
@@ -4405,7 +5241,9 @@ def youtube_publications(request: Request, limit: int = 120):
             data,
             latest_video_job=project_jobs.get("video"),
             latest_shorts_job=project_jobs.get("shorts"),
+            latest_tiktok_job=latest_tiktok_jobs.get(doc.id),
             channel_titles=channel_titles,
+            tiktok_account_titles=tiktok_account_titles,
             now=now,
         ))
 
@@ -4435,6 +5273,7 @@ def youtube_publications(request: Request, limit: int = 120):
         "channels": channels,
         "summary": summary,
         "items": rows,
+        "tiktokAccounts": tiktok_accounts,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -4516,6 +5355,123 @@ def youtube_shorts_publish_preview(project_id: str, request: Request):
             "basePublishAt": ((data.get("youtube") or {}).get("lastScheduledPublishAt") or ""),
         },
     }
+
+
+@app.get("/tiktok/publish/preview/{project_id}")
+def tiktok_publish_preview(project_id: str, request: Request):
+    principal = _require_project_access(request, project_id)
+    data = principal.get("project") or {}
+    if not _is_tiktok_project(data):
+        return JSONResponse(status_code=400, content={"error": "project is not a TikTok project"})
+    status = _tiktok_config_status()
+    video_dir = None
+    cover_url = ""
+    try:
+        video_dir = _youtube_project_video_dir(data)
+    except Exception:
+        pass
+    if video_dir:
+        tiktok_delivery = ((data.get("tiktok") or {}).get("delivery") or {})
+        cover_url = tiktok_delivery.get("coverUrl") or ""
+    return {
+        "projectId": project_id,
+        "configured": status["configured"],
+        "missing": status["missing"],
+        "redirectUri": status.get("redirectUri"),
+        "metadata": _tiktok_caption_pack(project_id, data),
+        "video": _tiktok_video_preflight(data),
+        "cover": {
+            "filename": "cover.jpg",
+            "signedUrl": cover_url,
+            "exists": bool(video_dir and _tiktok_cover_file(video_dir)),
+        },
+        "defaults": {
+            "mode": "inbox_upload",
+            "requiresUserReviewInTikTok": True,
+            "isAigc": True,
+            "brandedContent": False,
+            "maxPendingSharesPer24h": 5,
+        },
+    }
+
+
+@app.post("/tiktok/publish/schedule/{project_id}")
+async def tiktok_publish_schedule(project_id: str, request: Request, background_tasks: BackgroundTasks):
+    principal = _require_project_access(request, project_id)
+    status = _tiktok_config_status()
+    if not status["configured"]:
+        return JSONResponse(status_code=503, content={"error": "tiktok_oauth_not_configured", **status})
+    payload = await request.json()
+    account_id = str(payload.get("accountId") or payload.get("account_id") or "").strip()
+    if not account_id:
+        return JSONResponse(status_code=400, content={"error": "select a TikTok account"})
+
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    db = firestore.client()
+    account_ref = db.collection("users").document(principal["uid"]).collection("tiktokAccounts").document(account_id)
+    if not account_ref.get().exists:
+        return JSONResponse(status_code=404, content={"error": "TikTok account not connected"})
+
+    job_payload = _tiktok_build_publish_job_payload(
+        principal["uid"],
+        project_id,
+        principal.get("project") or {},
+        account_id,
+        payload,
+    )
+    job_id, job_data, created = _tiktok_create_or_get_job(db, firestore, job_payload)
+    dispatch = None
+    if created and _tiktok_job_is_due(job_payload):
+        dispatch = _enqueue_tiktok_publish_job(principal["uid"], job_id, background_tasks)
+    return {
+        "jobId": job_id,
+        "status": job_data.get("status") or "queued",
+        "created": created,
+        "idempotencyKey": job_payload["idempotencyKey"],
+        "scheduledAt": job_payload.get("scheduledAt") or "",
+        "metadata": job_payload["metadata"],
+        "dispatch": dispatch,
+    }
+
+
+@app.get("/tiktok/publish/jobs/{job_id}")
+def tiktok_publish_job(job_id: str, request: Request):
+    principal = _require_principal(request, allow_admin=True)
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    snap = firestore.client().collection("tiktokPublishJobs").document(job_id).get()
+    if not snap.exists:
+        return JSONResponse(status_code=404, content={"error": "job not found"})
+    data = snap.to_dict() or {}
+    if not principal.get("admin") and data.get("uid") != principal["uid"]:
+        raise HTTPException(status_code=403, detail="job access denied")
+    return {"id": snap.id, "jobId": snap.id, **_serialize_firestore_value(data)}
+
+
+@app.post("/tiktok/publish/run-due")
+def tiktok_publish_run_due(request: Request, background_tasks: BackgroundTasks, limit: int = 5):
+    principal = _require_principal(request, allow_admin=True, allow_local=True)
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    db = firestore.client()
+    now = datetime.now(timezone.utc)
+    docs = list(
+        db.collection("tiktokPublishJobs")
+        .where("status", "==", "queued")
+        .limit(max(1, min(int(limit or 5), 20)))
+        .stream()
+    )
+    launched = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        if not principal.get("admin") and data.get("uid") != principal.get("uid"):
+            continue
+        if not _tiktok_job_is_due(data, now=now):
+            continue
+        dispatch = _enqueue_tiktok_publish_job(data.get("uid"), doc.id, background_tasks)
+        launched.append({"jobId": doc.id, "dispatch": dispatch})
+    return {"launched": launched, "count": len(launched)}
 
 
 @app.post("/youtube/publish/{project_id}")
@@ -5161,6 +6117,8 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
                 "platform": payload.get("platform") or "youtube",
                 "format": payload.get("format") or "",
                 "tiktok": payload.get("tiktok") or {},
+                "brandProfileId": payload.get("brand_profile_id") or "",
+                "brandProfile": payload.get("brand_profile_snapshot") or {},
                 "personalization": payload.get("personalization") or {},
                 "generationOptions": payload.get("generation_options") or {},
             }
@@ -5255,6 +6213,8 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
                 "output": {},
                 "seo": {},
                 "tiktok": payload.get("tiktok") or {},
+                "brandProfileId": payload.get("brand_profile_id") or "",
+                "brandProfile": payload.get("brand_profile_snapshot") or {},
                 "costs": {"creditCost": 1},
                 "personalization": payload.get("personalization") or {},
                 "generationOptions": payload.get("generation_options") or {},
@@ -5781,6 +6741,15 @@ def run_script(topic, agent_file, project_id, generation_options=None):
                             **generation_options,
                             "personalization": project_data.get("personalization"),
                         }
+                    if (
+                        project_data.get("brandProfileId")
+                        and not generation_options.get("brand_profile_id")
+                    ):
+                        generation_options = {
+                            **generation_options,
+                            "brand_profile_id": project_data.get("brandProfileId"),
+                            "brand_profile_snapshot": project_data.get("brandProfile") or {},
+                        }
             except Exception as options_err:
                 print(f"   ⚠️ generationOptions lookup skipped: {options_err}", flush=True)
         # Import directo — sin subprocess, para que los errores aparezcan en logs
@@ -5987,6 +6956,8 @@ def run_production(project_id):
             "platform": "tiktok" if is_tiktok_project else "youtube",
             "video_scenes": factory_scenes,
             "seo_metadata": project.get("seo_metadata", {"title": title}),
+            "brandProfileId": project.get("brandProfileId") or "",
+            "brandProfile": project.get("brandProfile") or {},
         }
         if is_tiktok_project:
             temp_json["format"] = project_format

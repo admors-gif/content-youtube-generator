@@ -55,12 +55,6 @@ AUTOHYPNOSIS_IMAGE_PROMPT_PREFIX = (
     "composition, slow cinematic calm, non-clinical premium meditation aesthetic."
 )
 
-SEEDREAM_IMAGE_PROMPT_PREFIX = (
-    "Premium cinematic editorial still for a Spanish audio-video production, "
-    "environment-led or object-led composition, refined natural lighting, clean "
-    "blank surfaces, no readable text, no logos, no watermark, no captions."
-)
-
 AUTOHYPNOSIS_MUSIC_DIR = BASE_DIR / "assets" / "audio" / "autohipnosis"
 AUTOHYPNOSIS_DEFAULT_MUSIC_VOLUME_DB = -28.0
 LONG_MEDITATION_FORMAT = "meditacion_larga"
@@ -153,49 +147,41 @@ def _save_image_jobs(images_dir: Path, jobs: dict) -> None:
 def _build_image_prompt(prompt: str, pipeline_format: str = "narrativa", provider: str = "flux") -> str:
     prompt = (prompt or "").strip()
     if pipeline_format in TIKTOK_FORMATS:
-        return f"{SEEDREAM_IMAGE_PROMPT_PREFIX} vertical 9:16 TikTok-native frame, 1080x1920, clean caption-safe composition. {prompt}".strip()
+        return (
+            f"{GENERAL_IMAGE_PROMPT_PREFIX} vertical 9:16 TikTok-native frame, "
+            f"natural proportions, no stretched subjects, clean caption-safe composition. {prompt}"
+        ).strip()
     if pipeline_format == "podcast":
         return f"{PODCAST_IMAGE_PROMPT_PREFIX} {prompt}".strip()
-    if provider == "seedream":
-        return f"{SEEDREAM_IMAGE_PROMPT_PREFIX} {prompt}".strip()
     if pipeline_format in WELLNESS_FORMATS:
         return f"{AUTOHYPNOSIS_IMAGE_PROMPT_PREFIX} {prompt}".strip()
     return f"{GENERAL_IMAGE_PROMPT_PREFIX} {prompt}".strip()
 
 
 def _select_image_workflow(pipeline_format: str) -> dict:
-    """Select the Comfy workflow without changing documentary/narrative output."""
+    """Select the Comfy workflow without changing documentary/narrative output.
+
+    Runtime image generation is intentionally consolidated on FLUX/Krea. API
+    template nodes that require per-request authorization, such as Seedream, are
+    kept out of production routes so a missing Cloud approval cannot stall jobs.
+    """
+    is_tiktok = pipeline_format in TIKTOK_FORMATS
+    width = 768 if is_tiktok else 1344
+    height = 1344 if is_tiktok else 768
     if pipeline_format in TIKTOK_FORMATS:
         return {
-            "provider": "seedream",
-            "label": "Seedream 5 Lite vertical",
-            "workflow": BASE_DIR / "config" / "seedream_5_lite_t2i_api.json",
-            "prompt_node": "25",
-            "prompt_input": "prompt",
-            "seed_node": "25",
+            "provider": "flux",
+            "label": "FLUX/Krea vertical",
+            "workflow": BASE_DIR / "config" / "flux1_krea_dev_api.json",
+            "prompt_node": "200:195",
+            "prompt_input": "text",
+            "seed_node": "200:197",
             "seed_input": "seed",
-            "seed_max": 2147483647,
-            "size_node": "25",
-            "size_preset": "1080x1920 (9:16)",
-            "width": 1080,
-            "height": 1920,
-            "save_node": "26",
-        }
-    if pipeline_format in {"podcast", *WELLNESS_FORMATS}:
-        return {
-            "provider": "seedream",
-            "label": "Seedream 5 Lite",
-            "workflow": BASE_DIR / "config" / "seedream_5_lite_t2i_api.json",
-            "prompt_node": "25",
-            "prompt_input": "prompt",
-            "seed_node": "25",
-            "seed_input": "seed",
-            "seed_max": 2147483647,
-            "size_node": "25",
-            "size_preset": "2560x1440 (16:9)",
-            "width": 2560,
-            "height": 1440,
-            "save_node": "26",
+            "seed_max": 999999999999999,
+            "size_node": "200:196",
+            "width": width,
+            "height": height,
+            "save_node": "9",
         }
     return {
         "provider": "flux",
@@ -207,8 +193,8 @@ def _select_image_workflow(pipeline_format: str) -> dict:
         "seed_input": "seed",
         "seed_max": 999999999999999,
         "size_node": "200:196",
-        "width": 1344,
-        "height": 768,
+        "width": width,
+        "height": height,
         "save_node": "9",
     }
 

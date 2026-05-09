@@ -24,6 +24,7 @@ export default function ProjectHeader({
   onDownloadVideo,
   onDownloadAll,
   onPublishYouTube,
+  onPublishTikTok,
   downloadAllLoading = false,
   platform = "youtube",
 }) {
@@ -168,24 +169,21 @@ export default function ProjectHeader({
               {downloadAllLoading ? "Preparando ZIP" : "Material completo"}
             </button>
             <button
-              onClick={platform === "tiktok" ? undefined : onPublishYouTube}
-              disabled={platform === "tiktok"}
+              onClick={platform === "tiktok" ? onPublishTikTok : onPublishYouTube}
               className="cf-btn cf-btn--ghost"
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 8,
-                opacity: platform === "tiktok" ? 0.65 : 1,
-                cursor: platform === "tiktok" ? "not-allowed" : "pointer",
               }}
               title={
                 platform === "tiktok"
-                  ? "Publicación TikTok vendrá en una fase separada"
+                  ? "Enviar el video al Inbox de TikTok para revisión"
                   : "Revisar metadata y subir como privado o programado"
               }
             >
               <Icon name={platform === "tiktok" ? "zap" : "uploadCloud"} size={16} />{" "}
-              {platform === "tiktok" ? "TikTok listo" : "Publicar en YouTube"}
+              {platform === "tiktok" ? "Enviar a TikTok" : "Publicar en YouTube"}
             </button>
           </div>
         )}

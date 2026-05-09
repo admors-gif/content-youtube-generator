@@ -23,6 +23,8 @@ const STATUS_META = {
   scheduled: { label: "Programado", cls: "cf-badge--starter" },
   uploaded: { label: "Subido", cls: "cf-badge--ok" },
   ready: { label: "Listo", cls: "cf-badge--ok" },
+  inbox_delivered: { label: "Inbox", cls: "cf-badge--ok" },
+  needs_review: { label: "Revisar", cls: "cf-badge--warn" },
   none: { label: "Sin Shorts", cls: "cf-badge--neutral" },
   partial: { label: "Parcial", cls: "cf-badge--warn" },
 };
@@ -56,13 +58,14 @@ function actionHref(item) {
   const kind = item?.nextAction?.kind;
   if (kind === "publish_video") return `/dashboard/project/${item.id}?publish=youtube`;
   if (kind === "publish_shorts") return `/dashboard/project/${item.id}?publish=shorts`;
+  if (kind === "publish_tiktok" || kind === "review_tiktok") return `/dashboard/project/${item.id}?publish=tiktok`;
   return `/dashboard/project/${item.id}`;
 }
 
 function actionIcon(kind) {
-  if (kind === "publish_video" || kind === "publish_shorts") return "uploadCloud";
+  if (kind === "publish_video" || kind === "publish_shorts" || kind === "publish_tiktok") return "uploadCloud";
   if (kind === "complete") return "check";
-  if (kind === "review") return "alert";
+  if (kind === "review" || kind === "review_tiktok") return "alert";
   return "eye";
 }
 
@@ -171,8 +174,8 @@ function PublicationRow({ item, index }) {
           {isTikTok ? "PUBLICACIÓN" : "SHORTS"}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <StatusBadge status={isTikTok ? "ready" : shorts.status} />
-          {isTikTok && <span className="cf-badge cf-badge--neutral">Nativo</span>}
+          <StatusBadge status={shorts.status} />
+          {isTikTok && <span className="cf-badge cf-badge--neutral">Inbox</span>}
           {shorts.total > 0 && (
             <span className="cf-badge cf-badge--neutral">
               {shorts.uploaded}/{shorts.total}
@@ -181,7 +184,7 @@ function PublicationRow({ item, index }) {
         </div>
         {shorts.scheduled > 0 && (
           <div className="cf-caption" style={{ marginTop: 8 }}>
-            {shorts.scheduled} programado{shorts.scheduled === 1 ? "" : "s"}
+            {isTikTok ? "Envío programado" : `${shorts.scheduled} programado${shorts.scheduled === 1 ? "" : "s"}`}
           </div>
         )}
         {(shorts.error || shorts.errors?.length > 0) && (
@@ -217,11 +220,11 @@ function PublicationRow({ item, index }) {
           </a>
         )}
         <Link
-          className={`cf-btn cf-btn--sm ${["publish_video", "publish_shorts"].includes(nextAction.kind) ? "cf-btn--primary" : "cf-btn--secondary"}`}
+          className={`cf-btn cf-btn--sm ${["publish_video", "publish_shorts", "publish_tiktok"].includes(nextAction.kind) ? "cf-btn--primary" : "cf-btn--secondary"}`}
           href={actionHref(item)}
           style={{ textDecoration: "none" }}
         >
-          <Icon name={isTikTok ? "zap" : actionIcon(nextAction.kind)} size={14} />
+          <Icon name={isTikTok && !["publish_tiktok", "review_tiktok"].includes(nextAction.kind) ? "zap" : actionIcon(nextAction.kind)} size={14} />
           {nextAction.label || "Abrir"}
         </Link>
       </div>
@@ -266,9 +269,9 @@ export default function PublicationsPage() {
     return items.filter((item) => {
       if (filter === "needs_video" && !["missing", "error"].includes(item.video?.status)) return false;
       if (filter === "needs_shorts" && !["missing", "partial", "error"].includes(item.shorts?.status)) return false;
-      if (filter === "scheduled" && item.video?.status !== "scheduled" && !(item.shorts?.scheduled > 0)) return false;
+      if (filter === "scheduled" && item.video?.status !== "scheduled" && item.shorts?.status !== "scheduled" && !(item.shorts?.scheduled > 0)) return false;
       if (filter === "complete" && item.nextAction?.kind !== "complete") return false;
-      if (filter === "errors" && item.video?.status !== "error" && item.shorts?.status !== "error") return false;
+      if (filter === "errors" && item.video?.status !== "error" && item.shorts?.status !== "error" && item.shorts?.status !== "needs_review") return false;
       if (!q) return true;
       const haystack = `${item.title || ""} ${item.channel?.title || ""} ${item.format || ""}`.toLowerCase();
       return haystack.includes(q);

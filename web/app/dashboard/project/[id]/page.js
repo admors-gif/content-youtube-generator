@@ -26,6 +26,7 @@ import ScriptTab from "@/components/project/ScriptTab";
 import ScenesTab from "@/components/project/ScenesTab";
 import YouTubePublishModal from "@/components/project/YouTubePublishModal";
 import YouTubeShortsPublishModal from "@/components/project/YouTubeShortsPublishModal";
+import TikTokPublishModal from "@/components/project/TikTokPublishModal";
 import Icon from "@/components/Icon";
 
 /**
@@ -194,6 +195,7 @@ export default function ProjectDetailsPage({ params }) {
   const [downloadAllLoading, setDownloadAllLoading] = useState(false);
   const [publishModalOpen, setPublishModalOpen] = useState(false);
   const [shortsPublishModalOpen, setShortsPublishModalOpen] = useState(false);
+  const [tiktokPublishModalOpen, setTikTokPublishModalOpen] = useState(false);
   const publishIntentHandled = useRef(false);
   const normalizedProgress = useMemo(
     () => normalizeProgressPercent(project),
@@ -322,6 +324,11 @@ export default function ProjectDetailsPage({ params }) {
     if (intent === "shorts") {
       publishIntentHandled.current = true;
       const timer = window.setTimeout(() => setShortsPublishModalOpen(true), 0);
+      return () => window.clearTimeout(timer);
+    }
+    if (intent === "tiktok") {
+      publishIntentHandled.current = true;
+      const timer = window.setTimeout(() => setTikTokPublishModalOpen(true), 0);
       return () => window.clearTimeout(timer);
     }
     return undefined;
@@ -551,6 +558,7 @@ export default function ProjectDetailsPage({ params }) {
         onDownloadVideo={handleDownloadVideo}
         onDownloadAll={handleDownloadAll}
         onPublishYouTube={isTikTok ? null : () => setPublishModalOpen(true)}
+        onPublishTikTok={isTikTok ? () => setTikTokPublishModalOpen(true) : null}
         downloadAllLoading={downloadAllLoading}
         platform={isTikTok ? "tiktok" : "youtube"}
       />
@@ -569,6 +577,15 @@ export default function ProjectDetailsPage({ params }) {
         <YouTubeShortsPublishModal
           open={shortsPublishModalOpen}
           onClose={() => setShortsPublishModalOpen(false)}
+          projectId={id}
+          user={user}
+        />
+      )}
+
+      {isTikTok && (
+        <TikTokPublishModal
+          open={tiktokPublishModalOpen}
+          onClose={() => setTikTokPublishModalOpen(false)}
           projectId={id}
           user={user}
         />

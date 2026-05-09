@@ -62,3 +62,40 @@ def produce_video(self, project_id: str):
         print(f"[WORKER] produce_video FAILED | project_id={project_id} | error={e}", flush=True)
         # Re-raise para que Celery decida retry segun autoretry_for
         raise
+
+
+@celery_app.task(
+    bind=True,
+    name="content_factory.publish_tiktok_inbox",
+    acks_late=False,
+    reject_on_worker_lost=False,
+)
+def publish_tiktok_inbox(self, uid: str, job_id: str):
+    """
+    Envía un TikTok terminado al Inbox de TikTok.
+
+    A diferencia de producción de video, esta tarea NO se re-encola
+    automáticamente si el worker muere: una repetición ciega podría duplicar
+    un inbox share externo. La idempotencia real vive en Firestore y en
+    api_module._run_tiktok_publish_job.
+    """
+    try:
+        import sentry_sdk
+        sentry_sdk.set_tag("tiktok_job_id", job_id)
+        sentry_sdk.set_tag("uid", uid)
+        sentry_sdk.set_tag("celery_task_id", self.request.id)
+        sentry_sdk.set_context(
+            "tiktok_publish_task",
+            {
+                "task_name": self.name,
+                "task_id": self.request.id,
+                "job_id": job_id,
+            },
+        )
+    except Exception:
+        pass
+
+    print(f"[WORKER] publish_tiktok_inbox starting | job_id={job_id} | task_id={self.request.id}", flush=True)
+    api_module._run_tiktok_publish_job(uid, job_id)
+    print(f"[WORKER] publish_tiktok_inbox finished | job_id={job_id}", flush=True)
+    return {"job_id": job_id, "status": "handled"}

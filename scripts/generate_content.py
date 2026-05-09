@@ -27,6 +27,10 @@ import anthropic
 import firebase_admin
 from firebase_admin import credentials, firestore
 from dotenv import load_dotenv
+try:
+    from scripts.brand_profiles import DEFAULT_BRAND_PROFILE_ID, brand_profile_snapshot, get_brand_profile
+except Exception:
+    from brand_profiles import DEFAULT_BRAND_PROFILE_ID, brand_profile_snapshot, get_brand_profile
 
 # Cargar variables de entorno
 load_dotenv()
@@ -1297,6 +1301,28 @@ def _relationship_visual_context(topic: str) -> dict:
     }
 
 
+def _profile_cta_examples(brand_profile: dict | None) -> list[str]:
+    profile = brand_profile if isinstance(brand_profile, dict) else get_brand_profile(DEFAULT_BRAND_PROFILE_ID)
+    ctas = profile.get("ctas") if isinstance(profile.get("ctas"), list) else []
+    return [str(item).strip() for item in ctas if str(item).strip()][:7]
+
+
+def _brand_visual_prompt_block(brand_profile: dict | None, *, aspect_ratio: str) -> str:
+    profile = brand_profile if isinstance(brand_profile, dict) else get_brand_profile(DEFAULT_BRAND_PROFILE_ID)
+    template = str(profile.get("visualTemplate") or "").strip()
+    negative = str(profile.get("negativePrompt") or "").strip()
+    rules = (profile.get("platformRules") or {}).get("tiktok" if aspect_ratio == "9:16" else "youtube") or {}
+    mode = str(rules.get("visualMode") or "").strip()
+    parts = ["Esto No Es Amor visual identity.", template, mode]
+    if aspect_ratio == "9:16":
+        parts.append("Use a vertical 9:16 frame with natural proportions and TikTok-safe negative space.")
+    else:
+        parts.append("Use a horizontal 16:9 thumbnail-friendly frame with space for later text overlay.")
+    if negative:
+        parts.append(f"Negative prompt guidance: {negative}.")
+    return " ".join(part for part in parts if part).strip()
+
+
 def _fallback_tiktok_script(topic: str, tiktok_format: str, profile: dict, source_genre: str) -> dict:
     if tiktok_format == "tiktok_podcast":
         script = (
@@ -1341,6 +1367,7 @@ def _generate_tiktok_script_common(
     duration_profile: str | None = None,
     source_genre: str = "psychology",
     personalization: dict | None = None,
+    brand_profile: dict | None = None,
 ) -> dict:
     tiktok_format = _tiktok_format_from_agent_file(agent_file)
     profile = _tiktok_duration_profile(duration_profile)
@@ -1355,6 +1382,12 @@ def _generate_tiktok_script_common(
         "wordRange": [profile["word_min"], profile["word_max"]],
         "sourceGenre": genre_label,
         "personalization": personalization,
+        "brandProfile": {
+            "id": (brand_profile or {}).get("id") or DEFAULT_BRAND_PROFILE_ID,
+            "name": (brand_profile or {}).get("name") or "Esto No Es Amor",
+            "coreMessage": (brand_profile or {}).get("coreMessage") or "",
+            "ctaBank": _profile_cta_examples(brand_profile),
+        } if tiktok_format == "tiktok_podcast" else {},
     }
     user_prompt = (
         "Crea un guion nativo para TikTok con este contrato.\n"
@@ -1363,7 +1396,8 @@ def _generate_tiktok_script_common(
         "scores debe incluir hookScore, retentionScore, clarityScore y platformFitScore.\n"
         "El guion debe respetar el rango de palabras y no exceder 10 minutos.\n"
         "Para TikTok podcast, el guion debe alternar LUCIA y MATEO con turnos breves, hook inmediato, "
-        "giro emocional antes de la mitad y cierre con comentario/guardado/parte 2.\n\n"
+        "giro emocional antes de la mitad y cierre con comentario/guardado/parte 2. "
+        "El CTA final debe sonar humano y puede usar el banco de CTAs de marca; debe decirlo LUCIA o MATEO como parte natural de la conversación, no como anuncio.\n\n"
         f"CONTRATO:\n{json.dumps(prompt_payload, ensure_ascii=False, indent=2)}"
     )
 
@@ -1432,7 +1466,14 @@ def generate_tiktok_wellness_script(topic: str, agent_file: str, project_id: str
     return _generate_tiktok_script_common(topic, agent_file, project_id, **kwargs)
 
 
-def _build_tiktok_visual_scenes(topic: str, script_text: str, profile: dict, tiktok_format: str, source_genre: str = "psychology") -> list:
+def _build_tiktok_visual_scenes(
+    topic: str,
+    script_text: str,
+    profile: dict,
+    tiktok_format: str,
+    source_genre: str = "psychology",
+    brand_profile: dict | None = None,
+) -> list:
     target_count = profile["visual_max"]
     if tiktok_format == "tiktok_podcast":
         blocks = _parse_podcast_script(script_text)
@@ -1443,11 +1484,7 @@ def _build_tiktok_visual_scenes(topic: str, script_text: str, profile: dict, tik
         )
         segments = grouped or [{"narration": script_text, "narration_text": script_text, "dialogue_blocks": blocks}]
         visual_bank = TIKTOK_RELATIONSHIP_VISUALS
-        identity = (
-            "Esto No Es Amor visual identity: dark emotional noir, cinematic conceptual cover art, "
-            "deep black background, crimson glow, off-white highlights, smoky gray atmosphere, "
-            "elegant minimal composition for people healing from attachment wounds"
-        )
+        identity = _brand_visual_prompt_block(brand_profile, aspect_ratio="9:16")
         relationship_context = _relationship_visual_context(topic)
     elif tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
         segments = [
@@ -2294,6 +2331,11 @@ def run_full_pipeline(
     print(f"🗂️  Proyecto: {project_id}")
     generation_options = generation_options or {}
     personalization_options = generation_options.get("personalization") or {}
+    brand_profile_id = (generation_options.get("brand_profile_id") or generation_options.get("brandProfileId") or "").strip()
+    brand_profile = generation_options.get("brand_profile_snapshot") or generation_options.get("brandProfileSnapshot")
+    if not isinstance(brand_profile, dict) or not brand_profile.get("id"):
+        brand_profile = brand_profile_snapshot(brand_profile_id or DEFAULT_BRAND_PROFILE_ID)
+    brand_profile_id = brand_profile.get("id") or DEFAULT_BRAND_PROFILE_ID
 
     # Validar que al menos un motor de IA esté disponible
     if not claude_client and not openai_client:
@@ -2333,6 +2375,7 @@ def run_full_pipeline(
                     duration_profile=tiktok_profile["id"],
                     source_genre=tiktok_source_genre,
                     personalization=personalization_options,
+                    brand_profile=brand_profile,
                 )
             elif tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
                 result = generate_tiktok_wellness_script(
@@ -2342,6 +2385,7 @@ def run_full_pipeline(
                     duration_profile=tiktok_profile["id"],
                     source_genre=tiktok_source_genre,
                     personalization=personalization_options,
+                    brand_profile=brand_profile,
                 )
             else:
                 result = generate_tiktok_script(
@@ -2351,6 +2395,7 @@ def run_full_pipeline(
                     duration_profile=tiktok_profile["id"],
                     source_genre=tiktok_source_genre,
                     personalization=personalization_options,
+                    brand_profile=brand_profile,
                 )
         elif is_podcast:
             result = generate_podcast_script(topic, agent_file, project_id)
@@ -2410,6 +2455,7 @@ def run_full_pipeline(
                 tiktok_profile,
                 tiktok_format,
                 source_genre=tiktok_source_genre,
+                brand_profile=brand_profile,
             )
             print(f"   ⚡ TikTok visual: {len(video_scenes)} escenas verticales "
                   f"(profile={tiktok_profile['id']}, format={tiktok_format})")
@@ -2472,6 +2518,8 @@ def run_full_pipeline(
             "agent": agent_file,
             "platform": "tiktok" if is_tiktok else "youtube",
             "format": tiktok_format if is_tiktok else "podcast" if is_podcast else LONG_MEDITATION_FORMAT if is_long_meditation else "autohipnosis" if is_autohypnosis else "narrativa",
+            "brandProfileId": brand_profile_id,
+            "brandProfile": brand_profile,
             "script_plain": script,
             "script_tagged": tagged_script,
             "video_scenes": video_scenes,
@@ -2597,6 +2645,8 @@ def run_full_pipeline(
                     estimated_minutes = result["metadata"].get("target_duration_minutes") or estimated_minutes
                 firestore_payload = {
                     "status": "script_ready",
+                    "brandProfileId": brand_profile_id,
+                    "brandProfile": brand_profile,
                     "script.plain": script,
                     "script.tagged": tagged_script,
                     "script.wordCount": words,
