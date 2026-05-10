@@ -4,6 +4,7 @@ from scripts.radar import (
     build_agent_queries,
     build_knowledge_queries,
     build_news_queries,
+    build_title_lab,
     cache_key,
     candidate_hash,
     canonical_title_key,
@@ -125,6 +126,59 @@ def test_knowledge_results_create_internal_signals_without_external_sources():
     assert candidates[0]["seoTitle"]
     assert "apego ansioso" in candidates[0]["seoKeywords"]
     assert "visto" in candidates[0]["title"].lower()
+
+
+def test_title_lab_generates_seed_and_adjacent_titles():
+    lab = build_title_lab(
+        PODCAST_AGENT,
+        seed_topic="contacto cero",
+        knowledge_signals=[],
+        seed_limit=5,
+        adjacent_limit=5,
+    )
+
+    seed_items = lab["groups"][0]["items"]
+    adjacent_items = lab["groups"][1]["items"]
+
+    assert len(seed_items) == 5
+    assert len(adjacent_items) == 5
+    assert all(item["viralScore"] > 0 for item in seed_items)
+    assert any("contacto cero" in item["title"].lower() for item in seed_items)
+    assert any("ex" in item["title"].lower() or "sanando" in item["title"].lower() for item in adjacent_items)
+
+
+def test_title_lab_without_seed_suggests_niche_titles():
+    lab = build_title_lab(PODCAST_AGENT, seed_topic="", seed_limit=5, adjacent_limit=5)
+
+    assert lab["items"]
+    assert lab["seedTopic"] == ""
+    assert any("apego" in item["title"].lower() or "ex" in item["title"].lower() for item in lab["items"])
+
+
+def test_title_lab_adds_trend_and_competitor_groups_without_copying_verbatim():
+    lab = build_title_lab(
+        PODCAST_AGENT,
+        seed_topic="contacto cero",
+        trend_signals=[{"title": "No contact rule mistakes", "url": "https://example.com/trend"}],
+        competitor_signals=[
+            {
+                "videoTitle": "The biggest no contact mistake",
+                "channelTitle": "Competitor",
+                "url": "https://youtube.com/watch?v=x",
+                "views": 120000,
+                "viewsPerDay": 4000,
+            }
+        ],
+        seed_limit=3,
+        adjacent_limit=3,
+    )
+
+    by_group = {group["id"]: group for group in lab["groups"]}
+
+    assert by_group["trend"]["items"]
+    assert by_group["competitor"]["items"]
+    assert all("contacto cero" in item["title"].lower() for item in by_group["competitor"]["items"])
+    assert by_group["competitor"]["items"][0]["inspiredBy"]["channelTitle"] == "Competitor"
 
 
 def test_news_candidate_with_single_source_requires_medium_risk():

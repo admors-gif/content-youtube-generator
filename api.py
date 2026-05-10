@@ -40,6 +40,7 @@ from scripts.radar import (
     build_agent_queries as _radar_build_agent_queries,
     build_knowledge_queries as _radar_build_knowledge_queries,
     build_ranking_prompt as _radar_build_ranking_prompt,
+    build_title_lab as _radar_build_title_lab,
     cache_key as _radar_cache_key,
     canonical_title_key as _radar_canonical_title_key,
     compact_text as _radar_compact_text,
@@ -48,6 +49,7 @@ from scripts.radar import (
     fallback_candidates_for_agent as _radar_fallback_candidates_for_agent,
     knowledge_results_to_candidates as _radar_knowledge_results_to_candidates,
     parse_ranking_response as _radar_parse_ranking_response,
+    title_lab_option as _radar_title_lab_option,
     tavily_results_to_candidates as _radar_tavily_results_to_candidates,
 )
 from scripts.knowledge import (
@@ -3002,6 +3004,302 @@ def _radar_search_knowledge(query: str, *, limit: int = 4) -> dict:
         return {}
 
 
+def _youtube_data_api_key() -> str:
+    return (
+        os.environ.get("YOUTUBE_DATA_API_KEY")
+        or os.environ.get("YOUTUBE_API_KEY")
+        or os.environ.get("GOOGLE_YOUTUBE_API_KEY")
+        or ""
+    ).strip()
+
+
+def _youtube_request(path: str, params: dict) -> dict:
+    api_key = _youtube_data_api_key()
+    if not api_key:
+        raise KnowledgeError("YOUTUBE_DATA_API_KEY no configurado")
+    try:
+        import requests
+        clean_params = {k: v for k, v in (params or {}).items() if v not in {None, ""}}
+        clean_params["key"] = api_key
+        resp = requests.get(
+            f"https://www.googleapis.com/youtube/v3/{path.lstrip('/')}",
+            params=clean_params,
+            timeout=max(4, min(20, _safe_int(os.environ.get("CONTENT_FACTORY_YOUTUBE_TIMEOUT_SECONDS"), 8))),
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        raise KnowledgeError(f"YouTube API no disponible: {str(exc)[:180]}") from exc
+
+
+def _youtube_video_url(video_id: str) -> str:
+    return f"https://www.youtube.com/watch?v={video_id}" if video_id else ""
+
+
+def _youtube_channel_url(channel_id: str) -> str:
+    return f"https://www.youtube.com/channel/{channel_id}" if channel_id else ""
+
+
+def _youtube_channel_id_from_url(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith("UC") and len(text) >= 20 and "/" not in text:
+        return text
+    match = re.search(r"/channel/(UC[a-zA-Z0-9_-]+)", text)
+    if match:
+        return match.group(1)
+    return ""
+
+
+def _radar_competitor_doc_id(uid: str, agent_id: str, channel_id: str) -> str:
+    raw = f"{uid}:{agent_id}:{channel_id}".encode("utf-8")
+    return hashlib.sha1(raw).hexdigest()[:32]
+
+
+def _radar_firestore_competitors(db, uid: str, agent_id: str) -> list[dict]:
+    competitors = []
+    try:
+        for doc in db.collection("radarCompetitors").where("agentId", "==", agent_id).stream():
+            data = doc.to_dict() or {}
+            if data.get("userId") not in {uid, "admin"}:
+                continue
+            if data.get("active") is False:
+                continue
+            competitors.append({"id": doc.id, **data})
+    except Exception:
+        pass
+    return competitors
+
+
+def _radar_env_competitors(agent_id: str) -> list[dict]:
+    raw = os.environ.get("CONTENT_FACTORY_YOUTUBE_COMPETITORS_JSON", "").strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
+    items = data.get(agent_id) if isinstance(data, dict) else []
+    if not isinstance(items, list):
+        return []
+    out = []
+    for item in items:
+        if isinstance(item, str):
+            out.append({"channelId": item, "title": item, "source": "env"})
+        elif isinstance(item, dict) and item.get("channelId"):
+            out.append({**item, "source": item.get("source") or "env"})
+    return out
+
+
+def _radar_competitors_for_agent(db, uid: str, agent_id: str) -> list[dict]:
+    seen = set()
+    out = []
+    for item in _radar_firestore_competitors(db, uid, agent_id) + _radar_env_competitors(agent_id):
+        channel_id = str(item.get("channelId") or "").strip()
+        if not channel_id or channel_id in seen:
+            continue
+        seen.add(channel_id)
+        out.append({
+            "id": item.get("id") or channel_id,
+            "agentId": agent_id,
+            "channelId": channel_id,
+            "title": item.get("title") or item.get("channelTitle") or channel_id,
+            "handle": item.get("handle") or "",
+            "url": item.get("url") or _youtube_channel_url(channel_id),
+            "source": item.get("source") or "manual",
+        })
+    return out
+
+
+def _radar_default_competitor_query(agent: dict, seed_topic: str = "") -> str:
+    seed = _radar_compact_text(seed_topic, 80).strip()
+    agent_id = agent.get("agentId") or ""
+    if agent_id == "agent_podcast_general":
+        base = seed or "apego ansiedad ruptura contacto cero relaciones"
+        return f"{base} podcast relaciones amor propio español"
+    if agent_id == RADAR_NEWS_AGENT_ID:
+        return "noticias virales explicadas mexico latinoamerica"
+    return f"{seed or agent.get('name') or agent.get('category') or 'documental'} canales youtube español"
+
+
+def _radar_title_lab_trend_queries(agent: dict, seed_topic: str = "", *, limit: int = 1) -> list[str]:
+    seed = _radar_compact_text(seed_topic, 90).strip()
+    agent_id = agent.get("agentId") or ""
+    if agent_id == "agent_podcast_general":
+        queries = [
+            f"{seed or 'apego relaciones ruptura'} temas virales relaciones amor propio Mexico Latinoamerica 2026",
+            f"{seed or 'contacto cero ghosting apego ansioso'} preguntas frecuentes redes sociales relaciones",
+        ]
+    elif agent_id == RADAR_NEWS_AGENT_ID:
+        queries = [
+            f"{seed or 'noticias virales hoy'} Mexico Latinoamerica redes sociales",
+        ]
+    else:
+        queries = [
+            f"{seed or agent.get('name') or agent.get('category')} tendencias YouTube español 2026",
+        ]
+    return [query for query in queries if query][:max(1, min(2, _safe_int(limit, 1)))]
+
+
+def _radar_tavily_credit_cost(query_count: int) -> int:
+    search_depth = os.environ.get("CONTENT_FACTORY_RADAR_TAVILY_DEPTH", "basic").strip().lower()
+    unit_cost = 2 if search_depth == "advanced" else 1
+    return max(0, _safe_int(query_count, 0)) * unit_cost
+
+
+def _radar_tavily_title_signals(query: str, result: dict, *, limit: int = 6) -> list[dict]:
+    signals = []
+    for item in (result or {}).get("results") or []:
+        title = _radar_compact_text(item.get("title") or "", 120).strip()
+        if not title:
+            continue
+        url = item.get("url") or ""
+        signals.append({
+            "source": "tavily_trend",
+            "title": title,
+            "topic": title,
+            "url": url,
+            "domain": urllib.parse.urlparse(url).netloc.replace("www.", "") if url else "",
+            "score": item.get("score") or 0,
+            "query": query,
+        })
+        if len(signals) >= limit:
+            break
+    return signals
+
+
+def _youtube_discover_channels(query: str, *, limit: int = 5) -> list[dict]:
+    clean = _radar_compact_text(query, 160).strip()
+    if not clean:
+        return []
+    data = _youtube_request("search", {
+        "part": "snippet",
+        "q": clean,
+        "type": "channel",
+        "maxResults": max(1, min(10, _safe_int(limit, 5))),
+        "relevanceLanguage": "es",
+        "regionCode": "MX",
+        "order": "relevance",
+    })
+    channels = []
+    for item in data.get("items") or []:
+        channel_id = ((item.get("id") or {}).get("channelId") or "").strip()
+        snippet = item.get("snippet") or {}
+        if not channel_id:
+            continue
+        channels.append({
+            "channelId": channel_id,
+            "title": snippet.get("channelTitle") or snippet.get("title") or channel_id,
+            "description": snippet.get("description") or "",
+            "thumbnail": (((snippet.get("thumbnails") or {}).get("default") or {}).get("url") or ""),
+            "url": _youtube_channel_url(channel_id),
+            "source": "youtube_search",
+        })
+    return channels
+
+
+def _youtube_competitor_video_signals(competitors: list[dict], *, per_channel_limit: int = 8) -> tuple[list[dict], dict]:
+    api_key = _youtube_data_api_key()
+    if not api_key or not competitors:
+        return [], {"youtubeQuotaUnits": 0, "channels": len(competitors)}
+    channel_ids = [item.get("channelId") for item in competitors if item.get("channelId")][:25]
+    if not channel_ids:
+        return [], {"youtubeQuotaUnits": 0, "channels": 0}
+
+    quota_units = 0
+    channels_data = _youtube_request("channels", {
+        "part": "snippet,contentDetails,statistics",
+        "id": ",".join(channel_ids),
+        "maxResults": len(channel_ids),
+    })
+    quota_units += 1
+
+    uploads = []
+    channel_by_id = {}
+    for item in channels_data.get("items") or []:
+        channel_id = item.get("id") or ""
+        snippet = item.get("snippet") or {}
+        channel_by_id[channel_id] = {
+            "channelId": channel_id,
+            "channelTitle": snippet.get("title") or channel_id,
+            "subscriberCount": _safe_int((item.get("statistics") or {}).get("subscriberCount"), 0),
+        }
+        playlist_id = (((item.get("contentDetails") or {}).get("relatedPlaylists") or {}).get("uploads") or "")
+        if playlist_id:
+            uploads.append((channel_id, playlist_id))
+
+    video_refs = []
+    per_channel_limit = max(1, min(15, _safe_int(per_channel_limit, 8)))
+    for channel_id, playlist_id in uploads:
+        try:
+            data = _youtube_request("playlistItems", {
+                "part": "snippet,contentDetails",
+                "playlistId": playlist_id,
+                "maxResults": per_channel_limit,
+            })
+            quota_units += 1
+        except Exception:
+            continue
+        for item in data.get("items") or []:
+            video_id = ((item.get("contentDetails") or {}).get("videoId") or "").strip()
+            snippet = item.get("snippet") or {}
+            if video_id:
+                video_refs.append({
+                    "videoId": video_id,
+                    "channelId": channel_id,
+                    "title": snippet.get("title") or "",
+                    "publishedAt": snippet.get("publishedAt") or "",
+                })
+
+    signals = []
+    for start in range(0, len(video_refs), 50):
+        batch = video_refs[start:start + 50]
+        if not batch:
+            continue
+        data = _youtube_request("videos", {
+            "part": "snippet,statistics",
+            "id": ",".join(item["videoId"] for item in batch),
+            "maxResults": len(batch),
+        })
+        quota_units += 1
+        ref_by_id = {item["videoId"]: item for item in batch}
+        for item in data.get("items") or []:
+            video_id = item.get("id") or ""
+            ref = ref_by_id.get(video_id) or {}
+            snippet = item.get("snippet") or {}
+            stats = item.get("statistics") or {}
+            channel_id = snippet.get("channelId") or ref.get("channelId") or ""
+            published_at = snippet.get("publishedAt") or ref.get("publishedAt") or ""
+            views = _safe_int(stats.get("viewCount"), 0)
+            views_per_day = _youtube_views_per_day(views, published_at)
+            signals.append({
+                "source": "youtube_competitor",
+                "videoId": video_id,
+                "title": snippet.get("title") or ref.get("title") or "",
+                "videoTitle": snippet.get("title") or ref.get("title") or "",
+                "channelId": channel_id,
+                "channelTitle": (channel_by_id.get(channel_id) or {}).get("channelTitle") or snippet.get("channelTitle") or channel_id,
+                "views": views,
+                "viewsPerDay": views_per_day,
+                "publishedAt": published_at,
+                "url": _youtube_video_url(video_id),
+            })
+    signals.sort(key=lambda item: (item.get("viewsPerDay") or 0, item.get("views") or 0), reverse=True)
+    return signals[:25], {"youtubeQuotaUnits": quota_units, "channels": len(channel_ids), "videosAnalyzed": len(video_refs)}
+
+
+def _youtube_views_per_day(views: int, published_at: str) -> int:
+    try:
+        dt = datetime.fromisoformat(str(published_at).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        days = max(1, (datetime.now(timezone.utc) - dt).total_seconds() / 86400)
+        return int(round(views / days))
+    except Exception:
+        return 0
+
+
 def _radar_cost_estimate_for_agents(agents: list[dict], params: dict) -> dict:
     knowledge_query_limit = max(
         0,
@@ -3321,6 +3619,67 @@ def _radar_project_payload_from_candidate(candidate: dict) -> dict:
     if agent_id == "agent_meditacion_larga":
         payload.setdefault("durationProfile", "60m")
     return payload
+
+
+def _radar_candidate_from_title_lab_option(agent: dict, option: dict, *, seed_topic: str = "") -> dict:
+    title = _radar_compact_text(option.get("title") or option.get("seoTitle") or seed_topic, 180)
+    group = str(option.get("group") or "seed").strip() or "seed"
+    safe_option = _radar_title_lab_option(
+        agent,
+        title,
+        seed_topic=seed_topic,
+        group=group,
+        rank=_safe_int(option.get("rank"), 1),
+        knowledge_signals=option.get("knowledgeSignals") or [],
+    )
+    scores = safe_option.get("scores") or {}
+    return {
+        "candidateHash": safe_option["candidateHash"],
+        "agentId": agent.get("agentId"),
+        "agentName": agent.get("name"),
+        "agentFile": agent.get("promptFile") or f"{agent.get('agentId')}.md",
+        "platform": agent.get("platform") or "youtube",
+        "format": agent.get("format") or "",
+        "category": agent.get("category") or "",
+        "intent": "viral_topics",
+        "radarIntent": "viral_topics",
+        "title": safe_option["title"],
+        "headline": safe_option["title"],
+        "summary": safe_option.get("angle") or safe_option.get("hook") or "",
+        "angle": safe_option["title"],
+        "whyNow": f"Titulo generado en Laboratorio de titulos para el tema: {seed_topic or safe_option['title']}.",
+        "sources": [],
+        "recommendedFormat": safe_option.get("recommendedFormat") or "youtube_long",
+        "riskLevel": safe_option.get("riskLevel") or "low",
+        "riskReason": safe_option.get("riskReason") or "",
+        "sourceQuery": seed_topic or "title-lab",
+        "sourceType": "title_lab",
+        "seoTitle": safe_option.get("seoTitle") or safe_option["title"],
+        "seoKeywords": safe_option.get("seoKeywords") or [],
+        "searchIntent": "laboratorio de titulos",
+        "knowledgeSignals": safe_option.get("knowledgeSignals") or [],
+        "scores": {
+            "audience": scores.get("viral") or 0,
+            "fit": scores.get("fit") or 0,
+            "storyArc": scores.get("clickbait") or 0,
+            "freshness": 55,
+            "productionEase": 80,
+            "risk": scores.get("risk") or 90,
+            "overall": scores.get("overall") or 0,
+            "viral": scores.get("viral") or 0,
+            "seo": scores.get("seo") or 0,
+            "clickbait": scores.get("clickbait") or 0,
+        },
+        "editorialScore": scores.get("overall") or 0,
+        "titleLab": {
+            "seedTopic": seed_topic,
+            "group": group,
+            "viralScore": scores.get("viral") or 0,
+            "seoScore": scores.get("seo") or 0,
+            "clickbaitScore": scores.get("clickbait") or 0,
+            "fitScore": scores.get("fit") or 0,
+        },
+    }
 
 
 def _library_public_item(doc_id: str, data: dict) -> dict:
@@ -4276,6 +4635,221 @@ def radar_latest(
         }
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": str(exc)[:200], "items": []})
+
+
+@app.post("/radar/title-lab")
+async def radar_title_lab(request: Request):
+    principal = _radar_require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    agent_id = str((body or {}).get("agentId") or "agent_podcast_general").strip()
+    agent = _radar_agent_by_id(agent_id)
+    if not agent:
+        raise HTTPException(status_code=400, detail="invalid radar agentId")
+    seed_topic = _radar_compact_text((body or {}).get("seedTopic") or (body or {}).get("topic") or "", 140).strip()
+    seed_limit = max(3, min(16, _safe_int((body or {}).get("seedLimit"), 10)))
+    adjacent_limit = max(3, min(10, _safe_int((body or {}).get("adjacentLimit"), 5)))
+    use_trends = bool((body or {}).get("useTrends") or (body or {}).get("useTavily"))
+    use_competitors = bool((body or {}).get("useCompetitors"))
+    knowledge_signals = []
+    knowledge_queries = []
+    trend_signals = []
+    trend_queries = []
+    competitor_signals = []
+    competitor_meta = {"youtubeQuotaUnits": 0, "channels": 0, "videosAnalyzed": 0}
+    warnings = []
+    if _radar_knowledge_enabled():
+        base_query = seed_topic or f"{agent.get('name')} {agent.get('description')} ideas virales"
+        knowledge_queries = [
+            f"{base_query} {agent.get('name')} {agent.get('category')} titulos virales SEO hooks",
+        ]
+        if seed_topic:
+            knowledge_queries.append(f"{seed_topic} dolor audiencia preguntas frecuentes {agent.get('name')}")
+        for query in knowledge_queries[:2]:
+            result = _radar_search_knowledge(query, limit=5)
+            knowledge_signals.extend(result.get("items") or [])
+    if use_trends:
+        trend_queries = _radar_title_lab_trend_queries(agent, seed_topic, limit=_safe_int((body or {}).get("trendQueryLimit"), 1))
+        for query in trend_queries:
+            result = _radar_search_tavily(query)
+            if result:
+                trend_signals.extend(_radar_tavily_title_signals(query, result, limit=6))
+        if not trend_signals:
+            warnings.append("Tavily no devolvio tendencias utiles o no esta configurado.")
+    if use_competitors:
+        try:
+            _ensure_firebase_initialized()
+            from firebase_admin import firestore
+            db = firestore.client()
+            competitors = _radar_competitors_for_agent(db, principal["uid"], agent_id)
+            competitor_signals, competitor_meta = _youtube_competitor_video_signals(
+                competitors,
+                per_channel_limit=_safe_int((body or {}).get("perChannelLimit"), 8),
+            )
+            if not competitors:
+                warnings.append("No hay competidores guardados para este agente.")
+            elif not competitor_signals:
+                warnings.append("No se pudieron leer videos recientes de competidores.")
+        except Exception as exc:
+            warnings.append(f"YouTube competidores no disponible: {str(exc)[:160]}")
+    lab = _radar_build_title_lab(
+        agent,
+        seed_topic=seed_topic,
+        knowledge_signals=knowledge_signals,
+        trend_signals=trend_signals,
+        competitor_signals=competitor_signals,
+        seed_limit=seed_limit,
+        adjacent_limit=adjacent_limit,
+    )
+    lab["costEstimate"] = {
+        "tavilyCredits": _radar_tavily_credit_cost(len(trend_queries)),
+        "tavilyQueries": len(trend_queries),
+        "knowledgeQueries": len(knowledge_queries),
+        "embeddingQueries": len(knowledge_queries),
+        "youtubeQuotaUnits": competitor_meta.get("youtubeQuotaUnits") or 0,
+        "youtubeChannels": competitor_meta.get("channels") or 0,
+        "youtubeVideosAnalyzed": competitor_meta.get("videosAnalyzed") or 0,
+        "notes": ["El laboratorio no crea proyecto ni consume creditos de produccion."],
+    }
+    lab["warnings"] = warnings
+    return {"ok": True, **lab}
+
+
+@app.get("/radar/competitors")
+async def radar_competitors(request: Request, agentId: str = "agent_podcast_general"):
+    principal = _radar_require_admin(request)
+    agent_id = str(agentId or "agent_podcast_general").strip()
+    if not _radar_agent_by_id(agent_id):
+        raise HTTPException(status_code=400, detail="invalid radar agentId")
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        competitors = _radar_competitors_for_agent(db, principal["uid"], agent_id)
+        return {
+            "ok": True,
+            "agentId": agent_id,
+            "items": [_serialize_firestore_value(item) for item in competitors],
+            "count": len(competitors),
+            "youtubeConfigured": bool(_youtube_data_api_key()),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200], "items": []})
+
+
+@app.post("/radar/competitors/discover")
+async def radar_competitors_discover(request: Request):
+    _radar_require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    agent_id = str((body or {}).get("agentId") or "agent_podcast_general").strip()
+    agent = _radar_agent_by_id(agent_id)
+    if not agent:
+        raise HTTPException(status_code=400, detail="invalid radar agentId")
+    query = _radar_compact_text((body or {}).get("query") or _radar_default_competitor_query(agent, (body or {}).get("seedTopic") or ""), 160)
+    limit = max(1, min(10, _safe_int((body or {}).get("limit"), 5)))
+    if not _youtube_data_api_key():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "YOUTUBE_DATA_API_KEY no configurado",
+                "items": [],
+                "costEstimate": {"youtubeQuotaUnits": 100, "operation": "search.list"},
+            },
+        )
+    try:
+        items = _youtube_discover_channels(query, limit=limit)
+        return {
+            "ok": True,
+            "agentId": agent_id,
+            "query": query,
+            "items": items,
+            "count": len(items),
+            "costEstimate": {"youtubeQuotaUnits": 100, "operation": "search.list"},
+        }
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200], "items": []})
+
+
+@app.post("/radar/competitors/save")
+async def radar_competitors_save(request: Request):
+    principal = _radar_require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    agent_id = str((body or {}).get("agentId") or "agent_podcast_general").strip()
+    if not _radar_agent_by_id(agent_id):
+        raise HTTPException(status_code=400, detail="invalid radar agentId")
+    channel_id = (
+        str((body or {}).get("channelId") or "").strip()
+        or _youtube_channel_id_from_url((body or {}).get("url") or "")
+    )
+    if not channel_id:
+        raise HTTPException(status_code=400, detail="channelId required")
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        doc_id = _radar_competitor_doc_id(principal["uid"], agent_id, channel_id)
+        ref = db.collection("radarCompetitors").document(doc_id)
+        payload = {
+            "userId": principal["uid"],
+            "agentId": agent_id,
+            "channelId": channel_id,
+            "title": _radar_compact_text((body or {}).get("title") or (body or {}).get("channelTitle") or channel_id, 160),
+            "description": _radar_compact_text((body or {}).get("description") or "", 500),
+            "thumbnail": (body or {}).get("thumbnail") or "",
+            "url": (body or {}).get("url") or _youtube_channel_url(channel_id),
+            "source": (body or {}).get("source") or "manual",
+            "active": True,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+        if not ref.get().exists:
+            payload["createdAt"] = firestore.SERVER_TIMESTAMP
+        ref.set(payload, merge=True)
+        return {
+            "ok": True,
+            "item": _serialize_firestore_value({"id": doc_id, **payload}),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200]})
+
+
+@app.post("/radar/title-lab/save")
+async def radar_title_lab_save(request: Request):
+    principal = _radar_require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    agent_id = str((body or {}).get("agentId") or "agent_podcast_general").strip()
+    agent = _radar_agent_by_id(agent_id)
+    if not agent:
+        raise HTTPException(status_code=400, detail="invalid radar agentId")
+    title = _radar_compact_text((body or {}).get("title") or "", 180).strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title required")
+    seed_topic = _radar_compact_text((body or {}).get("seedTopic") or "", 140).strip()
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        candidate = _radar_candidate_from_title_lab_option(agent, {**body, "title": title}, seed_topic=seed_topic)
+        item = _radar_upsert_library_candidate(db, firestore, principal["uid"], candidate, status="saved")
+        return {"ok": True, "item": _library_public_item(item["itemId"], item), "candidateHash": candidate["candidateHash"]}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200]})
 
 
 @app.post("/radar/candidates/{candidate_hash}/save")

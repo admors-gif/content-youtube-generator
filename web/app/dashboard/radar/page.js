@@ -476,6 +476,58 @@ function DetailPanel({ item }) {
   );
 }
 
+function TitleLabOptionCard({ item, saving, copied, onCopy, onSave, onPrepare }) {
+  return (
+    <article className="cf-card" style={{ padding: "var(--s-4)", borderRadius: "var(--r-2)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+            <span className="cf-badge cf-badge--creator">Viral {Number(item.viralScore || 0)}</span>
+            <span className="cf-badge cf-badge--neutral">SEO {Number(item.seoScore || 0)}</span>
+            <span className="cf-badge cf-badge--neutral">Hook {Number(item.clickbaitScore || 0)}</span>
+            <span className="cf-badge cf-badge--neutral">Fit {Number(item.fitScore || 0)}</span>
+          </div>
+          <h3 className="cf-h3" style={{ margin: "0 0 10px", lineHeight: 1.18 }}>
+            {item.seoTitle || item.title}
+          </h3>
+          <p className="cf-body" style={{ margin: 0, lineHeight: 1.45 }}>
+            {item.hook}
+          </p>
+          {item.seoKeywords?.length > 0 && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+              {item.seoKeywords.slice(0, 6).map((keyword) => (
+                <span key={keyword} className="cf-badge cf-badge--neutral">
+                  {keyword}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        <div style={{ minWidth: 68, textAlign: "right" }}>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 34, lineHeight: 1, fontWeight: 800, color: "var(--ok)" }}>
+            {Number(item.overallScore || 0)}
+          </div>
+          <div className="cf-caption">total</div>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+        <button className="cf-btn cf-btn--ghost cf-btn--sm" type="button" onClick={onCopy}>
+          <Icon name="copy" size={14} />
+          {copied ? "Copiado" : "Copiar"}
+        </button>
+        <button className="cf-btn cf-btn--secondary cf-btn--sm" type="button" onClick={onSave} disabled={saving}>
+          <Icon name="bookOpen" size={14} />
+          {saving ? "Guardando" : "Guardar"}
+        </button>
+        <button className="cf-btn cf-btn--primary cf-btn--sm" type="button" onClick={onPrepare}>
+          <Icon name="arrowRight" size={14} />
+          Preparar
+        </button>
+      </div>
+    </article>
+  );
+}
+
 export default function RadarPage() {
   const router = useRouter();
   const { user, profile, loading: authLoading } = useAuth();
@@ -491,6 +543,22 @@ export default function RadarPage() {
     limit: 5,
     queryLimit: 2,
   });
+  const [titleLabAgentId, setTitleLabAgentId] = useState(DEFAULT_AGENT_ID);
+  const [titleLabTopic, setTitleLabTopic] = useState("");
+  const [titleLabResult, setTitleLabResult] = useState(null);
+  const [titleLabLoading, setTitleLabLoading] = useState(false);
+  const [titleLabError, setTitleLabError] = useState("");
+  const [titleLabNotice, setTitleLabNotice] = useState("");
+  const [titleLabSavingId, setTitleLabSavingId] = useState("");
+  const [titleLabCopiedId, setTitleLabCopiedId] = useState("");
+  const [titleLabUseTrends, setTitleLabUseTrends] = useState(false);
+  const [titleLabUseCompetitors, setTitleLabUseCompetitors] = useState(false);
+  const [competitors, setCompetitors] = useState([]);
+  const [competitorsLoading, setCompetitorsLoading] = useState(false);
+  const [competitorQuery, setCompetitorQuery] = useState("");
+  const [competitorResults, setCompetitorResults] = useState([]);
+  const [competitorError, setCompetitorError] = useState("");
+  const [competitorSavingId, setCompetitorSavingId] = useState("");
   const [query, setQuery] = useState("");
   const [run, setRun] = useState(null);
   const [selectedHash, setSelectedHash] = useState("");
@@ -539,6 +607,30 @@ export default function RadarPage() {
     admin,
     filters,
   ]);
+
+  useEffect(() => {
+    if (authLoading || !user || !admin || !RADAR_ENABLED) return;
+    const controller = new AbortController();
+    const loadCompetitors = async () => {
+      setCompetitorsLoading(true);
+      setCompetitorError("");
+      try {
+        const params = new URLSearchParams({ agentId: titleLabAgentId });
+        const res = await authedFetch(user, `${getApiBase()}/radar/competitors?${params.toString()}`, {
+          signal: controller.signal,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || data.error || "No se pudieron leer competidores.");
+        setCompetitors(data.items || []);
+      } catch (err) {
+        if (err.name !== "AbortError") setCompetitorError(err.message);
+      } finally {
+        setCompetitorsLoading(false);
+      }
+    };
+    loadCompetitors();
+    return () => controller.abort();
+  }, [authLoading, user, admin, titleLabAgentId]);
 
   const visibleItems = useMemo(() => {
     const text = query.trim().toLowerCase();
@@ -597,6 +689,122 @@ export default function RadarPage() {
     () => run?.costEstimate || estimateRadarCost(filters),
     [run?.costEstimate, filters],
   );
+
+  const runTitleLab = async () => {
+    setTitleLabLoading(true);
+    setTitleLabError("");
+    setTitleLabNotice("");
+    try {
+      const res = await authedFetch(user, `${getApiBase()}/radar/title-lab`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: titleLabAgentId,
+          seedTopic: titleLabTopic,
+          seedLimit: 10,
+          adjacentLimit: 5,
+          useTrends: titleLabUseTrends,
+          useCompetitors: titleLabUseCompetitors,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.error || "No se pudo generar el laboratorio.");
+      setTitleLabResult(data);
+      setTitleLabNotice(titleLabTopic.trim() ? "Titulos generados para tu idea." : "Titulos sugeridos para el nicho.");
+    } catch (err) {
+      setTitleLabError(err.message);
+    } finally {
+      setTitleLabLoading(false);
+    }
+  };
+
+  const discoverCompetitors = async () => {
+    setCompetitorsLoading(true);
+    setCompetitorError("");
+    setCompetitorResults([]);
+    try {
+      const res = await authedFetch(user, `${getApiBase()}/radar/competitors/discover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: titleLabAgentId,
+          query: competitorQuery,
+          seedTopic: titleLabTopic,
+          limit: 5,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.error || "No se pudieron descubrir competidores.");
+      setCompetitorResults(data.items || []);
+      setTitleLabNotice(`Busqueda YouTube lista: ${data.items?.length || 0} canal(es).`);
+    } catch (err) {
+      setCompetitorError(err.message);
+    } finally {
+      setCompetitorsLoading(false);
+    }
+  };
+
+  const saveCompetitor = async (item) => {
+    setCompetitorSavingId(item.channelId);
+    setCompetitorError("");
+    try {
+      const res = await authedFetch(user, `${getApiBase()}/radar/competitors/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...item,
+          agentId: titleLabAgentId,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.error || "No se pudo guardar el competidor.");
+      setCompetitors((current) => {
+        const next = data.item || item;
+        const id = next.channelId || item.channelId;
+        const filtered = current.filter((entry) => entry.channelId !== id);
+        return [next, ...filtered];
+      });
+      setTitleLabNotice("Competidor guardado para este agente.");
+    } catch (err) {
+      setCompetitorError(err.message);
+    } finally {
+      setCompetitorSavingId("");
+    }
+  };
+
+  const copyTitleLabOption = async (item) => {
+    try {
+      await navigator.clipboard.writeText(item.seoTitle || item.title);
+      setTitleLabCopiedId(item.optionId);
+      window.setTimeout(() => setTitleLabCopiedId(""), 1600);
+    } catch {
+      setTitleLabError("No se pudo copiar el titulo.");
+    }
+  };
+
+  const saveTitleLabOption = async (item) => {
+    setTitleLabSavingId(item.optionId);
+    setTitleLabError("");
+    setTitleLabNotice("");
+    try {
+      const res = await authedFetch(user, `${getApiBase()}/radar/title-lab/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...item,
+          agentId: titleLabAgentId,
+          seedTopic: titleLabResult?.seedTopic || titleLabTopic,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.error || "No se pudo guardar el titulo.");
+      setTitleLabNotice("Titulo guardado en Biblioteca por agente.");
+    } catch (err) {
+      setTitleLabError(err.message);
+    } finally {
+      setTitleLabSavingId("");
+    }
+  };
 
   const updateCandidate = (hash, patch) => {
     setRun((current) => {
@@ -714,6 +922,214 @@ export default function RadarPage() {
           </div>
         </div>
       </header>
+
+      <section className="cf-card cf-fade cf-fade--1" style={{ padding: "var(--s-5)", marginBottom: "var(--s-5)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 16 }}>
+          <div>
+            <div className="cf-eyebrow" style={{ color: "var(--ember)", marginBottom: 8 }}>
+              LABORATORIO DE TITULOS
+            </div>
+            <h2 className="cf-h2" style={{ margin: 0 }}>Convierte una idea en titulos virales</h2>
+            <p className="cf-body" style={{ margin: "10px 0 0", maxWidth: 760 }}>
+              Escribe una semilla como contacto cero o deja el campo vacio para recibir ideas independientes del nicho.
+            </p>
+          </div>
+          <button className="cf-btn cf-btn--primary" onClick={runTitleLab} disabled={titleLabLoading} type="button">
+            <Icon name="sparkles" size={16} />
+            {titleLabLoading ? "Generando" : "Generar titulos"}
+          </button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: 12 }}>
+          <label>
+            <div className="cf-mono-sm" style={{ marginBottom: 8 }}>Nicho / agente</div>
+            <select
+              className="cf-input"
+              value={titleLabAgentId}
+              onChange={(event) => setTitleLabAgentId(event.target.value)}
+            >
+              {SYSTEM_AGENTS.map((agent) => (
+                <option key={agent.agentId} value={agent.agentId}>{agent.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <div className="cf-mono-sm" style={{ marginBottom: 8 }}>Idea semilla opcional</div>
+            <input
+              className="cf-input"
+              value={titleLabTopic}
+              placeholder="Ej: contacto cero, ghosting, apego ansioso"
+              onChange={(event) => setTitleLabTopic(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") runTitleLab();
+              }}
+            />
+          </label>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: 12, marginTop: 14 }}>
+          <label className="cf-card" style={{ padding: "var(--s-4)", borderRadius: "var(--r-2)", display: "flex", gap: 12, alignItems: "flex-start" }}>
+            <input
+              type="checkbox"
+              checked={titleLabUseTrends}
+              onChange={(event) => setTitleLabUseTrends(event.target.checked)}
+              style={{ marginTop: 5 }}
+            />
+            <span>
+              <span className="cf-mono-sm" style={{ display: "block", color: "var(--paper)" }}>Tendencias Tavily</span>
+              <span className="cf-caption">Agrega senales web actuales. Normalmente 1 credito Tavily.</span>
+            </span>
+          </label>
+          <label className="cf-card" style={{ padding: "var(--s-4)", borderRadius: "var(--r-2)", display: "flex", gap: 12, alignItems: "flex-start" }}>
+            <input
+              type="checkbox"
+              checked={titleLabUseCompetitors}
+              onChange={(event) => setTitleLabUseCompetitors(event.target.checked)}
+              style={{ marginTop: 5 }}
+            />
+            <span>
+              <span className="cf-mono-sm" style={{ display: "block", color: "var(--paper)" }}>Competidores YouTube</span>
+              <span className="cf-caption">Usa canales guardados por agente. Mucho mas barato que descubrir de cero.</span>
+            </span>
+          </label>
+        </div>
+
+        <div className="cf-card" style={{ padding: "var(--s-4)", borderRadius: "var(--r-2)", marginTop: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div>
+              <div className="cf-mono-sm" style={{ marginBottom: 6 }}>Competidores curados</div>
+              <div className="cf-caption">
+                {competitors.length} guardado(s). Descubrir canales usa YouTube search.list: aprox. 100 unidades por busqueda.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <input
+                className="cf-input"
+                value={competitorQuery}
+                placeholder="Ej: contacto cero relaciones podcast"
+                onChange={(event) => setCompetitorQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") discoverCompetitors();
+                }}
+                style={{ minWidth: 280 }}
+              />
+              <button className="cf-btn cf-btn--secondary cf-btn--sm" type="button" onClick={discoverCompetitors} disabled={competitorsLoading}>
+                <Icon name="search" size={14} />
+                {competitorsLoading ? "Buscando" : "Descubrir"}
+              </button>
+            </div>
+          </div>
+
+          {competitors.length > 0 && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+              {competitors.slice(0, 8).map((item) => (
+                <a
+                  key={item.channelId}
+                  className="cf-badge cf-badge--neutral"
+                  href={item.url || "#"}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ textDecoration: "none" }}
+                >
+                  <Icon name="externalLink" size={12} />
+                  {item.title || item.channelId}
+                </a>
+              ))}
+            </div>
+          )}
+
+          {(competitorError || competitorResults.length > 0) && (
+            <div style={{ marginTop: 12 }}>
+              {competitorError && (
+                <div className="cf-caption" style={{ color: "var(--bad)", marginBottom: 10 }}>
+                  {competitorError}
+                </div>
+              )}
+              {competitorResults.length > 0 && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: 10 }}>
+                  {competitorResults.map((item) => {
+                    const alreadySaved = competitors.some((entry) => entry.channelId === item.channelId);
+                    return (
+                      <div key={item.channelId} className="cf-card" style={{ padding: 12, borderRadius: "var(--r-2)" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ color: "var(--paper)", fontWeight: 700, lineHeight: 1.25 }}>{item.title}</div>
+                            <p className="cf-caption" style={{ margin: "6px 0 0", lineHeight: 1.35 }}>
+                              {item.description || item.channelId}
+                            </p>
+                          </div>
+                          <button
+                            className="cf-btn cf-btn--ghost cf-btn--sm"
+                            type="button"
+                            onClick={() => saveCompetitor(item)}
+                            disabled={alreadySaved || competitorSavingId === item.channelId}
+                          >
+                            <Icon name={alreadySaved ? "check" : "plus"} size={14} />
+                            {alreadySaved ? "Guardado" : "Guardar"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {(titleLabError || titleLabNotice) && (
+          <div
+            className="cf-card"
+            style={{
+              padding: "var(--s-4)",
+              marginTop: 14,
+              borderColor: titleLabError ? "var(--bad)" : "var(--ok)",
+              color: titleLabError ? "var(--bad)" : "var(--ok)",
+            }}
+          >
+            {titleLabError || titleLabNotice}
+          </div>
+        )}
+
+        {titleLabResult?.groups?.length > 0 && (
+          <div style={{ display: "grid", gap: "var(--s-5)", marginTop: "var(--s-5)" }}>
+            {titleLabResult.warnings?.length > 0 && (
+              <div className="cf-card" style={{ padding: "var(--s-4)", borderColor: "var(--warn)", color: "var(--warn)" }}>
+                {titleLabResult.warnings.join(" ")}
+              </div>
+            )}
+            {titleLabResult.groups.map((group) => (
+              <div key={group.id}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12 }}>
+                  <div>
+                    <div className="cf-h4">{group.label}</div>
+                    <div className="cf-caption">{group.items.length} opcion(es)</div>
+                  </div>
+                  {group.id === "adjacent" && (
+                    <span className="cf-badge cf-badge--neutral">extra para explorar</span>
+                  )}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 12 }}>
+                  {group.items.map((item) => (
+                    <TitleLabOptionCard
+                      key={item.optionId}
+                      item={item}
+                      saving={titleLabSavingId === item.optionId}
+                      copied={titleLabCopiedId === item.optionId}
+                      onCopy={() => copyTitleLabOption(item)}
+                      onSave={() => saveTitleLabOption(item)}
+                      onPrepare={() => router.push(buildPreparedProjectUrl({ ...item, agentId: titleLabAgentId }))}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div className="cf-caption">
+              Costo: Tavily {Number(titleLabResult.costEstimate?.tavilyCredits || 0)} credito(s). YouTube {Number(titleLabResult.costEstimate?.youtubeQuotaUnits || 0)} unidad(es). Qdrant {Number(titleLabResult.costEstimate?.knowledgeQueries || 0)} busq. Embeddings {Number(titleLabResult.costEstimate?.embeddingQueries || 0)}.
+            </div>
+          </div>
+        )}
+      </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14, marginBottom: "var(--s-5)" }}>
         {[

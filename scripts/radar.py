@@ -138,6 +138,39 @@ PODCAST_KNOWLEDGE_QUERIES = {
     ],
 }
 
+PODCAST_TITLE_ADJACENT_TOPICS = [
+    "Cuando te escribe justo cuando estabas sanando",
+    "No extrañas a tu ex: extrañas la ansiedad que te daba",
+    "La migaja emocional que te hace empezar de cero",
+    "Por que quieres cerrar una historia que ya te cerro a ti",
+    "Cuando dejar de esperar se siente como traicionar lo que sentias",
+    "Si te busca solo cuando te alejas, no es amor",
+    "La paz que llega cuando dejas de revisar sus historias",
+    "Por que confundes intensidad con destino",
+]
+
+TITLE_LAB_POWER_WORDS = {
+    "nadie",
+    "verdad",
+    "error",
+    "errores",
+    "duele",
+    "secreto",
+    "incomoda",
+    "incómoda",
+    "nunca",
+    "si",
+    "cuando",
+    "porque",
+    "por que",
+    "ex",
+    "vuelve",
+    "deja",
+    "ansiedad",
+    "extrañas",
+    "extranas",
+}
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -988,6 +1021,378 @@ def infer_search_intent(candidate: dict) -> str:
     if intent == "news":
         return "actualidad"
     return "tema viral"
+
+
+def build_title_lab(
+    agent: dict,
+    *,
+    seed_topic: str = "",
+    knowledge_signals: list[dict] | None = None,
+    trend_signals: list[dict] | None = None,
+    competitor_signals: list[dict] | None = None,
+    seed_limit: int = 10,
+    adjacent_limit: int = 5,
+) -> dict:
+    seed = compact_text(seed_topic, 120).strip()
+    signals = normalize_knowledge_signals(knowledge_signals or [], limit=5)
+    trend_options = title_lab_external_options(
+        agent,
+        trend_signals or [],
+        seed_topic=seed,
+        group="trend",
+        limit=5,
+    )
+    competitor_options = title_lab_external_options(
+        agent,
+        competitor_signals or [],
+        seed_topic=seed,
+        group="competitor",
+        limit=5,
+    )
+    seed_titles = title_lab_seed_titles(agent, seed, limit=seed_limit)
+    adjacent_titles = title_lab_adjacent_titles(agent, seed, signals, limit=adjacent_limit)
+
+    seed_options = [
+        title_lab_option(agent, title, seed_topic=seed, group="seed", rank=index + 1, knowledge_signals=signals)
+        for index, title in enumerate(seed_titles)
+    ]
+    adjacent_options = [
+        title_lab_option(agent, title, seed_topic=seed, group="adjacent", rank=index + 1, knowledge_signals=signals)
+        for index, title in enumerate(adjacent_titles)
+    ]
+    return {
+        "agentId": agent_id(agent),
+        "agentName": agent_label(agent),
+        "seedTopic": seed,
+        "groups": [
+            {"id": "seed", "label": "Sobre tu idea", "items": seed_options},
+            {"id": "adjacent", "label": "Ideas adicionales", "items": adjacent_options},
+            {"id": "trend", "label": "Tendencias web", "items": trend_options},
+            {"id": "competitor", "label": "Competidores YouTube", "items": competitor_options},
+        ],
+        "items": seed_options + adjacent_options + trend_options + competitor_options,
+        "knowledgeSignals": signals,
+        "trendSignals": trend_signals or [],
+        "competitorSignals": competitor_signals or [],
+    }
+
+
+def title_lab_seed_titles(agent: dict, seed_topic: str, *, limit: int = 10) -> list[str]:
+    seed = clean_seed_topic(seed_topic)
+    aid = agent_id(agent)
+    if not seed:
+        if aid in PODCAST_AGENT_IDS:
+            base = [
+                "No extrañas a tu ex: extrañas la ansiedad que te daba",
+                "La migaja emocional que te hace empezar de cero",
+                "Por que confundes intensidad con amor",
+                "Cuando te busca justo cuando ya estabas sanando",
+                "El limite que te cuesta poner porque aun quieres que te elijan",
+                "Si te da paz solo cuando aparece, no es paz",
+                "La señal de que no era amor, era apego",
+                "Por que sigues esperando un mensaje que ya sabes que no llega",
+                "Cuando pedir claridad se siente como rogar amor",
+                "La fantasia de cierre que nunca llega",
+            ]
+        else:
+            name = agent_label(agent) or "este tema"
+            base = [
+                f"Lo que nadie esta explicando sobre {name}",
+                f"La verdad incomoda detras de {name}",
+                f"El error que cambia todo en {name}",
+                f"Por que {name} importa mas de lo que parece",
+                f"La historia oculta que convierte {name} en un gran video",
+            ]
+        return dedupe_title_strings(base)[:limit]
+
+    if aid in PODCAST_AGENT_IDS:
+        base = [
+            f"{seed} no funciona si lo haces para que vuelva",
+            f"La parte de {seed} que nadie te explica",
+            f"Por que {seed} duele como abstinencia emocional",
+            f"El error que arruina {seed} sin que te des cuenta",
+            f"Cuando haces {seed} pero sigues revisando sus historias",
+            f"{seed} no es castigo: es recuperar tu dignidad",
+            f"Si rompiste {seed} por ansiedad, escucha esto antes de culparte",
+            f"La verdad incomoda sobre {seed}",
+            f"Lo que {seed} revela sobre tu apego",
+            f"{seed}: cuando dejar de escribir se siente como perderlo todo",
+            f"El lado de {seed} que solo entiendes cuando todavia duele",
+            f"Antes de romper {seed}, escucha esto",
+        ]
+    else:
+        base = [
+            f"Lo que nadie esta explicando sobre {seed}",
+            f"La verdad incomoda detras de {seed}",
+            f"El error que cambia todo en {seed}",
+            f"Por que {seed} importa mas de lo que parece",
+            f"La historia oculta de {seed}",
+            f"{seed}: explicado sin relleno y con contexto",
+            f"El detalle de {seed} que casi todos pasan por alto",
+            f"Antes de creer lo que dicen sobre {seed}, mira esto",
+        ]
+    return dedupe_title_strings(base)[:limit]
+
+
+def title_lab_adjacent_titles(
+    agent: dict,
+    seed_topic: str,
+    knowledge_signals: list[dict],
+    *,
+    limit: int = 5,
+) -> list[str]:
+    aid = agent_id(agent)
+    seed = normalize_text(seed_topic)
+    if aid in PODCAST_AGENT_IDS:
+        pool = list(PODCAST_TITLE_ADJACENT_TOPICS)
+        if "contacto cero" in seed:
+            pool = [
+                "Volvio cuando menos lo necesitabas: por que eso te confunde",
+                "No extrañas a tu ex: extrañas la ansiedad que te daba",
+                "La migaja emocional que te hace empezar de cero",
+                "Por que quieres cerrar una historia que ya te cerro a ti",
+                "Cuando dejar de esperar se siente como traicionar lo que sentias",
+                "Si te busca despues del silencio, no siempre significa amor",
+            ] + pool
+        elif "ghosting" in seed or "visto" in seed:
+            pool = [
+                "Me dejo en visto pero ve mis historias: la trampa emocional",
+                "Por que esperas una respuesta de quien ya te respondio con silencio",
+                "La ansiedad de mirar el celular como si fuera una prueba de amor",
+                "Si aparece y desaparece, esto es lo que esta entrenando en ti",
+                "Cuando el silencio de alguien decide tu valor",
+            ] + pool
+        for signal in knowledge_signals:
+            text = normalize_text(signal.get("excerpt") or "")
+            if "apego ansioso" in text:
+                pool.append("Cuando el apego ansioso convierte un mensaje en una prueba de amor")
+            if "limite" in text or "limites" in text:
+                pool.append("El limite que te cuesta poner porque todavia quieres que te elijan")
+            if "duelo" in text:
+                pool.append("El duelo invisible de soltar a quien todavia deseas")
+    else:
+        name = agent_label(agent) or "este nicho"
+        pool = [
+            f"Una idea fuerte para {name} que aun no estas explotando",
+            f"El tema vecino de {name} con mas potencial narrativo",
+            f"La pregunta que tu audiencia haria sobre {name}",
+            f"El mito de {name} que merece un video completo",
+            f"Un angulo inesperado para crecer en {name}",
+        ]
+    return dedupe_title_strings(pool)[:limit]
+
+
+def title_lab_option(
+    agent: dict,
+    title: str,
+    *,
+    seed_topic: str,
+    group: str,
+    rank: int,
+    knowledge_signals: list[dict] | None = None,
+) -> dict:
+    clean_title = compact_text(title, 110)
+    scores = score_title_lab_option(agent, clean_title, seed_topic=seed_topic, group=group)
+    option_id = candidate_hash(agent_id(agent), clean_title, f"title-lab-{group}")
+    keywords = title_lab_keywords(agent, clean_title, seed_topic)
+    return {
+        "optionId": option_id,
+        "candidateHash": option_id,
+        "agentId": agent_id(agent),
+        "agentName": agent_label(agent),
+        "title": clean_title,
+        "seoTitle": compact_text(clean_title, 70),
+        "topic": seed_topic or clean_title,
+        "group": group,
+        "rank": rank,
+        "hook": build_title_lab_hook(clean_title, agent),
+        "angle": build_title_lab_angle(clean_title, agent, group),
+        "seoKeywords": keywords,
+        "scores": scores,
+        "viralScore": scores["viral"],
+        "seoScore": scores["seo"],
+        "clickbaitScore": scores["clickbait"],
+        "fitScore": scores["fit"],
+        "overallScore": scores["overall"],
+        "riskLevel": scores["riskLevel"],
+        "riskReason": scores["riskReason"],
+        "recommendedFormat": "youtube_long",
+        "knowledgeSignals": (knowledge_signals or [])[:3],
+    }
+
+
+def title_lab_external_options(
+    agent: dict,
+    signals: list[dict],
+    *,
+    seed_topic: str = "",
+    group: str = "trend",
+    limit: int = 5,
+) -> list[dict]:
+    options = []
+    for signal in signals[:limit]:
+        source_title = compact_text(signal.get("title") or signal.get("videoTitle") or signal.get("topic") or "", 120)
+        if not source_title:
+            continue
+        remixed = remix_external_title(agent, source_title, seed_topic=seed_topic, group=group)
+        option = title_lab_option(
+            agent,
+            remixed,
+            seed_topic=seed_topic,
+            group=group,
+            rank=len(options) + 1,
+            knowledge_signals=[],
+        )
+        option["inspiredBy"] = {
+            "title": source_title,
+            "channelTitle": signal.get("channelTitle") or "",
+            "url": signal.get("url") or "",
+            "views": signal.get("views") or 0,
+            "viewsPerDay": signal.get("viewsPerDay") or 0,
+            "source": signal.get("source") or group,
+        }
+        options.append(option)
+    return options
+
+
+def remix_external_title(agent: dict, source_title: str, *, seed_topic: str = "", group: str = "trend") -> str:
+    seed = clean_seed_topic(seed_topic)
+    text = normalize_text(source_title)
+    aid = agent_id(agent)
+    if aid in PODCAST_AGENT_IDS:
+        if seed and "contacto cero" in normalize_text(seed):
+            if "error" in text:
+                return "El error que arruina el contacto cero aunque parezca fuerza"
+            if "no contact" in text or "contacto cero" in text:
+                return "Contacto cero no funciona si lo haces desde la esperanza"
+            return f"{seed}: la parte emocional que casi nadie te explica"
+        if "ex" in text:
+            return "No extrañas a tu ex: extrañas la ansiedad que te daba"
+        if "silencio" in text or "visto" in text or "ghost" in text:
+            return "Cuando el silencio de alguien decide tu valor"
+        if seed:
+            return f"{seed}: la verdad incomoda que tu audiencia si quiere escuchar"
+        return "La verdad incomoda sobre amar desde la ansiedad"
+    if seed:
+        return f"{seed}: lo que esta tendencia revela de verdad"
+    return f"{clean_source_title(source_title)}: explicado con un angulo nuevo"
+
+
+def score_title_lab_option(agent: dict, title: str, *, seed_topic: str = "", group: str = "seed") -> dict:
+    text = normalize_text(title)
+    seed = normalize_text(seed_topic)
+    aid = agent_id(agent)
+    length = len(title)
+
+    viral = 48
+    seo = 45
+    clickbait = 45
+    fit = 55
+    risk_score = 92
+
+    if any(word in text for word in TITLE_LAB_POWER_WORDS):
+        viral += min(24, sum(1 for word in TITLE_LAB_POWER_WORDS if word in text) * 4)
+        clickbait += min(24, sum(1 for word in TITLE_LAB_POWER_WORDS if word in text) * 4)
+    if "?" in title or text.startswith(("por que", "porque", "cuando", "si ")):
+        viral += 8
+        clickbait += 8
+    if ":" in title:
+        seo += 6
+        clickbait += 4
+    if 42 <= length <= 72:
+        seo += 18
+    elif 30 <= length <= 90:
+        seo += 10
+    else:
+        seo -= 8
+    if seed and seed in text:
+        seo += 18
+        fit += 12
+    if group == "adjacent":
+        viral += 4
+        seo -= 3
+    if aid in PODCAST_AGENT_IDS:
+        podcast_terms = [
+            "apego",
+            "ex",
+            "ansiedad",
+            "contacto cero",
+            "historias",
+            "dignidad",
+            "amor",
+            "limite",
+            "limites",
+            "extrañas",
+            "extranas",
+            "sanando",
+        ]
+        fit += min(30, sum(1 for term in podcast_terms if term in text) * 5)
+        if "cura" in text or "diagnostico" in text:
+            risk_score -= 35
+    if any(term in text for term in ["acusacion", "denuncia", "fraude", "cura", "milagro"]):
+        risk_score -= 30
+
+    viral = clamp_score(viral)
+    seo = clamp_score(seo)
+    clickbait = clamp_score(clickbait)
+    fit = clamp_score(fit)
+    risk_score = clamp_score(risk_score)
+    overall = clamp_score(viral * 0.35 + seo * 0.25 + clickbait * 0.20 + fit * 0.20)
+    risk_level = "high" if risk_score < 45 else "medium" if risk_score < 75 else "low"
+    return {
+        "viral": viral,
+        "seo": seo,
+        "clickbait": clickbait,
+        "fit": fit,
+        "risk": risk_score,
+        "overall": overall,
+        "riskLevel": risk_level,
+        "riskReason": "Titulo seguro para exploracion editorial." if risk_level == "low" else "Revisar claims o sensibilidad antes de producir.",
+    }
+
+
+def title_lab_keywords(agent: dict, title: str, seed_topic: str = "") -> list[str]:
+    fake_candidate = {
+        "agentId": agent_id(agent),
+        "agentName": agent_label(agent),
+        "category": agent.get("category") or "",
+        "title": title,
+        "angle": title,
+        "summary": seed_topic,
+    }
+    return build_seo_keywords(fake_candidate, limit=8)
+
+
+def build_title_lab_hook(title: str, agent: dict) -> str:
+    if agent_id(agent) in PODCAST_AGENT_IDS:
+        return compact_text(f"Si este titulo te incomoda, probablemente toca una parte de tu historia: {title}", 180)
+    return compact_text(f"Hoy vamos a mirar {title} desde el angulo que casi nadie esta contando.", 180)
+
+
+def build_title_lab_angle(title: str, agent: dict, group: str) -> str:
+    if agent_id(agent) in PODCAST_AGENT_IDS:
+        if group == "adjacent":
+            return "Idea vecina del mismo nicho emocional, pensada para ampliar el calendario sin salir de la identidad del canal."
+        return "Titulo diseñado para abrir una conversacion emocional, con tension, identificacion inmediata y cierre reflexivo."
+    return "Titulo diseñado para funcionar como documental de YouTube con promesa clara, curiosidad y busqueda natural."
+
+
+def clean_seed_topic(value: str) -> str:
+    text = compact_text(value, 90).strip(" .,:;")
+    return text[:1].upper() + text[1:] if text else ""
+
+
+def dedupe_title_strings(titles: list[str]) -> list[str]:
+    out = []
+    seen = set()
+    for title in titles:
+        clean = compact_text(title, 120).strip()
+        key = normalize_text(clean)
+        if not clean or key in seen:
+            continue
+        seen.add(key)
+        out.append(clean)
+    return out
 
 
 def dedupe_candidates(
