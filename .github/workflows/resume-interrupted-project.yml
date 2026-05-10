@@ -1,0 +1,100 @@
+name: Resume interrupted project
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: "Firestore project id"
+        required: true
+      clear_stale_lock:
+        description: "Clear old production lock before enqueueing"
+        required: true
+        default: "true"
+
+concurrency:
+  group: resume-project-${{ github.event.inputs.project_id }}
+  cancel-in-progress: false
+
+jobs:
+  resume:
+    name: Requeue production safely on VPS
+    runs-on: [self-hosted, linux, vps, docker]
+    timeout-minutes: 10
+
+    steps:
+      - name: Inspect and enqueue production
+        run: |
+          set -euo pipefail
+          PID="${{ github.event.inputs.project_id }}"
+          CLEAR_LOCK="${{ github.event.inputs.clear_stale_lock }}"
+          docker exec content-factory python - "$PID" "$CLEAR_LOCK" <<'PY'
+          import json
+          import sys
+
+          project_id = sys.argv[1]
+          clear_lock = str(sys.argv[2]).lower() in {"1", "true", "yes", "y"}
+
+          import api as api_module
+          from firebase_admin import firestore
+
+          api_module._ensure_firebase_initialized()
+          db = firestore.client()
+          doc_ref = db.collection("projects").document(project_id)
+          snap = doc_ref.get()
+          if not snap.exists:
+              raise SystemExit(f"project not found: {project_id}")
+
+          data = snap.to_dict() or {}
+          progress = data.get("progress") or {}
+          snapshot = {
+              "projectId": project_id,
+              "title": data.get("title"),
+              "status": data.get("status"),
+              "videoFolder": data.get("videoFolder"),
+              "hasVideoUrl": bool(data.get("videoUrl")),
+              "scenes": len(data.get("scenes") or []),
+              "progressPercent": progress.get("percent"),
+              "progressStep": progress.get("stepName"),
+              "hasProductionLock": bool(data.get("productionLockId")),
+          }
+          print(json.dumps({"before": snapshot}, ensure_ascii=False, indent=2))
+
+          if data.get("videoUrl"):
+              print(json.dumps({"ok": True, "alreadyCompleted": True, "projectId": project_id}, indent=2))
+              raise SystemExit(0)
+
+          if clear_lock and data.get("productionLockId"):
+              api_module._release_production_lock(project_id)
+              print("Cleared stale production lock")
+
+          lock_result = api_module._try_acquire_production_lock(project_id)
+          if not lock_result.get("acquired"):
+              print(json.dumps({"ok": False, "lock": lock_result}, ensure_ascii=False, indent=2))
+              raise SystemExit("production lock still active; not enqueueing duplicate job")
+
+          try:
+              api_module._assert_production_capacity(db)
+          except Exception:
+              api_module._release_production_lock(project_id, lock_result.get("lock_id"))
+              raise
+
+          doc_ref.update({
+              "status": "producing",
+              "progress.percent": 5,
+              "progress.stepName": "Reanudando produccion desde archivos existentes...",
+          })
+
+          try:
+              from worker_tasks import produce_video
+              task = produce_video.delay(project_id)
+          except Exception:
+              api_module._release_production_lock(project_id, lock_result.get("lock_id"))
+              raise
+
+          print(json.dumps({
+              "ok": True,
+              "projectId": project_id,
+              "taskId": getattr(task, "id", ""),
+              "message": "Production requeued. Existing files on disk will be reused when possible.",
+          }, ensure_ascii=False, indent=2))
+          PY
