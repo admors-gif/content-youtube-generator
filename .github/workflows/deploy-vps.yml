@@ -71,6 +71,7 @@ jobs:
           QDRANT_URL: ${{ secrets.QDRANT_URL }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           QDRANT_KNOWLEDGE_COLLECTION: ${{ secrets.QDRANT_KNOWLEDGE_COLLECTION }}
+          YOUTUBE_DATA_API_KEY: ${{ secrets.YOUTUBE_DATA_API_KEY }}
         run: |
           set -euo pipefail
           cd /docker/content-factory
@@ -95,6 +96,7 @@ jobs:
               "QDRANT_URL",
               "QDRANT_API_KEY",
               "QDRANT_KNOWLEDGE_COLLECTION",
+              "YOUTUBE_DATA_API_KEY",
           ]
           updates = {name: os.environ.get(name, "").strip() for name in names}
           updates = {name: value for name, value in updates.items() if value}
