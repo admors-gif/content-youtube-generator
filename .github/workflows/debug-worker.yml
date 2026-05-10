@@ -181,12 +181,14 @@ jobs:
           def emit(obj):
               print(json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True))
 
-          def qdrant_request(base, method, path, body=None, timeout=5):
+          def qdrant_request(base, method, path, body=None, api_key=None, timeout=5):
               data = None
               headers = {}
               if body is not None:
                   data = json.dumps(body).encode("utf-8")
                   headers["content-type"] = "application/json"
+              if api_key:
+                  headers["api-key"] = api_key
               req = urllib.request.Request(base.rstrip("/") + path, data=data, method=method, headers=headers)
               with urllib.request.urlopen(req, timeout=timeout) as resp:
                   raw = resp.read().decode("utf-8", errors="replace")
@@ -228,6 +230,24 @@ jobs:
               if ip:
                   ips.append(ip)
 
+          env_map = {}
+          for item in inspect.get("Config", {}).get("Env") or []:
+              if "=" in item:
+                  key, value = item.split("=", 1)
+                  env_map[key] = value
+          api_key_name = None
+          api_key = None
+          for candidate in (
+              "QDRANT__SERVICE__READ_ONLY_API_KEY",
+              "QDRANT__SERVICE__API_KEY",
+              "QDRANT_API_KEY",
+          ):
+              value = env_map.get(candidate)
+              if value:
+                  api_key_name = candidate
+                  api_key = value
+                  break
+
           bases = ["http://127.0.0.1:6333", "http://localhost:6333"]
           bases += [f"http://{ip}:6333" for ip in ips]
           bases.append("http://qdrant:6333")
@@ -237,7 +257,7 @@ jobs:
           collections_response = None
           for base in bases:
               try:
-                  collections_response = qdrant_request(base, "GET", "/collections")
+                  collections_response = qdrant_request(base, "GET", "/collections", api_key=api_key)
                   selected = base
                   break
               except Exception as exc:
@@ -255,6 +275,7 @@ jobs:
           result = {
               "ok": True,
               "endpoint": selected,
+              "authSource": api_key_name,
               "collectionCount": len(collection_names),
               "collections": [],
               "triedBeforeSuccess": tried,
@@ -264,7 +285,7 @@ jobs:
               quoted = urllib.parse.quote(name, safe="")
               entry = {"name": name}
               try:
-                  detail = qdrant_request(selected, "GET", f"/collections/{quoted}")
+                  detail = qdrant_request(selected, "GET", f"/collections/{quoted}", api_key=api_key)
                   info = detail.get("result", {}) or {}
                   entry["status"] = info.get("status")
                   entry["pointsCount"] = info.get("points_count")
@@ -282,6 +303,7 @@ jobs:
                       "POST",
                       f"/collections/{quoted}/points/scroll",
                       {"limit": 3, "with_payload": True, "with_vector": False},
+                      api_key=api_key,
                   )
                   points = (sample.get("result", {}) or {}).get("points", [])
                   entry["samplePoints"] = sanitize_points(points)
