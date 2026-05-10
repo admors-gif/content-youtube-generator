@@ -164,11 +164,11 @@ jobs:
             docker ps -a --filter name=qdrant --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
             echo ""
             echo "=== qdrant inspect summary ==="
-            docker inspect qdrant --format 'image={{.Config.Image}}
-restartPolicy={{.HostConfig.RestartPolicy.Name}}
-ports={{json .NetworkSettings.Ports}}
-mounts={{json .Mounts}}
-networks={{range $name, $net := .NetworkSettings.Networks}}{{$name}} {{$net.IPAddress}} {{end}}' 2>&1
+            docker inspect qdrant --format 'image={{.Config.Image}}' 2>&1
+            docker inspect qdrant --format 'restartPolicy={{.HostConfig.RestartPolicy.Name}}' 2>&1
+            docker inspect qdrant --format 'ports={{json .NetworkSettings.Ports}}' 2>&1
+            docker inspect qdrant --format 'mounts={{json .Mounts}}' 2>&1
+            docker inspect qdrant --format 'networks={{range $name, $net := .NetworkSettings.Networks}}{{$name}} {{$net.IPAddress}} {{end}}' 2>&1
           } > debug_output/11_qdrant_container.txt 2>&1
 
           python3 - <<'PY' > debug_output/12_qdrant_inventory.json 2>&1
