@@ -1,0 +1,36 @@
+name: Knowledge sync index
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_points:
+        description: "Maximum Qdrant points to scan into Firestore"
+        required: false
+        default: "300000"
+
+concurrency:
+  group: knowledge-sync-index
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync Qdrant book index to Firestore
+    runs-on: [self-hosted, linux, vps, docker]
+    timeout-minutes: 15
+
+    steps:
+      - name: Sync knowledge index
+        run: |
+          set -euo pipefail
+          MAX_POINTS="${{ github.event.inputs.max_points }}"
+          docker exec -e KNOWLEDGE_SYNC_MAX_POINTS="$MAX_POINTS" -i content-factory python - <<'PY'
+          import json
+
+          import api
+
+          api._ensure_firebase_initialized()
+          from firebase_admin import firestore
+
+          result = api._knowledge_sync_index(firestore.client(), firestore)
+          print(json.dumps(result, ensure_ascii=False, indent=2))
+          PY
