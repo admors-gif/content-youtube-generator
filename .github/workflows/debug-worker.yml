@@ -155,6 +155,145 @@ jobs:
             echo "$c | restarts=$COUNT | state=$STATE | exit=$EXIT | finishedAt=$FINISHED" >> debug_output/08_restarts.txt
           done
 
+      - name: Qdrant read-only inventory
+        continue-on-error: true
+        run: |
+          set +e
+          {
+            echo "=== qdrant container ==="
+            docker ps -a --filter name=qdrant --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+            echo ""
+            echo "=== qdrant inspect summary ==="
+            docker inspect qdrant --format 'image={{.Config.Image}}
+restartPolicy={{.HostConfig.RestartPolicy.Name}}
+ports={{json .NetworkSettings.Ports}}
+mounts={{json .Mounts}}
+networks={{range $name, $net := .NetworkSettings.Networks}}{{$name}} {{$net.IPAddress}} {{end}}' 2>&1
+          } > debug_output/11_qdrant_container.txt 2>&1
+
+          python3 - <<'PY' > debug_output/12_qdrant_inventory.json 2>&1
+          import json
+          import subprocess
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          def emit(obj):
+              print(json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True))
+
+          def qdrant_request(base, method, path, body=None, timeout=5):
+              data = None
+              headers = {}
+              if body is not None:
+                  data = json.dumps(body).encode("utf-8")
+                  headers["content-type"] = "application/json"
+              req = urllib.request.Request(base.rstrip("/") + path, data=data, method=method, headers=headers)
+              with urllib.request.urlopen(req, timeout=timeout) as resp:
+                  raw = resp.read().decode("utf-8", errors="replace")
+                  return json.loads(raw) if raw else {}
+
+          def truncate_value(value, limit=220):
+              if isinstance(value, str):
+                  clean = " ".join(value.split())
+                  return clean[:limit] + ("..." if len(clean) > limit else "")
+              if isinstance(value, (int, float, bool)) or value is None:
+                  return value
+              if isinstance(value, list):
+                  return [truncate_value(item, limit=120) for item in value[:5]]
+              if isinstance(value, dict):
+                  return {str(k): truncate_value(v, limit=120) for k, v in list(value.items())[:12]}
+              return str(value)[:limit]
+
+          def sanitize_points(points):
+              out = []
+              for point in points[:3]:
+                  payload = point.get("payload") or {}
+                  out.append({
+                      "id": str(point.get("id")),
+                      "payloadKeys": sorted(str(k) for k in payload.keys()),
+                      "payloadPreview": {str(k): truncate_value(v) for k, v in list(payload.items())[:12]},
+                  })
+              return out
+
+          try:
+              raw = subprocess.check_output(["docker", "inspect", "qdrant"], text=True)
+              inspect = json.loads(raw)[0]
+          except Exception as exc:
+              emit({"ok": False, "error": f"docker inspect qdrant failed: {exc}"})
+              raise SystemExit(0)
+
+          ips = []
+          for network in (inspect.get("NetworkSettings", {}).get("Networks") or {}).values():
+              ip = network.get("IPAddress")
+              if ip:
+                  ips.append(ip)
+
+          bases = ["http://127.0.0.1:6333", "http://localhost:6333"]
+          bases += [f"http://{ip}:6333" for ip in ips]
+          bases.append("http://qdrant:6333")
+
+          tried = []
+          selected = None
+          collections_response = None
+          for base in bases:
+              try:
+                  collections_response = qdrant_request(base, "GET", "/collections")
+                  selected = base
+                  break
+              except Exception as exc:
+                  tried.append({"base": base, "error": str(exc)[:240]})
+
+          if not selected:
+              emit({"ok": False, "tried": tried})
+              raise SystemExit(0)
+
+          collection_names = [
+              item.get("name")
+              for item in (collections_response.get("result", {}) or {}).get("collections", [])
+              if item.get("name")
+          ]
+          result = {
+              "ok": True,
+              "endpoint": selected,
+              "collectionCount": len(collection_names),
+              "collections": [],
+              "triedBeforeSuccess": tried,
+          }
+
+          for name in collection_names:
+              quoted = urllib.parse.quote(name, safe="")
+              entry = {"name": name}
+              try:
+                  detail = qdrant_request(selected, "GET", f"/collections/{quoted}")
+                  info = detail.get("result", {}) or {}
+                  entry["status"] = info.get("status")
+                  entry["pointsCount"] = info.get("points_count")
+                  entry["vectorsCount"] = info.get("vectors_count")
+                  entry["indexedVectorsCount"] = info.get("indexed_vectors_count")
+                  entry["segmentsCount"] = info.get("segments_count")
+                  entry["config"] = truncate_value(info.get("config") or {}, limit=160)
+                  entry["payloadSchema"] = truncate_value(info.get("payload_schema") or {}, limit=160)
+              except Exception as exc:
+                  entry["detailError"] = str(exc)[:240]
+
+              try:
+                  sample = qdrant_request(
+                      selected,
+                      "POST",
+                      f"/collections/{quoted}/points/scroll",
+                      {"limit": 3, "with_payload": True, "with_vector": False},
+                  )
+                  points = (sample.get("result", {}) or {}).get("points", [])
+                  entry["samplePoints"] = sanitize_points(points)
+              except Exception as exc:
+                  entry["sampleError"] = str(exc)[:240]
+
+              result["collections"].append(entry)
+
+          emit(result)
+          PY
+          set -e
+
       - name: Upload debug bundle
         uses: actions/upload-artifact@v4
         with:
