@@ -1,0 +1,130 @@
+name: Postprocess recovered project
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: "Firestore project id"
+        required: true
+      force_shorts:
+        description: "Regenerate shorts even if 3 are already registered"
+        required: false
+        default: "false"
+      force_thumbnails:
+        description: "Regenerate thumbnails even if 3 are already registered"
+        required: false
+        default: "false"
+
+concurrency:
+  group: postprocess-project-${{ github.event.inputs.project_id }}
+  cancel-in-progress: false
+
+jobs:
+  postprocess:
+    name: Build shorts and thumbnails from recovered video
+    runs-on: [self-hosted, linux, vps, docker]
+    timeout-minutes: 45
+
+    steps:
+      - name: Build missing postprocess assets
+        run: |
+          set -euo pipefail
+          PID="${{ github.event.inputs.project_id }}"
+          FORCE_SHORTS="${{ github.event.inputs.force_shorts }}"
+          FORCE_THUMBNAILS="${{ github.event.inputs.force_thumbnails }}"
+          docker exec -i content-factory python - "$PID" "$FORCE_SHORTS" "$FORCE_THUMBNAILS" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          import api
+
+          def truthy(value):
+              return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+          project_id = sys.argv[1]
+          force_shorts = truthy(sys.argv[2] if len(sys.argv) > 2 else "")
+          force_thumbnails = truthy(sys.argv[3] if len(sys.argv) > 3 else "")
+
+          api._ensure_firebase_initialized()
+          from firebase_admin import firestore
+
+          db = firestore.client()
+          doc_ref = db.collection("projects").document(project_id)
+          snap = doc_ref.get()
+          if not snap.exists:
+              raise SystemExit(f"project not found: {project_id}")
+
+          data = snap.to_dict() or {}
+          folder = data.get("videoFolder") or ""
+          title = data.get("title") or ""
+          agent_id = data.get("agentId") or ""
+          if not folder:
+              raise SystemExit("project has no videoFolder")
+
+          video_dir = Path("/app/output/videos") / folder
+          if not video_dir.is_dir():
+              raise SystemExit(f"video folder not on disk: {video_dir}")
+
+          final_path, has_subs, invalid = api._pick_valid_final_video(video_dir)
+          if not final_path:
+              raise SystemExit("no valid FINAL video found: " + json.dumps(invalid, ensure_ascii=False)[:1000])
+
+          ok, final_duration, final_error = api._is_valid_media_file(final_path, min_duration_seconds=30)
+          if not ok:
+              raise SystemExit(f"final video invalid: {final_error}")
+
+          existing_shorts = data.get("shorts") if isinstance(data.get("shorts"), list) else []
+          existing_thumbnails = data.get("thumbnails") if isinstance(data.get("thumbnails"), list) else []
+
+          shorts_results = existing_shorts
+          thumbnails_results = existing_thumbnails
+          generated = {"shorts": False, "thumbnails": False}
+
+          update = {
+              "status": "completed",
+              "progress.percent": 100,
+              "progress.stepName": "Video, Shorts y miniaturas listos",
+              "videoPath": str(final_path),
+              "videoFolder": folder,
+              "hasSubtitles": bool(has_subs),
+              "videoDurationSeconds": round(final_duration, 1),
+              "videoSizeMB": round(final_path.stat().st_size / (1024 * 1024), 1),
+              "postprocessCompletedAt": firestore.SERVER_TIMESTAMP,
+          }
+
+          if force_shorts or len(existing_shorts) < 3:
+              print(f"Building shorts from {final_path.name}...")
+              shorts_results = api.build_shorts_for_project(video_dir, project_id)
+              generated["shorts"] = True
+              if shorts_results:
+                  update["shorts"] = shorts_results
+
+          if force_thumbnails or len(existing_thumbnails) < 3:
+              print(f"Building thumbnails for {title!r}...")
+              thumbnails_results = api.build_thumbnails_for_project(
+                  video_dir,
+                  project_id,
+                  title,
+                  agent_id=agent_id,
+                  premium=None,
+              )
+              generated["thumbnails"] = True
+              if thumbnails_results:
+                  update["thumbnails"] = thumbnails_results
+
+          doc_ref.update(update)
+
+          summary = {
+              "ok": True,
+              "project_id": project_id,
+              "final": final_path.name,
+              "duration_seconds": round(final_duration, 1),
+              "generated": generated,
+              "shorts_count": len(shorts_results or []),
+              "thumbnails_count": len(thumbnails_results or []),
+              "shorts_paths": [item.get("gs_path") for item in (shorts_results or [])],
+              "thumbnail_paths": [item.get("gs_path") for item in (thumbnails_results or [])],
+          }
+          print(json.dumps(summary, ensure_ascii=False, indent=2))
+          PY
