@@ -11,18 +11,21 @@ import { useAuth } from "@/context/AuthContext";
 import {
   RADAR_CATEGORY_OPTIONS,
   RADAR_FORMAT_OPTIONS,
+  RADAR_INTENT_OPTIONS,
   RADAR_SCOPE_OPTIONS,
   RADAR_WINDOW_OPTIONS,
   agentDisplayName,
   compactNumber,
   formatRadarDate,
+  formatRadarIntent,
   formatRecommendation,
   ideaStatusMeta,
   riskMeta,
 } from "@/lib/radarUi";
 
 const RADAR_ENABLED = process.env.NEXT_PUBLIC_CONTENT_FACTORY_RADAR_ENABLED !== "false";
-const DEFAULT_AGENT_ID = "agent_noticias_virales";
+const NEWS_AGENT_ID = "agent_noticias_virales";
+const DEFAULT_AGENT_ID = "agent_podcast_general";
 
 function buttonStyle(selected) {
   return {
@@ -38,13 +41,14 @@ function buildRadarParams(filters, force = false) {
     market: filters.market,
     language: "es",
     category: filters.category,
+    intent: filters.scope === "news" ? "news" : filters.intent,
     window: filters.window,
     limit: Number(filters.limit || 3),
     queryLimit: Number(filters.queryLimit || 2),
     force,
   };
   if (filters.scope === "agent") payload.agentId = filters.agentId || DEFAULT_AGENT_ID;
-  if (filters.scope === "news") payload.agentId = DEFAULT_AGENT_ID;
+  if (filters.scope === "news") payload.agentId = NEWS_AGENT_ID;
   return payload;
 }
 
@@ -117,6 +121,9 @@ function CandidateCard({ item, selected, saving, creating, onSelect, onSave, onC
             <span className={`cf-badge ${status.badge}`}>{status.label}</span>
             <span className="cf-badge cf-badge--neutral">
               {formatRecommendation(item.recommendedFormat)}
+            </span>
+            <span className="cf-badge cf-badge--neutral">
+              {formatRadarIntent(item.intent || item.radarIntent)}
             </span>
           </div>
           <h2 className="cf-h3" style={{ margin: "0 0 8px", lineHeight: 1.2 }}>
@@ -236,6 +243,11 @@ function DetailPanel({ item }) {
         <span className="cf-badge cf-badge--neutral">{formatRecommendation(item.recommendedFormat)}</span>
       </div>
       <p className="cf-body" style={{ marginTop: 0 }}>{item.whyNow || item.summary}</p>
+      {item.sourceQuery && (
+        <div className="cf-caption" style={{ margin: "-8px 0 16px" }}>
+          Query radar: {item.sourceQuery}
+        </div>
+      )}
       {item.riskReason && (
         <div
           style={{
@@ -311,8 +323,9 @@ export default function RadarPage() {
   const { user, profile, loading: authLoading } = useAuth();
   const admin = isAdminUser(user, profile);
   const [filters, setFilters] = useState({
-    scope: "global",
+    scope: "agent",
     agentId: DEFAULT_AGENT_ID,
+    intent: "viral_topics",
     market: "mx",
     category: "all",
     window: "today",
@@ -341,6 +354,7 @@ export default function RadarPage() {
         const params = new URLSearchParams({
           scope: payload.scope,
           agentId: payload.agentId || "",
+          intent: payload.intent || "viral_topics",
           market: payload.market,
           language: payload.language,
           category: payload.category,
@@ -509,7 +523,7 @@ export default function RadarPage() {
     <div>
       <header className="cf-fade" style={{ marginBottom: "var(--s-6)" }}>
         <div className="cf-eyebrow" style={{ color: "var(--ember)", marginBottom: 10 }}>
-          RADAR
+          RADAR V2
         </div>
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
           <div>
@@ -517,7 +531,7 @@ export default function RadarPage() {
               Radar editorial
             </h1>
             <p className="cf-body" style={{ maxWidth: 680, margin: "12px 0 0" }}>
-              Noticias virales, ideas por agente, fuentes, riesgo y creacion ordenada de proyectos.
+              Temas virales, dolores de audiencia, hooks, noticias y creacion ordenada de proyectos.
             </p>
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -558,7 +572,12 @@ export default function RadarPage() {
                   key={option.id}
                   className="cf-btn cf-btn--sm"
                   style={buttonStyle(filters.scope === option.id)}
-                  onClick={() => setFilters((current) => ({ ...current, scope: option.id }))}
+                  onClick={() => setFilters((current) => ({
+                    ...current,
+                    scope: option.id,
+                    agentId: option.id === "news" ? NEWS_AGENT_ID : current.agentId === NEWS_AGENT_ID ? DEFAULT_AGENT_ID : current.agentId,
+                    intent: option.id === "news" ? "news" : current.intent === "news" ? "viral_topics" : current.intent,
+                  }))}
                   type="button"
                 >
                   {option.label}
@@ -579,6 +598,33 @@ export default function RadarPage() {
               ))}
             </select>
           </label>
+          <div>
+            <div className="cf-mono-sm" style={{ marginBottom: 8 }}>Intencion</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {RADAR_INTENT_OPTIONS.map((option) => {
+                const selectedIntent = filters.scope === "news" ? "news" : filters.intent;
+                const disabled = filters.scope === "news" ? option.id !== "news" : option.id === "news";
+                return (
+                  <button
+                    key={option.id}
+                    className="cf-btn cf-btn--sm"
+                    style={{
+                      ...buttonStyle(selectedIntent === option.id),
+                      opacity: disabled ? 0.45 : 1,
+                    }}
+                    onClick={() => {
+                      if (disabled) return;
+                      setFilters((current) => ({ ...current, intent: option.id }));
+                    }}
+                    type="button"
+                    disabled={disabled}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <label>
             <div className="cf-mono-sm" style={{ marginBottom: 8 }}>Categoria</div>
             <select

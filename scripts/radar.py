@@ -19,10 +19,19 @@ DEFAULT_MARKET = "mx"
 DEFAULT_LANGUAGE = "es"
 DEFAULT_WINDOW = "today"
 DEFAULT_CATEGORY = "all"
+DEFAULT_INTENT = "viral_topics"
 MAX_MANUAL_LIMIT = 12
 MAX_AGENT_LIMIT = 5
 RADAR_CACHE_TTL_SECONDS = 3600
-RADAR_CACHE_VERSION = "v2"
+RADAR_CACHE_VERSION = "v3"
+RADAR_INTENTS = {
+    "news",
+    "viral_topics",
+    "audience_pain",
+    "evergreen",
+    "shorts_hooks",
+    "calendar_gaps",
+}
 
 HIGH_RISK_TERMS = {
     "acusacion",
@@ -47,6 +56,44 @@ NEWS_QUERIES = [
     "polemica viral esta semana",
     "historia detras de noticia viral",
 ]
+
+PODCAST_AGENT_IDS = {"agent_podcast_general", "agent_tiktok_podcast"}
+PODCAST_TOPIC_CORE = (
+    "apego emocional ruptura contacto cero limites amor propio ghosting "
+    "breadcrumbing ansiedad en relaciones dependencia emocional duelo amoroso"
+)
+PODCAST_FALLBACK_SEEDS = {
+    "viral_topics": [
+        "Por que confundes ansiedad con amor",
+        "La senal de que no era amor, era apego",
+        "Cuando te busca justo cuando ya estabas sanando",
+        "Por que el contacto cero duele como abstinencia",
+    ],
+    "audience_pain": [
+        "Me dejo en visto pero sigue viendo mis historias",
+        "Por que extraño a alguien que me hacia sentir insegura",
+        "No puedo soltar aunque se que no me conviene",
+        "Cuando pedir claridad se siente como rogar amor",
+    ],
+    "shorts_hooks": [
+        "No extrañas a esa persona: extrañas la version de ti que inventaste",
+        "Si te da paz solo cuando aparece, no es paz",
+        "El amor no te deja revisando el celular cada cinco minutos",
+        "Contacto cero no es castigo: es desintoxicacion emocional",
+    ],
+    "evergreen": [
+        "Amor o apego: como reconocer la diferencia sin mentirte",
+        "Por que elegimos personas emocionalmente no disponibles",
+        "Los limites que salvan tu dignidad despues de una ruptura",
+        "Como dejar de romantizar la intensidad",
+    ],
+    "calendar_gaps": [
+        "Episodio puente: antes de volver con tu ex, escucha esto",
+        "Episodio corto: tres señales de que ya estas negociando tus limites",
+        "Episodio profundo: la fantasia de cierre que nunca llega",
+        "Episodio derivable: contacto cero para podcast, Shorts y TikTok",
+    ],
+}
 
 
 def now_iso() -> str:
@@ -96,6 +143,7 @@ def cache_key(
     language: str,
     category: str,
     window: str,
+    intent: str = DEFAULT_INTENT,
 ) -> str:
     raw = "|".join(
         [
@@ -106,9 +154,25 @@ def cache_key(
             normalize_text(language or DEFAULT_LANGUAGE),
             normalize_text(category or DEFAULT_CATEGORY),
             normalize_text(window or DEFAULT_WINDOW),
+            normalize_intent(intent),
         ]
     )
     return hashlib.sha1(raw.encode("utf-8", errors="ignore")).hexdigest()[:24]
+
+
+def normalize_intent(value: str | None) -> str:
+    intent = normalize_text(value or DEFAULT_INTENT).replace(" ", "_")
+    if intent in {"topics", "temas"}:
+        return "viral_topics"
+    if intent in {"pain", "dolores", "pain_points"}:
+        return "audience_pain"
+    if intent in {"hooks", "shorts"}:
+        return "shorts_hooks"
+    if intent in {"calendar", "gaps"}:
+        return "calendar_gaps"
+    if intent not in RADAR_INTENTS:
+        return DEFAULT_INTENT
+    return intent
 
 
 def agent_label(agent: dict) -> str:
@@ -139,20 +203,76 @@ def build_news_queries(
     return queries[: max(1, max_queries)]
 
 
+def build_podcast_queries(
+    agent: dict,
+    *,
+    market: str = DEFAULT_MARKET,
+    language: str = DEFAULT_LANGUAGE,
+    category: str = DEFAULT_CATEGORY,
+    intent: str = DEFAULT_INTENT,
+    max_queries: int = 3,
+) -> list[str]:
+    intent = normalize_intent(intent)
+    market_hint = "Mexico Latinoamerica" if normalize_text(market) in {"mx", "latam", "mexico"} else market
+    language_hint = "en espanol para audiencia latina" if normalize_text(language) in {"es", "es-mx", "spanish", "espanol"} else f"en {language}"
+    category_hint = "" if not category or category == "all" else f"{category} "
+    platform_hint = "TikTok Reels Shorts" if agent_id(agent) == "agent_tiktok_podcast" or intent == "shorts_hooks" else "podcast YouTube"
+
+    intent_queries = {
+        "viral_topics": [
+            f"temas virales relaciones {PODCAST_TOPIC_CORE} {market_hint} {language_hint}",
+            f"preguntas populares sobre {category_hint}apego ruptura contacto cero relaciones {market_hint} {language_hint}",
+            f"tendencias TikTok relaciones apego evitativo limerencia ghosting breadcrumbing {language_hint}",
+        ],
+        "audience_pain": [
+            f"dolores reales audiencia relaciones {PODCAST_TOPIC_CORE} reddit quora {language_hint}",
+            f"preguntas de personas que no pueden soltar a su ex apego ansiedad relaciones {market_hint} {language_hint}",
+            f"situaciones comunes despues de una ruptura contacto cero volver con ex limites {language_hint}",
+        ],
+        "shorts_hooks": [
+            f"frases virales hooks TikTok relaciones apego emocional ruptura contacto cero {language_hint}",
+            f"ganchos de video corto amor propio limites dependencia emocional ghosting {market_hint} {language_hint}",
+            f"temas para Shorts sobre ansiedad en relaciones apego evitativo breadcrumbing {language_hint}",
+        ],
+        "evergreen": [
+            f"temas evergreen podcast relaciones apego emocional limites amor propio {language_hint}",
+            f"preguntas frecuentes amor o apego dependencia emocional contacto cero ruptura {language_hint}",
+            f"temas profundos relaciones psicologia popular apego ansiedad limites {market_hint} {language_hint}",
+        ],
+        "calendar_gaps": [
+            f"ideas calendario editorial podcast relaciones apego ruptura contacto cero amor propio {language_hint}",
+            f"temas derivados podcast largo shorts tiktok relaciones apego limites {market_hint} {language_hint}",
+            f"huecos editoriales canal relaciones amor propio dependencia emocional {platform_hint} {language_hint}",
+        ],
+    }
+    return intent_queries.get(intent, intent_queries["viral_topics"])[: max(1, max_queries)]
+
+
 def build_agent_queries(
     agent: dict,
     *,
     market: str = DEFAULT_MARKET,
     language: str = DEFAULT_LANGUAGE,
     category: str = DEFAULT_CATEGORY,
+    intent: str = DEFAULT_INTENT,
     max_queries: int = 2,
 ) -> list[str]:
     aid = agent_id(agent)
-    if aid == NEWS_AGENT_ID:
+    intent = normalize_intent(intent)
+    if aid == NEWS_AGENT_ID or intent == "news":
         return build_news_queries(
             market=market,
             language=language,
             category=category,
+            max_queries=max_queries,
+        )
+    if aid in PODCAST_AGENT_IDS:
+        return build_podcast_queries(
+            agent,
+            market=market,
+            language=language,
+            category=category,
+            intent=intent,
             max_queries=max_queries,
         )
 
@@ -163,10 +283,26 @@ def build_agent_queries(
     market_hint = "Mexico Latinoamerica" if normalize_text(market) in {"mx", "latam"} else market
     language_hint = "en espanol para audiencia latina" if normalize_text(language) in {"es", "es-mx", "spanish", "espanol"} else f"en {language}"
     base = f"{name} {description}".strip()
-    queries = [
-        f"tendencias actuales para video de YouTube sobre {base} {market_hint} {language_hint}",
-        f"temas populares preguntas historias virales {base} {market_hint} {language_hint}",
-    ]
+    if intent == "audience_pain":
+        queries = [
+            f"preguntas populares problemas dudas audiencia sobre {base} {market_hint} {language_hint}",
+            f"dolores curiosidades debates de audiencia para video sobre {base} {language_hint}",
+        ]
+    elif intent == "shorts_hooks":
+        queries = [
+            f"hooks virales TikTok Shorts para tema {base} {market_hint} {language_hint}",
+            f"frases virales preguntas cortas sobre {base} {language_hint}",
+        ]
+    elif intent == "evergreen":
+        queries = [
+            f"temas evergreen preguntas frecuentes video YouTube sobre {base} {language_hint}",
+            f"ideas de contenido atemporal documental sobre {base} {market_hint} {language_hint}",
+        ]
+    else:
+        queries = [
+            f"tendencias actuales para video de YouTube sobre {base} {market_hint} {language_hint}",
+            f"temas populares preguntas historias virales {base} {market_hint} {language_hint}",
+        ]
     if example_hint:
         queries.append(f"ideas relacionadas con {example_hint} tendencia video documental {language_hint}")
     if category and category != "all":
@@ -174,16 +310,20 @@ def build_agent_queries(
     return queries[: max(1, max_queries)]
 
 
-def fallback_candidates_for_agent(agent: dict, *, limit: int = 3) -> list[dict]:
+def fallback_candidates_for_agent(agent: dict, *, limit: int = 3, intent: str = DEFAULT_INTENT) -> list[dict]:
     aid = agent_id(agent)
     name = agent_label(agent)
     description = compact_text(agent.get("description"), 180)
     examples = agent.get("exampleTopics") or agent.get("examples") or []
-    seeds = examples[:limit] or [
-        f"Lo que nadie esta explicando sobre {name}",
-        f"La historia oculta detras de {name}",
-        f"Por que {name} esta volviendo a importar",
-    ]
+    intent = normalize_intent(intent)
+    if aid in PODCAST_AGENT_IDS:
+        seeds = PODCAST_FALLBACK_SEEDS.get(intent) or PODCAST_FALLBACK_SEEDS["viral_topics"]
+    else:
+        seeds = examples[:limit] or [
+            f"Lo que nadie esta explicando sobre {name}",
+            f"La historia oculta detras de {name}",
+            f"Por que {name} esta volviendo a importar",
+        ]
     candidates = []
     for index, seed in enumerate(seeds[:limit], 1):
         summary = description or f"Idea editorial sugerida para {name}."
@@ -197,6 +337,7 @@ def fallback_candidates_for_agent(agent: dict, *, limit: int = 3) -> list[dict]:
                 sources=[],
                 query="fallback",
                 source_type="fallback",
+                intent=intent,
                 recommended_format="youtube_long" if not str(agent.get("platform")) == "tiktok" else "tiktok",
                 rank_seed=index,
             )
@@ -210,8 +351,10 @@ def tavily_results_to_candidates(
     response: dict | None,
     *,
     limit: int = 5,
+    intent: str = DEFAULT_INTENT,
 ) -> list[dict]:
     response = response or {}
+    intent = normalize_intent(intent)
     answer = compact_text(response.get("answer"), 360)
     results = response.get("results") or []
     candidates = []
@@ -235,6 +378,7 @@ def tavily_results_to_candidates(
                 sources=[source] if url else [],
                 query=query,
                 source_type="tavily",
+                intent=intent,
                 rank_seed=index,
             )
         )
@@ -249,6 +393,7 @@ def tavily_results_to_candidates(
                 sources=[],
                 query=query,
                 source_type="tavily_answer",
+                intent=intent,
                 rank_seed=1,
             )
         )
@@ -259,11 +404,43 @@ def build_angle(agent: dict, title: str, summary: str) -> str:
     aid = agent_id(agent)
     if aid == NEWS_AGENT_ID:
         return f"La historia detras de {title}: que paso, por que se volvio viral y que revela"
-    if aid == "agent_podcast_general":
-        return f"{title}: una conversacion sobre apego, deseo, limites y autoengano"
+    if aid in PODCAST_AGENT_IDS:
+        topic = clean_source_title(title)
+        if is_podcast_brand_meta(topic, summary):
+            topic = "un patron de apego que la audiencia esta viviendo"
+        return f"{topic}: una conversacion sobre apego, limites, deseo y autoengano"
     if aid in {"agent_autohipnosis", "agent_meditacion_larga", "agent_tiktok_autohipnosis", "agent_tiktok_meditation"}:
         return f"{title}: una sesion segura, calmada y sin promesas medicas"
     return f"{title}: contado como una historia con contexto, giro y consecuencia"
+
+
+def clean_source_title(title: str) -> str:
+    text = compact_text(title, 150)
+    for separator in (" | ", " - ", " – ", " — "):
+        if separator in text:
+            text = text.split(separator, 1)[0].strip()
+    text = re.sub(r"\s+", " ", text)
+    return text.strip(" .,:;") or "Tema editorial"
+
+
+def is_podcast_brand_meta(title: str, summary: str = "") -> bool:
+    text = normalize_text(f"{title} {summary}")
+    if "esto no es amor" not in text:
+        return False
+    return not any(
+        term in text
+        for term in [
+            "apego",
+            "ruptura",
+            "contacto cero",
+            "ghosting",
+            "limites",
+            "ansiedad",
+            "dependencia",
+            "relacion",
+            "relaciones",
+        ]
+    )
 
 
 def infer_recommended_format(agent: dict, title: str, summary: str) -> str:
@@ -271,6 +448,8 @@ def infer_recommended_format(agent: dict, title: str, summary: str) -> str:
     lower = normalize_text(f"{title} {summary}")
     if str(agent.get("platform") or "").lower() == "tiktok" or aid.startswith("agent_tiktok_"):
         return "tiktok"
+    if aid == "agent_podcast_general" and any(token in lower for token in ["tiktok", "shorts", "hook", "frase viral"]):
+        return "both"
     if aid == NEWS_AGENT_ID and any(token in lower for token in ["viral", "tiktok", "video", "redes"]):
         return "both"
     if len(summary.split()) < 45 and any(token in lower for token in ["viral", "polemica", "debate", "nadie"]):
@@ -310,6 +489,22 @@ def score_candidate(candidate: dict, agent: dict) -> dict:
     risk_score = 90 if candidate.get("riskLevel") == "low" else 55 if candidate.get("riskLevel") == "medium" else 20
 
     viral_terms = ["viral", "polemica", "tendencia", "nadie", "secreto", "verdad", "debate", "historia"]
+    podcast_terms = [
+        "apego",
+        "limites",
+        "ruptura",
+        "contacto cero",
+        "ansiedad",
+        "ghosting",
+        "breadcrumbing",
+        "limerencia",
+        "dependencia",
+        "ex",
+        "duelo",
+        "amor propio",
+        "narcisismo",
+        "validacion",
+    ]
     audience += min(30, sum(1 for term in viral_terms if term in text) * 6)
     arc += min(25, sum(1 for term in ["porque", "detras", "consecuencia", "caida", "ascenso", "misterio"] if term in text) * 6)
     freshness += 25 if candidate.get("sourceType") in {"tavily", "tavily_answer"} else 0
@@ -317,7 +512,10 @@ def score_candidate(candidate: dict, agent: dict) -> dict:
     fit += 18 if normalize_text(agent_label(agent)).split(" ")[0] in text else 0
     fit += 20 if aid == NEWS_AGENT_ID and any(term in text for term in ["noticia", "viral", "redes", "polemica"]) else 0
     if aid == "agent_podcast_general":
-        fit += 20 if any(term in text for term in ["amor", "apego", "limites", "ruptura", "contacto cero", "ansiedad"]) else 0
+        fit += min(30, sum(1 for term in podcast_terms if term in text) * 6)
+        if is_podcast_brand_meta(candidate.get("title") or "", candidate.get("summary") or ""):
+            audience -= 20
+            fit -= 30
     if len(sources) >= 2:
         freshness += 10
         risk_score += 5
@@ -360,10 +558,12 @@ def shape_candidate(
     sources: list[dict],
     query: str,
     source_type: str,
+    intent: str = DEFAULT_INTENT,
     recommended_format: str | None = None,
     rank_seed: int = 0,
 ) -> dict:
     aid = agent_id(agent)
+    intent = "news" if aid == NEWS_AGENT_ID else normalize_intent(intent)
     primary_url = (sources[0] or {}).get("url") if sources else ""
     risk_level, risk_reason = classify_risk(agent, title, summary, sources)
     candidate = {
@@ -374,6 +574,8 @@ def shape_candidate(
         "platform": str(agent.get("platform") or ("tiktok" if aid.startswith("agent_tiktok_") else "youtube")),
         "format": agent.get("format") or "",
         "category": agent.get("category") or "",
+        "intent": intent,
+        "radarIntent": intent,
         "title": compact_text(title, 180),
         "headline": compact_text(title, 180),
         "summary": compact_text(summary, 650),
@@ -462,6 +664,13 @@ def apply_llm_ranking(candidates: list[dict], llm_items: list[dict]) -> list[dic
             score = candidate.get("editorialScore", 0)
         candidate["editorialScore"] = score
         candidate.setdefault("scores", {})["overall"] = score
+        if llm_item.get("title"):
+            candidate["title"] = compact_text(llm_item["title"], 180)
+            candidate["headline"] = candidate["title"]
+        if llm_item.get("summary"):
+            candidate["summary"] = compact_text(llm_item["summary"], 650)
+        if llm_item.get("whyNow"):
+            candidate["whyNow"] = compact_text(llm_item["whyNow"], 420)
         if llm_item.get("angle"):
             candidate["angle"] = compact_text(llm_item["angle"], 240)
         if llm_item.get("riskLevel") in {"low", "medium", "high"}:
@@ -475,7 +684,8 @@ def apply_llm_ranking(candidates: list[dict], llm_items: list[dict]) -> list[dic
     return ranked
 
 
-def build_ranking_prompt(candidates: list[dict], *, scope: str) -> str:
+def build_ranking_prompt(candidates: list[dict], *, scope: str, intent: str = DEFAULT_INTENT) -> str:
+    intent = normalize_intent(intent)
     compact = [
         {
             "candidateHash": c.get("candidateHash"),
@@ -483,6 +693,7 @@ def build_ranking_prompt(candidates: list[dict], *, scope: str) -> str:
             "title": c.get("title"),
             "summary": c.get("summary"),
             "angle": c.get("angle"),
+            "intent": c.get("intent") or intent,
             "sources": [s.get("domain") or s.get("url") for s in c.get("sources", [])],
             "riskLevel": c.get("riskLevel"),
             "editorialScore": c.get("editorialScore"),
@@ -493,9 +704,16 @@ def build_ranking_prompt(candidates: list[dict], *, scope: str) -> str:
         "Eres editor estrategico de Content Factory. Rankea estas ideas de video.\n"
         "Devuelve EXCLUSIVAMENTE JSON array. No markdown.\n"
         "Cada item debe conservar candidateHash e incluir: editorialScore 0-100, "
-        "angle, riskLevel low|medium|high, riskReason, recommendationReason.\n"
+        "title, summary, angle, riskLevel low|medium|high, riskReason, recommendationReason.\n"
+        "Reescribe title y angle en español latino como temas concretos, no como busquedas ni titulos SEO genericos.\n"
+        "Si el agente es Esto no es amor o TikTok Podcast, NO propongas ideas sobre el nombre de la marca. "
+        "Convierte cada resultado en un dolor, conflicto o pregunta real de audiencia sobre apego, ruptura, "
+        "contacto cero, limites, amor propio, ghosting, ansiedad en relaciones o dependencia emocional.\n"
+        "Para shorts_hooks, prioriza frases con punch emocional. Para audience_pain, prioriza situaciones que "
+        "la audiencia diria en primera persona. Para evergreen, prioriza temas atemporales.\n"
         "Penaliza fuentes debiles, promesas medicas, acusaciones legales sin evidencia y sensacionalismo.\n"
         f"Scope: {scope}\n"
+        f"Intent: {intent}\n"
         f"Candidatos:\n{json.dumps(compact, ensure_ascii=False)}"
     )
 

@@ -29,6 +29,7 @@ const NAV = [
 ];
 
 const RADAR_ENABLED = process.env.NEXT_PUBLIC_CONTENT_FACTORY_RADAR_ENABLED !== "false";
+const KNOWLEDGE_ENABLED = process.env.NEXT_PUBLIC_CONTENT_FACTORY_KNOWLEDGE_ENABLED !== "false";
 
 const PLAN_LABELS = {
   free:    { label: "FREE",    badgeClass: "cf-badge--free" },
@@ -298,6 +299,7 @@ export default function Sidebar() {
     ? [
         ...NAV.slice(0, 2),
         ...(RADAR_ENABLED ? [{ id: "radar", icon: "trendingUp", label: "Radar", href: "/dashboard/radar" }] : []),
+        ...(KNOWLEDGE_ENABLED ? [{ id: "knowledge", icon: "bookOpen", label: "Conocimiento", href: "/dashboard/knowledge" }] : []),
         ...NAV.slice(2),
         { id: "admin", icon: "lock", label: "Admin", href: "/dashboard/admin" },
       ]

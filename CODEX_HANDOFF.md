@@ -83,6 +83,44 @@ Verificacion pendiente en entorno completo:
 - `cd web && npm run build`
 - `workflow_dispatch` del Radar nocturno cuando los secrets esten confirmados.
 
+### Base de conocimiento Qdrant v1
+
+Implementada en la sesion 2026-05-10:
+
+- Frontend admin-only: `/dashboard/knowledge`, sidebar "Conocimiento" si `NEXT_PUBLIC_CONTENT_FACTORY_KNOWLEDGE_ENABLED !== "false"`.
+- Backend admin-only:
+  - `GET /knowledge/summary`
+  - `POST /knowledge/sync-index`
+  - `GET /knowledge/books`
+  - `GET /knowledge/books/{bookId}`
+  - `GET /knowledge/books/{bookId}/chunks`
+  - `POST /knowledge/search`
+  - `POST /knowledge/ingest/pdf`
+  - `GET /knowledge/ingest/{jobId}`
+- Modulo puro: `scripts/knowledge.py` con cliente Qdrant, filtros, scan de indice, chunking, embeddings y upsert.
+- Firestore nuevo: `knowledgeBooks`, `knowledgeIngestJobs`, `knowledgeMeta/summary`.
+- Celery task: `content_factory.ingest_knowledge_pdf`.
+- Infra: `content-api` y `content-worker` conectados a red externa Docker `qdrant_default`; deploy workflow puede propagar `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_KNOWLEDGE_COLLECTION`.
+- Coleccion objetivo: `valtyk_knowledge`; no exponer `claude_sessions`.
+- Radar 2 aun no consume Knowledge Hub; quedo listo el contrato `/knowledge/search`.
+
+Flags:
+
+- Backend: `CONTENT_FACTORY_KNOWLEDGE_ENABLED`, `CONTENT_FACTORY_KNOWLEDGE_ADMIN_ONLY`.
+- Frontend: `NEXT_PUBLIC_CONTENT_FACTORY_KNOWLEDGE_ENABLED`.
+- Qdrant: `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_KNOWLEDGE_COLLECTION`.
+
+Pruebas agregadas:
+
+- `tests/test_knowledge.py`
+
+Verificacion local 2026-05-10:
+
+- `uv run python -m py_compile scripts/knowledge.py api.py worker_tasks.py`
+- `uv run --with pytest --with requests pytest tests/test_knowledge.py`
+- `cd web && npm run lint`
+- `cd web && npm run build`
+
 Segun `MANUAL.md`:
 
 - Descarga de video: resuelta con API HTTPS + Firebase Storage signed URLs.

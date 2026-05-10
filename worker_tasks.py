@@ -99,3 +99,35 @@ def publish_tiktok_inbox(self, uid: str, job_id: str):
     api_module._run_tiktok_publish_job(uid, job_id)
     print(f"[WORKER] publish_tiktok_inbox finished | job_id={job_id}", flush=True)
     return {"job_id": job_id, "status": "handled"}
+
+
+@celery_app.task(
+    bind=True,
+    name="content_factory.ingest_knowledge_pdf",
+    autoretry_for=(ConnectionError, TimeoutError),
+    max_retries=1,
+    retry_backoff=60,
+    retry_jitter=True,
+)
+def ingest_knowledge_pdf(self, job_id: str):
+    """Extract, chunk, embed and upsert a PDF into the Knowledge Hub collection."""
+    try:
+        import sentry_sdk
+        sentry_sdk.set_tag("knowledge_job_id", job_id)
+        sentry_sdk.set_tag("celery_task_id", self.request.id)
+        sentry_sdk.set_context(
+            "knowledge_ingest_task",
+            {
+                "task_name": self.name,
+                "task_id": self.request.id,
+                "job_id": job_id,
+                "retry_count": self.request.retries,
+            },
+        )
+    except Exception:
+        pass
+
+    print(f"[WORKER] ingest_knowledge_pdf starting | job_id={job_id} | task_id={self.request.id}", flush=True)
+    result = api_module._run_knowledge_ingest_job(job_id)
+    print(f"[WORKER] ingest_knowledge_pdf finished | job_id={job_id}", flush=True)
+    return result

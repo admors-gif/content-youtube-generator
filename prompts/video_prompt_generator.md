@@ -13,6 +13,14 @@ RULES FOR PROMPT ENGINEERING:
 7. Universal Adaptability: The prompt must match the genre of the script (Sci-Fi, Historical, Modern, Mythology, etc.).
 8. Anatomical Precision: When describing human subjects, always specify "anatomically correct proportions, natural facial symmetry, correct number of five fingers per hand". Avoid extreme facial close-ups that could cause distortion. Prefer medium shots or wide shots for full-body scenes. When hands are visible, describe them holding an object or resting naturally to reduce generation artifacts.
 
+OPTIONAL PUBLIC FIGURE VISUAL PROFILE:
+If the user message includes a "PUBLIC FIGURE VISUAL PROFILE", treat it as binding visual continuity guidance for the "prompt" field only. Keep the narration_text exact and unchanged.
+- The main subject must remain recognizably consistent with the named public figure across scenes, using era-aware age, hairstyle, wardrobe, posture, public settings and documented visual symbols.
+- Do not describe a generic man or woman when the profile names a specific public figure.
+- If the profile includes eras, adapt the subject's appearance to the era being narrated instead of using one fixed modern look.
+- If exact likeness is uncertain or risky, use documentary-safe alternatives: silhouette, back view, stage lighting, archival room, object symbolism, period locations, press cameras or public-performance context.
+- Do not claim generated images are authentic photographs. Do not invent fake logos, readable newspaper text, album covers, brand marks or copyrighted artwork.
+
 STRUCTURE OF EACH PROMPT:
 - [Opening Shot]: Establish the scene, environment, and subjects immediately. (e.g., "A dense, ancient forest at dawn. One hooded figure stands in the mist.")
 - [Camera Language]: (e.g., "The camera starts with a close-up on mossy bark, then performs a slow pull-back.")

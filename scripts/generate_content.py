@@ -31,6 +31,26 @@ try:
     from scripts.brand_profiles import DEFAULT_BRAND_PROFILE_ID, brand_profile_snapshot, get_brand_profile
 except Exception:
     from brand_profiles import DEFAULT_BRAND_PROFILE_ID, brand_profile_snapshot, get_brand_profile
+try:
+    from scripts.public_figure_visuals import (
+        annotate_scenes_with_public_figure_visuals,
+        download_assigned_reference_images,
+        format_visual_profile_for_prompt,
+        prepare_public_figure_visuals,
+        project_output_slug,
+        should_prepare_public_figure_visuals,
+        write_public_figure_visual_outputs,
+    )
+except Exception:
+    from public_figure_visuals import (
+        annotate_scenes_with_public_figure_visuals,
+        download_assigned_reference_images,
+        format_visual_profile_for_prompt,
+        prepare_public_figure_visuals,
+        project_output_slug,
+        should_prepare_public_figure_visuals,
+        write_public_figure_visual_outputs,
+    )
 
 # Cargar variables de entorno
 load_dotenv()
@@ -451,7 +471,12 @@ def add_emotion_tags(script_text: str, prompt_file: str = "emotion_tagger.md") -
 # ============================================================
 # MOTOR 2: PROMPTS VISUALES
 # ============================================================
-def generate_video_prompts_claude(chunk: str, scene_counter: int, prompt_file: str = "video_prompt_generator.md") -> list:
+def generate_video_prompts_claude(
+    chunk: str,
+    scene_counter: int,
+    prompt_file: str = "video_prompt_generator.md",
+    visual_context: str | None = None,
+) -> list:
     """
     Genera prompts de video usando el motor visual configurado.
 
@@ -463,6 +488,12 @@ def generate_video_prompts_claude(chunk: str, scene_counter: int, prompt_file: s
     start_seconds = scene_counter * 5
     start_mm = start_seconds // 60
     start_ss = start_seconds % 60
+    visual_context_block = ""
+    if visual_context:
+        visual_context_block = (
+            "\n\nPUBLIC FIGURE VISUAL PROFILE (apply only to visual prompt fields):\n"
+            f"{visual_context}\n"
+        )
 
     for attempt in range(3):
         try:
@@ -484,6 +515,7 @@ def generate_video_prompts_claude(chunk: str, scene_counter: int, prompt_file: s
                             f"No omitas ninguna parte del fragmento.\n\n"
                             f"Responde SOLO con un JSON valido con la estructura: "
                             f"{{\"scenes\": [...]}}\n\n"
+                            f"{visual_context_block}"
                             f"FRAGMENTO DE NARRATIVA:\n\n{chunk}"
                         )
                     }
@@ -524,7 +556,12 @@ def generate_video_prompts_claude(chunk: str, scene_counter: int, prompt_file: s
     return None
 
 
-def generate_video_prompts_gpt(chunk: str, scene_counter: int, prompt_file: str = "video_prompt_generator.md") -> list:
+def generate_video_prompts_gpt(
+    chunk: str,
+    scene_counter: int,
+    prompt_file: str = "video_prompt_generator.md",
+    visual_context: str | None = None,
+) -> list:
     """
     Genera prompts de video usando el fallback OpenAI configurado.
 
@@ -535,6 +572,12 @@ def generate_video_prompts_gpt(chunk: str, scene_counter: int, prompt_file: str 
     start_seconds = scene_counter * 5
     start_mm = start_seconds // 60
     start_ss = start_seconds % 60
+    visual_context_block = ""
+    if visual_context:
+        visual_context_block = (
+            "\n\nPUBLIC FIGURE VISUAL PROFILE (apply only to visual prompt fields):\n"
+            f"{visual_context}\n"
+        )
 
     for attempt in range(3):
         try:
@@ -558,6 +601,7 @@ def generate_video_prompts_gpt(chunk: str, scene_counter: int, prompt_file: str 
                             f"No omitas ninguna parte del fragmento.\n\n"
                             f"Responde SOLO con un JSON valido con la estructura: "
                             f"{{\"scenes\": [...]}}\n\n"
+                            f"{visual_context_block}"
                             f"FRAGMENTO DE NARRATIVA:\n\n{chunk}"
                         )
                     }
@@ -602,7 +646,11 @@ def generate_video_prompts_gpt(chunk: str, scene_counter: int, prompt_file: str 
     return None
 
 
-def generate_video_prompts(script_text: str, prompt_file: str = "video_prompt_generator.md") -> list:
+def generate_video_prompts(
+    script_text: str,
+    prompt_file: str = "video_prompt_generator.md",
+    visual_context: str | None = None,
+) -> list:
     """
     Motor 2: Genera prompts de video cinematográficos.
     Usa el motor visual primario configurado y fallback OpenAI.
@@ -644,13 +692,28 @@ def generate_video_prompts(script_text: str, prompt_file: str = "video_prompt_ge
         # Intentar con Claude primero, fallback a GPT
         chunk_scenes = None
         if use_claude:
-            chunk_scenes = generate_video_prompts_claude(chunk, scene_counter, prompt_file=prompt_file)
+            chunk_scenes = generate_video_prompts_claude(
+                chunk,
+                scene_counter,
+                prompt_file=prompt_file,
+                visual_context=visual_context,
+            )
             if chunk_scenes is None:
                 print(f"   ⚠️  Motor visual primario falló en chunk {i+1}, usando fallback...")
                 if openai_client:
-                    chunk_scenes = generate_video_prompts_gpt(chunk, scene_counter, prompt_file=prompt_file)
+                    chunk_scenes = generate_video_prompts_gpt(
+                        chunk,
+                        scene_counter,
+                        prompt_file=prompt_file,
+                        visual_context=visual_context,
+                    )
         else:
-            chunk_scenes = generate_video_prompts_gpt(chunk, scene_counter, prompt_file=prompt_file)
+            chunk_scenes = generate_video_prompts_gpt(
+                chunk,
+                scene_counter,
+                prompt_file=prompt_file,
+                visual_context=visual_context,
+            )
 
         # SEGUNDO INTENTO: Si falló, intentar dividir el chunk en sub-chunks más pequeños
         if chunk_scenes is None:
@@ -662,9 +725,19 @@ def generate_video_prompts(script_text: str, prompt_file: str = "video_prompt_ge
                 print(f"      Sub-chunk {j+1}/{len(sub_paragraphs)}...")
                 sub_result = None
                 if use_claude:
-                    sub_result = generate_video_prompts_claude(sub_p, scene_counter + len(sub_scenes), prompt_file=prompt_file)
+                    sub_result = generate_video_prompts_claude(
+                        sub_p,
+                        scene_counter + len(sub_scenes),
+                        prompt_file=prompt_file,
+                        visual_context=visual_context,
+                    )
                 if sub_result is None and openai_client:
-                    sub_result = generate_video_prompts_gpt(sub_p, scene_counter + len(sub_scenes), prompt_file=prompt_file)
+                    sub_result = generate_video_prompts_gpt(
+                        sub_p,
+                        scene_counter + len(sub_scenes),
+                        prompt_file=prompt_file,
+                        visual_context=visual_context,
+                    )
                 if sub_result:
                     sub_scenes.extend(sub_result)
                 else:
@@ -2392,6 +2465,8 @@ def run_full_pipeline(
         print("🌌 Modo MEDITACION LARGA detectado — duracion extendida con bajo costo")
     if is_tiktok:
         print(f"⚡ Modo TIKTOK detectado — {tiktok_format} vertical {tiktok_profile['id']}")
+    public_figure_visuals = {"enabled": False, "detected": False}
+    public_figure_visual_context = ""
 
     try:
         update_progress(project_id, "Escribiendo la estructura narrativa...", 10, {"status": "scripting"})
@@ -2481,6 +2556,35 @@ def run_full_pipeline(
             print(f"   🎭 Podcast parseado: {len(podcast_blocks)} bloques de diálogo → "
                   f"{len(podcast_scenes_grouped)} escenas visuales")
 
+        generic_documentary_visuals = not (is_podcast or is_autohypnosis or is_long_meditation or is_tiktok)
+        if generic_documentary_visuals and should_prepare_public_figure_visuals(
+            topic,
+            agent_file,
+            generation_options,
+        ):
+            try:
+                update_progress(project_id, "Buscando referencias visuales del personaje...", 55, {"status": "prompting"})
+                public_figure_visuals = prepare_public_figure_visuals(
+                    topic,
+                    agent_file,
+                    generation_options=generation_options,
+                )
+                if public_figure_visuals.get("detected"):
+                    profile = public_figure_visuals.get("profile") or {}
+                    public_figure_visual_context = format_visual_profile_for_prompt(profile)
+                    print(
+                        "   🧭 Persona pública detectada: "
+                        f"{public_figure_visuals.get('subject')} | "
+                        f"{public_figure_visuals.get('referencesCount', 0)} referencias licenciadas"
+                    )
+            except Exception as visual_err:
+                public_figure_visuals = {
+                    "enabled": True,
+                    "detected": False,
+                    "error": str(visual_err)[:200],
+                }
+                print(f"   ⚠️ Referencias visuales omitidas: {visual_err}")
+
         update_progress(project_id, "Diseñando escenas visuales...", 60, {"status": "prompting"})
 
         # PASO 3: Generar prompts de video (estética por formato)
@@ -2523,7 +2627,39 @@ def run_full_pipeline(
             print(f"   🌌 Meditacion larga visual: {len(video_scenes)} escenas casi estaticas "
                   f"(final={long_profile['target_minutes']} min)")
         else:
-            video_scenes = generate_video_prompts(script, prompt_file="video_prompt_generator.md")
+            video_scenes = generate_video_prompts(
+                script,
+                prompt_file="video_prompt_generator.md",
+                visual_context=public_figure_visual_context,
+            )
+
+        if public_figure_visuals.get("detected"):
+            try:
+                video_scenes = annotate_scenes_with_public_figure_visuals(
+                    video_scenes,
+                    public_figure_visuals,
+                    max_archive_images=int(
+                        generation_options.get("public_figure_archive_image_limit")
+                        or generation_options.get("publicFigureArchiveImageLimit")
+                        or 4
+                    ),
+                )
+                output_folder = project_output_slug(topic, project_id)
+                project_dir = BASE_DIR / "output" / "videos" / output_folder
+                images_dir = project_dir / "images"
+                download_stats = download_assigned_reference_images(video_scenes, images_dir)
+                public_figure_visuals["downloadStats"] = download_stats
+                write_public_figure_visual_outputs(
+                    project_dir,
+                    public_figure_visuals,
+                    scenes=video_scenes,
+                    download_stats=download_stats,
+                )
+                if download_stats.get("downloaded"):
+                    print(f"   🖼️  {download_stats['downloaded']} imágenes reales licenciadas preparadas")
+            except Exception as archive_err:
+                public_figure_visuals["archiveError"] = str(archive_err)[:200]
+                print(f"   ⚠️ Archivo visual externo omitido: {archive_err}")
 
         # Para podcast: enriquecer las escenas generadas con los dialogue_blocks
         # del parsing previo, alineando por scene_number cuando es posible.
@@ -2566,6 +2702,8 @@ def run_full_pipeline(
                 "script_characters": len(script),
             },
         }
+        if public_figure_visuals.get("detected"):
+            full_result["publicFigureVisuals"] = public_figure_visuals
         if is_autohypnosis or is_long_meditation:
             full_result["personalization"] = result["metadata"].get("personalization") or {
                 "enabled": False,
@@ -2691,6 +2829,8 @@ def run_full_pipeline(
                     "seo": seo,
                     "completedAt": firestore.SERVER_TIMESTAMP,
                 }
+                if public_figure_visuals.get("detected"):
+                    firestore_payload["publicFigureVisuals"] = public_figure_visuals
                 if is_long_meditation:
                     firestore_payload["script.speechEstimatedMinutes"] = result["metadata"].get("estimated_speech_minutes")
                     firestore_payload["script.targetMinutes"] = result["metadata"].get("target_duration_minutes")

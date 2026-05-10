@@ -21,6 +21,15 @@ export const RADAR_CATEGORY_OPTIONS = [
   { id: "technology", label: "Tecnologia" },
 ];
 
+export const RADAR_INTENT_OPTIONS = [
+  { id: "viral_topics", label: "Temas virales" },
+  { id: "audience_pain", label: "Dolores" },
+  { id: "shorts_hooks", label: "Hooks" },
+  { id: "evergreen", label: "Evergreen" },
+  { id: "calendar_gaps", label: "Huecos" },
+  { id: "news", label: "Noticias" },
+];
+
 export const RADAR_FORMAT_OPTIONS = [
   { id: "all", label: "Todos" },
   { id: "youtube_long", label: "YouTube largo" },
@@ -63,6 +72,12 @@ export function formatRecommendation(value) {
   if (key === "tiktok") return "TikTok";
   if (key === "youtube_long") return "YouTube largo";
   return key.replace(/_/g, " ");
+}
+
+export function formatRadarIntent(value) {
+  const key = String(value || "viral_topics").toLowerCase();
+  const option = RADAR_INTENT_OPTIONS.find((item) => item.id === key);
+  return option?.label || key.replace(/_/g, " ");
 }
 
 export function formatRadarDate(value) {

@@ -31,6 +31,16 @@ WELLNESS_AGENT = {
 }
 
 
+PODCAST_AGENT = {
+    "agentId": "agent_podcast_general",
+    "name": "Esto no es amor",
+    "description": "Conversacion sobre apego, limites y amor propio",
+    "category": "podcast",
+    "format": "podcast",
+    "promptFile": "agent_podcast_general.md",
+}
+
+
 def test_candidate_hash_uses_agent_title_and_source_domain():
     first = candidate_hash(NEWS_AGENT_ID, "La noticia viral", "https://example.com/a")
     second = candidate_hash(NEWS_AGENT_ID, "La noticia viral", "https://example.com/b")
@@ -55,6 +65,23 @@ def test_build_agent_queries_delegates_news_agent():
     assert "noticias virales" in queries[0]
 
 
+def test_podcast_queries_search_topics_not_brand_name():
+    queries = build_agent_queries(
+        PODCAST_AGENT,
+        market="mx",
+        category="all",
+        intent="audience_pain",
+        max_queries=3,
+    )
+    combined = " ".join(queries).lower()
+
+    assert len(queries) == 3
+    assert "esto no es amor" not in combined
+    assert "apego" in combined
+    assert "contacto cero" in combined
+    assert "audiencia" in combined or "preguntas" in combined
+
+
 def test_news_candidate_with_single_source_requires_medium_risk():
     candidate = shape_candidate(
         agent=NEWS_AGENT,
@@ -70,6 +97,23 @@ def test_news_candidate_with_single_source_requires_medium_risk():
     assert candidate["riskLevel"] == "medium"
     assert candidate["editorialScore"] > 0
     assert candidate["scores"]["freshness"] >= 70
+
+
+def test_podcast_candidate_penalizes_brand_meta_topic():
+    candidate = shape_candidate(
+        agent=PODCAST_AGENT,
+        title="Por que Esto no es amor es importante",
+        summary="Un texto sobre el nombre de la marca sin un dolor real de audiencia.",
+        angle="Meta",
+        why_now="Fallback",
+        sources=[],
+        query="q",
+        source_type="fallback",
+        intent="viral_topics",
+    )
+
+    assert candidate["intent"] == "viral_topics"
+    assert candidate["scores"]["fit"] < 60
 
 
 def test_wellness_candidate_penalizes_medical_claims():
@@ -150,6 +194,8 @@ def test_cache_key_changes_by_scope_agent_and_window():
     base = cache_key(scope="global", agent_id="all", market="mx", language="es", category="all", window="today")
     other = cache_key(scope="agent", agent_id=NEWS_AGENT_ID, market="mx", language="es", category="all", window="today")
     later = cache_key(scope="global", agent_id="all", market="mx", language="es", category="all", window="week")
+    intent = cache_key(scope="global", agent_id="all", market="mx", language="es", category="all", window="today", intent="audience_pain")
 
     assert base != other
     assert base != later
+    assert base != intent

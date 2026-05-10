@@ -1,4 +1,4 @@
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
@@ -28,6 +28,7 @@ from scripts.sentry_observability import (
 from scripts.brand_profiles import DEFAULT_BRAND_PROFILE_ID, brand_profile_snapshot
 from scripts.radar import (
     DEFAULT_CATEGORY as RADAR_DEFAULT_CATEGORY,
+    DEFAULT_INTENT as RADAR_DEFAULT_INTENT,
     DEFAULT_LANGUAGE as RADAR_DEFAULT_LANGUAGE,
     DEFAULT_MARKET as RADAR_DEFAULT_MARKET,
     DEFAULT_WINDOW as RADAR_DEFAULT_WINDOW,
@@ -45,6 +46,24 @@ from scripts.radar import (
     fallback_candidates_for_agent as _radar_fallback_candidates_for_agent,
     parse_ranking_response as _radar_parse_ranking_response,
     tavily_results_to_candidates as _radar_tavily_results_to_candidates,
+)
+from scripts.knowledge import (
+    DEFAULT_COLLECTION as KNOWLEDGE_DEFAULT_COLLECTION,
+    MAX_SEARCH_LIMIT as KNOWLEDGE_MAX_SEARCH_LIMIT,
+    KnowledgeConfig,
+    KnowledgeError,
+    QdrantKnowledgeClient,
+    book_filter as _knowledge_book_filter,
+    build_points as _knowledge_build_points,
+    chunk_text as _knowledge_chunk_text,
+    embed_texts as _knowledge_embed_texts,
+    extract_pdf_text as _knowledge_extract_pdf_text,
+    payload_category as _knowledge_payload_category,
+    payload_content as _knowledge_payload_content,
+    payload_book_title as _knowledge_payload_book_title,
+    scan_book_index as _knowledge_scan_book_index,
+    search_filter as _knowledge_search_filter,
+    stable_book_id as _knowledge_book_id,
 )
 
 FIREBASE_STORAGE_BUCKET = os.environ.get(
@@ -627,6 +646,7 @@ def _clean_radar_context_payload(raw) -> dict:
 
     context = {
         "candidateHash": _clean(raw.get("candidateHash") or raw.get("candidate_hash"), 80),
+        "intent": _clean(raw.get("intent") or raw.get("radarIntent") or raw.get("radar_intent"), 40),
         "title": _clean(raw.get("title") or raw.get("headline"), 180),
         "angle": _clean(raw.get("angle"), 260),
         "summary": _clean(raw.get("summary"), 900),
@@ -2822,13 +2842,18 @@ def _radar_request_defaults(data: dict | None) -> dict:
     if scope not in {"global", "agent", "news"}:
         scope = "global"
     agent_id = str(data.get("agentId") or data.get("agent_id") or "").strip()
+    intent = str(data.get("intent") or data.get("radarIntent") or RADAR_DEFAULT_INTENT).strip().lower().replace(" ", "_")
+    if intent not in {"news", "viral_topics", "audience_pain", "evergreen", "shorts_hooks", "calendar_gaps"}:
+        intent = RADAR_DEFAULT_INTENT
     if scope == "news":
         agent_id = RADAR_NEWS_AGENT_ID
+        intent = "news"
     limit = max(1, min(RADAR_MAX_MANUAL_LIMIT, _safe_int(data.get("limit"), 3)))
     query_limit = max(1, min(5, _safe_int(data.get("queryLimit"), 2)))
     return {
         "scope": scope,
         "agentId": agent_id,
+        "intent": intent,
         "market": str(data.get("market") or RADAR_DEFAULT_MARKET).strip().lower()[:24],
         "language": str(data.get("language") or RADAR_DEFAULT_LANGUAGE).strip().lower()[:12],
         "category": str(data.get("category") or RADAR_DEFAULT_CATEGORY).strip().lower()[:48],
@@ -2869,6 +2894,8 @@ def _radar_doc_to_public(doc_id: str, data: dict | None) -> dict:
         "mode": data.get("mode") or "",
         "scope": data.get("scope") or "",
         "agentId": data.get("agentId") or "",
+        "intent": data.get("intent") or data.get("radarIntent") or RADAR_DEFAULT_INTENT,
+        "radarIntent": data.get("intent") or data.get("radarIntent") or RADAR_DEFAULT_INTENT,
         "market": data.get("market") or RADAR_DEFAULT_MARKET,
         "language": data.get("language") or RADAR_DEFAULT_LANGUAGE,
         "category": data.get("category") or RADAR_DEFAULT_CATEGORY,
@@ -2950,7 +2977,7 @@ def _radar_search_tavily(query: str) -> dict:
         return {}
 
 
-def _radar_rank_with_llm(candidates: list[dict], *, scope: str) -> list[dict]:
+def _radar_rank_with_llm(candidates: list[dict], *, scope: str, intent: str) -> list[dict]:
     if not candidates or not os.environ.get("ANTHROPIC_API_KEY"):
         return candidates
     if scope == "global" and not _flag_enabled("CONTENT_FACTORY_RADAR_LLM_GLOBAL", default=False):
@@ -2961,7 +2988,7 @@ def _radar_rank_with_llm(candidates: list[dict], *, scope: str) -> list[dict]:
         resp = client.messages.create(
             model=os.environ.get("CONTENT_FACTORY_RADAR_MODEL", "claude-haiku-4-5-20251001"),
             max_tokens=1800,
-            messages=[{"role": "user", "content": _radar_build_ranking_prompt(candidates, scope=scope)}],
+            messages=[{"role": "user", "content": _radar_build_ranking_prompt(candidates, scope=scope, intent=intent)}],
         )
         ranked = _radar_parse_ranking_response(resp.content[0].text)
         return _radar_apply_llm_ranking(candidates, ranked)
@@ -2979,6 +3006,7 @@ def _radar_candidates_for_agent(
     market: str,
     language: str,
     category: str,
+    intent: str,
     query_limit: int,
     limit: int,
 ) -> list[dict]:
@@ -2988,13 +3016,14 @@ def _radar_candidates_for_agent(
         market=market,
         language=language,
         category=category,
+        intent=intent,
         max_queries=query_limit,
     ):
         result = _radar_search_tavily(query)
-        candidates.extend(_radar_tavily_results_to_candidates(agent, query, result, limit=5))
+        candidates.extend(_radar_tavily_results_to_candidates(agent, query, result, limit=5, intent=intent))
     if not candidates:
-        candidates = _radar_fallback_candidates_for_agent(agent, limit=limit)
-    return _radar_rank_with_llm(candidates, scope="agent")[:limit]
+        candidates = _radar_fallback_candidates_for_agent(agent, limit=limit, intent=intent)
+    return _radar_rank_with_llm(candidates, scope="agent", intent=intent)[:limit]
 
 
 def _radar_run_discovery(db, uid: str, params: dict, *, mode: str) -> dict:
@@ -3037,6 +3066,7 @@ def _radar_run_discovery(db, uid: str, params: dict, *, mode: str) -> dict:
                 market=params["market"],
                 language=params["language"],
                 category=params["category"],
+                intent=params["intent"],
                 query_limit=params["queryLimit"],
                 limit=per_agent_limit * 2,
             )
@@ -3063,6 +3093,7 @@ def _radar_run_discovery(db, uid: str, params: dict, *, mode: str) -> dict:
         language=params["language"],
         category=params["category"],
         window=params["window"],
+        intent=params["intent"],
     )
     payload = {
         "runId": f"{cache_id}-{int(generated_at.timestamp())}",
@@ -3070,6 +3101,8 @@ def _radar_run_discovery(db, uid: str, params: dict, *, mode: str) -> dict:
         "mode": mode,
         "scope": params["scope"],
         "agentId": params["agentId"] or "",
+        "intent": params["intent"],
+        "radarIntent": params["intent"],
         "market": params["market"],
         "language": params["language"],
         "category": params["category"],
@@ -3095,6 +3128,7 @@ def _radar_cached_run(db, params: dict) -> dict | None:
         language=params["language"],
         category=params["category"],
         window=params["window"],
+        intent=params["intent"],
     )
     snap = db.collection("radarRuns").document(cache_id).get()
     if not snap.exists:
@@ -3135,6 +3169,7 @@ def _radar_find_candidate(db, uid: str, candidate_hash: str) -> tuple[dict | Non
 def _radar_context_from_candidate(candidate: dict) -> dict:
     return _clean_radar_context_payload({
         "candidateHash": candidate.get("candidateHash"),
+        "intent": candidate.get("intent") or candidate.get("radarIntent") or RADAR_DEFAULT_INTENT,
         "title": candidate.get("title") or candidate.get("headline"),
         "angle": candidate.get("angle"),
         "summary": candidate.get("summary"),
@@ -3159,6 +3194,7 @@ def _radar_upsert_library_candidate(db, firestore, uid: str, candidate: dict, *,
         "agentFile": candidate.get("agentFile"),
         "platform": candidate.get("platform") or "youtube",
         "format": candidate.get("format") or "",
+        "intent": candidate.get("intent") or candidate.get("radarIntent") or RADAR_DEFAULT_INTENT,
         "title": candidate.get("title"),
         "angle": candidate.get("angle"),
         "summary": candidate.get("summary"),
@@ -3210,6 +3246,8 @@ def _library_public_item(doc_id: str, data: dict) -> dict:
         "title": data.get("title") or "",
         "angle": data.get("angle") or "",
         "summary": data.get("summary") or "",
+        "intent": data.get("intent") or data.get("radarIntent") or RADAR_DEFAULT_INTENT,
+        "radarIntent": data.get("intent") or data.get("radarIntent") or RADAR_DEFAULT_INTENT,
         "candidateHash": data.get("candidateHash") or "",
         "editorialScore": data.get("editorialScore") or (data.get("scores") or {}).get("overall") or 0,
         "riskLevel": risk.get("level") or data.get("riskLevel") or "low",
@@ -3239,6 +3277,315 @@ def _library_public_project(doc_id: str, data: dict) -> dict:
         "createdAt": _serialize_firestore_value(data.get("createdAt")),
         "updatedAt": _serialize_firestore_value(data.get("completedAt") or data.get("updatedAt") or data.get("createdAt")),
     }
+
+
+KNOWLEDGE_UPLOAD_DIR = Path(os.environ.get("KNOWLEDGE_UPLOAD_DIR", str(BASE_DIR / "output" / "knowledge_uploads")))
+KNOWLEDGE_MAX_UPLOAD_BYTES = int(os.environ.get("KNOWLEDGE_MAX_UPLOAD_BYTES", str(80 * 1024 * 1024)))
+KNOWLEDGE_SYNC_MAX_POINTS = int(os.environ.get("KNOWLEDGE_SYNC_MAX_POINTS", "300000"))
+
+
+def _knowledge_is_enabled() -> bool:
+    return _flag_enabled("CONTENT_FACTORY_KNOWLEDGE_ENABLED", default=True)
+
+
+def _knowledge_require_admin(request: Request, *, allow_local: bool = False) -> dict:
+    if not _knowledge_is_enabled():
+        raise HTTPException(status_code=404, detail="knowledge disabled")
+    if not _flag_enabled("CONTENT_FACTORY_KNOWLEDGE_ADMIN_ONLY", default=True):
+        return _require_principal(request, allow_admin=True, allow_local=allow_local)
+    return _require_admin(request, allow_local=allow_local)
+
+
+def _knowledge_collection() -> str:
+    return (os.environ.get("QDRANT_KNOWLEDGE_COLLECTION") or KNOWLEDGE_DEFAULT_COLLECTION).strip()
+
+
+def _knowledge_config_status() -> dict:
+    cfg = KnowledgeConfig.from_env()
+    return {
+        "qdrantUrlConfigured": bool(cfg.qdrant_url),
+        "apiKeyConfigured": bool(cfg.api_key),
+        "collection": cfg.collection,
+        "embeddingModel": cfg.embedding_model,
+    }
+
+
+def _knowledge_client() -> QdrantKnowledgeClient:
+    return QdrantKnowledgeClient()
+
+
+def _knowledge_public_book(doc_id: str, data: dict) -> dict:
+    return {
+        "bookId": data.get("bookId") or doc_id,
+        "title": data.get("title") or "Unknown",
+        "category": data.get("category") or "General",
+        "collection": data.get("collection") or _knowledge_collection(),
+        "chunksCount": _safe_int(data.get("chunksCount"), 0),
+        "sample": data.get("sample") or "",
+        "source": data.get("source") or "",
+        "status": data.get("status") or "indexed",
+        "firstSeenAt": _serialize_firestore_value(data.get("firstSeenAt")),
+        "lastSyncedAt": _serialize_firestore_value(data.get("lastSyncedAt")),
+        "updatedAt": _serialize_firestore_value(data.get("updatedAt")),
+    }
+
+
+def _knowledge_public_job(doc_id: str, data: dict) -> dict:
+    return {
+        "jobId": data.get("jobId") or doc_id,
+        "fileName": data.get("fileName") or "",
+        "title": data.get("title") or "",
+        "category": data.get("category") or "",
+        "collection": data.get("collection") or _knowledge_collection(),
+        "status": data.get("status") or "queued",
+        "progress": _safe_int(data.get("progress"), 0),
+        "chunksCount": _safe_int(data.get("chunksCount"), 0),
+        "error": data.get("error") or "",
+        "duplicate": bool(data.get("duplicate")),
+        "createdAt": _serialize_firestore_value(data.get("createdAt")),
+        "completedAt": _serialize_firestore_value(data.get("completedAt")),
+        "updatedAt": _serialize_firestore_value(data.get("updatedAt")),
+    }
+
+
+def _knowledge_book_doc(db, collection: str, title: str, category: str):
+    book_id = _knowledge_book_id(collection, title, category)
+    return book_id, db.collection("knowledgeBooks").document(book_id)
+
+
+def _knowledge_sync_index(db, firestore_module) -> dict:
+    client = _knowledge_client()
+    info = client.collection_info()
+    books = _knowledge_scan_book_index(client, page_limit=512, max_points=KNOWLEDGE_SYNC_MAX_POINTS)
+    batch = db.batch()
+    written = 0
+    now = firestore_module.SERVER_TIMESTAMP
+    for book_id, item in books.items():
+        batch.set(
+            db.collection("knowledgeBooks").document(book_id),
+            {
+                **item,
+                "status": "indexed",
+                "firstSeenAt": now,
+                "lastSyncedAt": now,
+                "updatedAt": now,
+            },
+            merge=True,
+        )
+        written += 1
+        if written % 400 == 0:
+            batch.commit()
+            batch = db.batch()
+    if written % 400:
+        batch.commit()
+
+    db.collection("knowledgeMeta").document("summary").set({
+        "collection": client.config.collection,
+        "pointsCount": info.get("points_count"),
+        "indexedVectorsCount": info.get("indexed_vectors_count"),
+        "status": info.get("status"),
+        "booksCount": len(books),
+        "lastSyncedAt": now,
+        "updatedAt": now,
+    }, merge=True)
+    categories = sorted({item.get("category") or "General" for item in books.values()})
+    return {
+        "ok": True,
+        "collection": client.config.collection,
+        "booksCount": len(books),
+        "categories": categories,
+        "pointsCount": info.get("points_count") or 0,
+        "indexedVectorsCount": info.get("indexed_vectors_count") or 0,
+        "status": info.get("status") or "",
+    }
+
+
+def _knowledge_list_books(db, *, category: str = "", query: str = "", limit: int = 80) -> list[dict]:
+    limit = max(1, min(250, _safe_int(limit, 80)))
+    text = (query or "").strip().lower()
+    collection = _knowledge_collection()
+    books: list[dict] = []
+    for doc in db.collection("knowledgeBooks").stream():
+        data = doc.to_dict() or {}
+        if data.get("collection") and data.get("collection") != collection:
+            continue
+        if category and category != "all" and data.get("category") != category:
+            continue
+        haystack = " ".join([
+            str(data.get("title") or ""),
+            str(data.get("category") or ""),
+            str(data.get("sample") or ""),
+        ]).lower()
+        if text and text not in haystack:
+            continue
+        books.append(_knowledge_public_book(doc.id, data))
+    books.sort(key=lambda item: (-_safe_int(item.get("chunksCount"), 0), item.get("title", "").lower()))
+    return books[:limit]
+
+
+def _knowledge_chunk_from_point(point: dict) -> dict:
+    payload = point.get("payload") or {}
+    return {
+        "pointId": str(point.get("id") or ""),
+        "score": point.get("score"),
+        "title": _knowledge_payload_book_title(payload),
+        "category": _knowledge_payload_category(payload),
+        "content": _knowledge_payload_content(payload, limit=900),
+        "metadata": payload.get("metadata") or {},
+    }
+
+
+def _knowledge_search(query: str, *, category: str = "", book_title: str = "", limit: int = 6) -> dict:
+    clean = re.sub(r"\s+", " ", str(query or "")).strip()
+    if len(clean) < 3:
+        raise HTTPException(status_code=400, detail="query too short")
+    client = _knowledge_client()
+    vector = _knowledge_embed_texts([clean], model=client.config.embedding_model)[0]
+    items = client.search(
+        vector,
+        limit=max(1, min(KNOWLEDGE_MAX_SEARCH_LIMIT, _safe_int(limit, 6))),
+        payload_filter=_knowledge_search_filter(category if category != "all" else "", book_title),
+    )
+    return {
+        "ok": True,
+        "query": clean,
+        "collection": client.config.collection,
+        "items": [_knowledge_chunk_from_point(item) for item in items],
+    }
+
+
+def _knowledge_update_job(db, firestore_module, job_id: str, **updates):
+    updates.setdefault("updatedAt", firestore_module.SERVER_TIMESTAMP)
+    db.collection("knowledgeIngestJobs").document(job_id).set(updates, merge=True)
+
+
+def _run_knowledge_ingest_job(job_id: str) -> dict:
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+
+    db = firestore.client()
+    ref = db.collection("knowledgeIngestJobs").document(job_id)
+    snap = ref.get()
+    if not snap.exists:
+        raise RuntimeError(f"knowledge ingest job not found: {job_id}")
+    job = snap.to_dict() or {}
+    title = re.sub(r"\s+", " ", str(job.get("title") or "")).strip()
+    category = re.sub(r"\s+", " ", str(job.get("category") or "General")).strip() or "General"
+    path = Path(str(job.get("filePath") or ""))
+    reindex = bool(job.get("reindex"))
+    client = _knowledge_client()
+
+    try:
+        _knowledge_update_job(db, firestore, job_id, status="extracting", progress=10, error="")
+        if not path.exists():
+            raise KnowledgeError("archivo PDF no encontrado")
+
+        exact_filter = _knowledge_book_filter(title, category)
+        existing_count = client.count(exact_filter)
+        book_id, book_ref = _knowledge_book_doc(db, client.config.collection, title, category)
+        if existing_count > 0 and not reindex:
+            book_ref.set({
+                "bookId": book_id,
+                "title": title,
+                "category": category,
+                "collection": client.config.collection,
+                "chunksCount": existing_count,
+                "source": "qdrant",
+                "status": "indexed",
+                "lastSyncedAt": firestore.SERVER_TIMESTAMP,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+            _knowledge_update_job(
+                db,
+                firestore,
+                job_id,
+                status="completed",
+                progress=100,
+                chunksCount=existing_count,
+                duplicate=True,
+                completedAt=firestore.SERVER_TIMESTAMP,
+            )
+            return {"ok": True, "jobId": job_id, "duplicate": True, "chunksCount": existing_count}
+
+        text = _knowledge_extract_pdf_text(path)
+        if not text:
+            raise KnowledgeError("PDF sin texto extraible")
+        _knowledge_update_job(db, firestore, job_id, status="chunking", progress=28)
+        chunks = _knowledge_chunk_text(text, chunk_size=1200, overlap=200)
+        if not chunks:
+            raise KnowledgeError("PDF sin chunks validos")
+
+        if reindex and existing_count > 0:
+            client.delete_by_filter(exact_filter)
+
+        all_points = []
+        for start in range(0, len(chunks), 64):
+            batch = chunks[start:start + 64]
+            _knowledge_update_job(
+                db,
+                firestore,
+                job_id,
+                status="embedding",
+                progress=35 + int((start / max(1, len(chunks))) * 35),
+                chunksCount=len(chunks),
+            )
+            vectors = _knowledge_embed_texts(batch, model=client.config.embedding_model)
+            all_points.extend(_knowledge_build_points(
+                collection=client.config.collection,
+                title=title,
+                category=category,
+                chunks=batch,
+                vectors=vectors,
+                source=job.get("fileName") or path.name,
+                start_index=start,
+            ))
+
+        _knowledge_update_job(db, firestore, job_id, status="upserting", progress=78, chunksCount=len(chunks))
+        client.upsert_points(all_points)
+        book_ref.set({
+            "bookId": book_id,
+            "title": title,
+            "category": category,
+            "collection": client.config.collection,
+            "chunksCount": len(chunks),
+            "sample": chunks[0][:320],
+            "source": job.get("fileName") or path.name,
+            "status": "indexed",
+            "firstSeenAt": firestore.SERVER_TIMESTAMP,
+            "lastSyncedAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+        _knowledge_update_job(
+            db,
+            firestore,
+            job_id,
+            status="completed",
+            progress=100,
+            chunksCount=len(chunks),
+            completedAt=firestore.SERVER_TIMESTAMP,
+        )
+        return {"ok": True, "jobId": job_id, "chunksCount": len(chunks)}
+    except Exception as exc:
+        _knowledge_update_job(
+            db,
+            firestore,
+            job_id,
+            status="failed",
+            error=str(exc)[:500],
+            completedAt=firestore.SERVER_TIMESTAMP,
+        )
+        raise
+
+
+def _enqueue_knowledge_ingest(job_id: str, background_tasks: BackgroundTasks) -> str:
+    try:
+        from worker_tasks import ingest_knowledge_pdf
+        task = ingest_knowledge_pdf.delay(job_id)
+        return getattr(task, "id", "") or "celery"
+    except Exception as exc:
+        print(f"   [knowledge] Celery enqueue failed, using background task: {exc}", flush=True)
+        background_tasks.add_task(_run_knowledge_ingest_job, job_id)
+        return "background"
 
 
 @app.post("/thumbnails/build/{project_id}")
@@ -3460,6 +3807,236 @@ async def recommend_agent(request: Request):
         )
 
 
+@app.get("/knowledge/summary")
+def knowledge_summary(request: Request):
+    _knowledge_require_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        config = _knowledge_config_status()
+        qdrant = {}
+        try:
+            info = _knowledge_client().collection_info()
+            qdrant = {
+                "ok": True,
+                "status": info.get("status"),
+                "pointsCount": info.get("points_count") or 0,
+                "indexedVectorsCount": info.get("indexed_vectors_count") or 0,
+                "segmentsCount": info.get("segments_count") or 0,
+            }
+        except Exception as exc:
+            qdrant = {"ok": False, "error": str(exc)[:220]}
+
+        books = _knowledge_list_books(db, limit=250)
+        categories = sorted({book.get("category") or "General" for book in books})
+        meta_snap = db.collection("knowledgeMeta").document("summary").get()
+        meta = meta_snap.to_dict() if meta_snap.exists else {}
+        recent_jobs = []
+        try:
+            for doc in db.collection("knowledgeIngestJobs").order_by("createdAt", direction=firestore.Query.DESCENDING).limit(5).stream():
+                recent_jobs.append(_knowledge_public_job(doc.id, doc.to_dict() or {}))
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "config": config,
+            "qdrant": qdrant,
+            "collection": config["collection"],
+            "booksCount": len(books),
+            "chunksCount": sum(_safe_int(book.get("chunksCount"), 0) for book in books),
+            "categories": categories,
+            "lastSyncedAt": _serialize_firestore_value(meta.get("lastSyncedAt")),
+            "recentJobs": recent_jobs,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/knowledge/sync-index")
+async def knowledge_sync_index(request: Request):
+    _knowledge_require_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        result = await run_in_threadpool(_knowledge_sync_index, db, firestore)
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.get("/knowledge/books")
+def knowledge_books(request: Request, category: str = "", q: str = "", limit: int = 80):
+    _knowledge_require_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        books = _knowledge_list_books(db, category=category, query=q, limit=limit)
+        return {"ok": True, "books": books, "count": len(books)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220], "books": []})
+
+
+@app.get("/knowledge/books/{book_id}")
+def knowledge_book_detail(book_id: str, request: Request):
+    _knowledge_require_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        snap = db.collection("knowledgeBooks").document(book_id).get()
+        if not snap.exists:
+            raise HTTPException(status_code=404, detail="book not found")
+        return {"ok": True, "book": _knowledge_public_book(snap.id, snap.to_dict() or {})}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.get("/knowledge/books/{book_id}/chunks")
+def knowledge_book_chunks(book_id: str, request: Request, limit: int = 12, cursor: str = ""):
+    _knowledge_require_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        snap = db.collection("knowledgeBooks").document(book_id).get()
+        if not snap.exists:
+            raise HTTPException(status_code=404, detail="book not found")
+        book = snap.to_dict() or {}
+        client = _knowledge_client()
+        result = client.scroll(
+            limit=max(1, min(50, _safe_int(limit, 12))),
+            offset=cursor or None,
+            payload_filter=_knowledge_book_filter(book.get("title") or "", book.get("category") or ""),
+            with_payload=True,
+        )
+        points = result.get("points") or []
+        return {
+            "ok": True,
+            "book": _knowledge_public_book(snap.id, book),
+            "chunks": [_knowledge_chunk_from_point(point) for point in points],
+            "nextCursor": result.get("next_page_offset") or "",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220], "chunks": []})
+
+
+@app.post("/knowledge/search")
+async def knowledge_search(request: Request):
+    _knowledge_require_admin(request)
+    try:
+        body = await request.json()
+        result = await run_in_threadpool(
+            _knowledge_search,
+            body.get("query") or "",
+            category=str(body.get("category") or ""),
+            book_title=str(body.get("bookTitle") or body.get("book_title") or ""),
+            limit=_safe_int(body.get("limit"), 6),
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220], "items": []})
+
+
+@app.post("/knowledge/ingest/pdf")
+async def knowledge_ingest_pdf(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    title: str = Form(...),
+    category: str = Form("General"),
+    reindex: bool = Form(False),
+):
+    principal = _knowledge_require_admin(request)
+    clean_title = re.sub(r"\s+", " ", str(title or "")).strip()
+    clean_category = re.sub(r"\s+", " ", str(category or "General")).strip() or "General"
+    if len(clean_title) < 2:
+        raise HTTPException(status_code=400, detail="title required")
+    filename = Path(file.filename or "upload.pdf").name
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="solo PDF")
+
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        job_ref = db.collection("knowledgeIngestJobs").document()
+        job_id = job_ref.id
+        folder = KNOWLEDGE_UPLOAD_DIR / job_id
+        folder.mkdir(parents=True, exist_ok=True)
+        pdf_path = folder / filename
+        total = 0
+        with pdf_path.open("wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > KNOWLEDGE_MAX_UPLOAD_BYTES:
+                    try:
+                        pdf_path.unlink()
+                    except Exception:
+                        pass
+                    raise HTTPException(status_code=413, detail="PDF demasiado grande")
+                out.write(chunk)
+
+        job_ref.set({
+            "jobId": job_id,
+            "fileName": filename,
+            "filePath": str(pdf_path),
+            "fileSize": total,
+            "title": clean_title,
+            "category": clean_category,
+            "collection": _knowledge_collection(),
+            "status": "queued",
+            "progress": 0,
+            "chunksCount": 0,
+            "error": "",
+            "reindex": bool(reindex),
+            "requestedBy": principal.get("uid") or "admin",
+            "createdAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        task_id = _enqueue_knowledge_ingest(job_id, background_tasks)
+        job_ref.set({"taskId": task_id, "updatedAt": firestore.SERVER_TIMESTAMP}, merge=True)
+        return {"ok": True, "job": _knowledge_public_job(job_id, {"jobId": job_id, "fileName": filename, "title": clean_title, "category": clean_category, "status": "queued", "progress": 0}), "taskId": task_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.get("/knowledge/ingest/{job_id}")
+def knowledge_ingest_status(job_id: str, request: Request):
+    _knowledge_require_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        snap = db.collection("knowledgeIngestJobs").document(job_id).get()
+        if not snap.exists:
+            raise HTTPException(status_code=404, detail="job not found")
+        return {"ok": True, "job": _knowledge_public_job(snap.id, snap.to_dict() or {})}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
 @app.post("/radar/run")
 async def radar_run(request: Request):
     principal = _radar_require_admin(request)
@@ -3485,6 +4062,7 @@ def radar_latest(
     request: Request,
     scope: str = "global",
     agentId: str = "",
+    intent: str = RADAR_DEFAULT_INTENT,
     market: str = RADAR_DEFAULT_MARKET,
     language: str = RADAR_DEFAULT_LANGUAGE,
     category: str = RADAR_DEFAULT_CATEGORY,
@@ -3494,6 +4072,7 @@ def radar_latest(
     params = _radar_request_defaults({
         "scope": scope,
         "agentId": agentId,
+        "intent": intent,
         "market": market,
         "language": language,
         "category": category,
@@ -3515,9 +4094,12 @@ def radar_latest(
                 language=params["language"],
                 category=params["category"],
                 window=params["window"],
+                intent=params["intent"],
             ),
             "scope": params["scope"],
             "agentId": params["agentId"],
+            "intent": params["intent"],
+            "radarIntent": params["intent"],
             "market": params["market"],
             "language": params["language"],
             "category": params["category"],
@@ -7878,6 +8460,18 @@ def run_production(project_id):
             target_duration = s.get("target_duration_seconds", s.get("targetDurationSeconds"))
             if target_duration:
                 scene_dict["target_duration_seconds"] = target_duration
+            for visual_key in (
+                "public_figure_subject",
+                "public_figure_visual_context",
+                "visual_source",
+                "visualSource",
+                "archive_reference_id",
+                "archiveReference",
+                "archive_image_local_path",
+                "archiveImageLocalPath",
+            ):
+                if visual_key in s:
+                    scene_dict[visual_key] = s[visual_key]
             # Para podcast, propagar dialogue_blocks (los necesita la dual TTS)
             if is_podcast_project and s.get("dialogue_blocks"):
                 scene_dict["dialogue_blocks"] = s["dialogue_blocks"]
@@ -7894,6 +8488,7 @@ def run_production(project_id):
             "seo_metadata": project.get("seo_metadata", {"title": title}),
             "brandProfileId": project.get("brandProfileId") or "",
             "brandProfile": project.get("brandProfile") or {},
+            "publicFigureVisuals": project.get("publicFigureVisuals") or {},
         }
         if is_tiktok_project:
             temp_json["format"] = project_format

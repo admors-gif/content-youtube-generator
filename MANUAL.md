@@ -3,7 +3,7 @@
 > **Documento vivo.** Se actualiza cada vez que pasa algo significativo en el proyecto. Sirve como blueprint reproducible y referencia técnica completa. Si alguien (incluido tú en 6 meses) quiere reproducir el proyecto desde cero, este documento debe tener todo lo necesario.
 
 **Última actualización:** 2026-05-09
-**Versión del manual:** 0.2 (incluye Radar editorial admin-only)
+**Versión del manual:** 0.3 (incluye Radar editorial admin-only + Base de conocimiento)
 **Repo:** `https://github.com/admors-gif/content-youtube-generator`
 **Tag de rollback:** `pre-migration-2026-05-01` (commit `099a25f`)
 
@@ -166,6 +166,20 @@ La biblioteca `/dashboard/library` agrupa ideas, proyectos y huecos editoriales 
 
 Nota operativa: el Radar manual global esta limitado a un set prioritario de agentes y timeout corto de Tavily para evitar bloquear la API. La cobertura completa de agentes queda para el refresh nocturno cacheado.
 
+### Base de conocimiento admin-only
+
+La Base de conocimiento agrega una capa visual y operativa sobre Qdrant:
+
+1. Admin abre `/dashboard/knowledge`.
+2. Backend lee solo la coleccion configurada en `QDRANT_KNOWLEDGE_COLLECTION` (default `valtyk_knowledge`).
+3. `POST /knowledge/sync-index` escanea Qdrant, agrupa por `metadata.book_title` + `metadata.category` y guarda indice ligero en Firestore (`knowledgeBooks`).
+4. `GET /knowledge/books` carga libros desde Firestore, no desde Qdrant en cada render.
+5. `GET /knowledge/books/{bookId}/chunks` lee fragmentos del libro desde Qdrant.
+6. `POST /knowledge/search` genera embedding con OpenAI `text-embedding-3-small` y busca semanticamente en Qdrant.
+7. `POST /knowledge/ingest/pdf` sube PDF admin-only y manda job Celery para extraer, partir, embeber y upsert en Qdrant.
+
+No expone `QDRANT_API_KEY` al frontend, no muestra colecciones sensibles como `claude_sessions`, y no esta conectado todavia a Radar 2. El contrato queda listo para que Radar consulte fragmentos internos por tema/agente mas adelante.
+
 ---
 
 ## 4. APIs y proveedores externos
@@ -206,6 +220,12 @@ FIREBASE_CREDENTIALS=ewog...       # Service account JSON (base64 o raw)
 CONTENT_FACTORY_RADAR_ENABLED=true # Radar editorial admin-only
 CONTENT_FACTORY_RADAR_ADMIN_ONLY=true
 CONTENT_FACTORY_ADMIN_TOKEN=...    # Usado por refresh nocturno GitHub Actions
+CONTENT_FACTORY_KNOWLEDGE_ENABLED=true
+CONTENT_FACTORY_KNOWLEDGE_ADMIN_ONLY=true
+QDRANT_URL=http://qdrant:6333
+QDRANT_API_KEY=...
+QDRANT_KNOWLEDGE_COLLECTION=valtyk_knowledge
+KNOWLEDGE_MAX_UPLOAD_BYTES=83886080
 ```
 
 ### Frontend (`web/.env.local`)
@@ -220,6 +240,7 @@ NEXT_PUBLIC_FIREBASE_APP_ID=1:903561262290:web:...
 NEXT_PUBLIC_N8N_WEBHOOK_URL=https://n8n.valtyk.com/webhook/content-factory-trigger
 NEXT_PUBLIC_VPS_API_URL=https://api.valtyk.com   # ← migrado a HTTPS via NPM
 NEXT_PUBLIC_CONTENT_FACTORY_RADAR_ENABLED=true    # Muestra Radar a admins
+NEXT_PUBLIC_CONTENT_FACTORY_KNOWLEDGE_ENABLED=true # Muestra Conocimiento a admins
 ```
 
 ### GitHub repo secrets (para Actions)
@@ -229,6 +250,9 @@ Configurados en `Settings → Secrets and variables → Actions`:
 - `VPS_USER` — `deploy` (no root, por seguridad)
 - `CONTENT_FACTORY_ADMIN_TOKEN` — token admin para jobs internos como Radar nocturno
 - `CONTENT_FACTORY_API_BASE` — opcional; default del workflow Radar: `https://api.valtyk.com`
+- `QDRANT_URL` — opcional si el `.env` del VPS ya lo tiene; recomendado `http://qdrant:6333`
+- `QDRANT_API_KEY` — API key de Qdrant; nunca imprimir en logs
+- `QDRANT_KNOWLEDGE_COLLECTION` — default `valtyk_knowledge`
 
 ### Endpoints Radar
 
@@ -241,6 +265,19 @@ Todos requieren admin:
 - `GET /library/agents` — biblioteca agrupada por agente.
 - `POST /library/items/{item_id}/archive` — archiva una idea.
 - `POST /admin/radar/refresh-nightly` — refresh programado desde GitHub Actions.
+
+### Endpoints Base de conocimiento
+
+Todos requieren admin:
+
+- `GET /knowledge/summary` — estado de Qdrant, coleccion activa, totales y jobs recientes.
+- `POST /knowledge/sync-index` — sincroniza indice Firestore desde Qdrant.
+- `GET /knowledge/books?category=&q=&limit=` — lista libros desde `knowledgeBooks`.
+- `GET /knowledge/books/{bookId}` — metadata de libro.
+- `GET /knowledge/books/{bookId}/chunks?limit=&cursor=` — fragmentos paginados desde Qdrant.
+- `POST /knowledge/search` — busqueda semantica por tema, categoria o libro exacto.
+- `POST /knowledge/ingest/pdf` — ingesta PDF admin-only via Celery.
+- `GET /knowledge/ingest/{jobId}` — progreso de ingesta.
 
 ---
 
@@ -260,6 +297,7 @@ C:\Users\admor\Downloads\Content You tube Generator\
 ├── scripts/                      # Pipeline de producción
 │   ├── factory.py                # Orquestador principal
 │   ├── generate_content.py       # Guión + Tavily research
+│   ├── knowledge.py              # Qdrant Knowledge Hub: sync, search, chunking, ingestion helpers
 │   ├── comfyui_client.py         # Cliente ComfyUI (imágenes)
 │   ├── elevenlabs_tts.py         # Narración TTS
 │   ├── luma_video.py             # Clips cinemáticos

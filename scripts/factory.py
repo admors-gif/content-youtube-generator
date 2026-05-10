@@ -81,6 +81,7 @@ from luma_video import (
 )
 from generate_subtitles import add_subtitles_to_video, add_tiktok_subtitles_to_video
 from media_validation import validate_media_file
+from public_figure_visuals import write_public_figure_visual_outputs
 
 
 def _scene_number(scene):
@@ -1583,6 +1584,16 @@ if __name__ == "__main__":
         d.mkdir(parents=True, exist_ok=True)
     if mode == "cinematico":
         luma_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        write_public_figure_visual_outputs(
+            project_dir,
+            data.get("publicFigureVisuals") or data.get("public_figure_visuals"),
+            scenes=scenes,
+            download_stats=(data.get("publicFigureVisuals") or {}).get("downloadStats"),
+        )
+    except Exception as exc:
+        print(f"   ⚠️ No se pudieron escribir atribuciones visuales: {exc}")
     
     # Determinar voz
     voice = forced_voice or get_voice_for_agent(agent_name) or DEFAULT_VOICE

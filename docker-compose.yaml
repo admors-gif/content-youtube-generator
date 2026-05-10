@@ -38,6 +38,7 @@ services:
     networks:
       - default
       - proxy
+      - qdrant
     depends_on:
       content-redis:
         condition: service_healthy
@@ -64,6 +65,7 @@ services:
       - /opt/content-factory/output:/app/output
     networks:
       - default
+      - qdrant
     depends_on:
       content-redis:
         condition: service_healthy
@@ -85,3 +87,6 @@ networks:
   proxy:
     external: true
     name: evolution-network
+  qdrant:
+    external: true
+    name: qdrant_default
