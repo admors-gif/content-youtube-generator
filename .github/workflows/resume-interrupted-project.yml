@@ -27,7 +27,7 @@ jobs:
           set -euo pipefail
           PID="${{ github.event.inputs.project_id }}"
           CLEAR_LOCK="${{ github.event.inputs.clear_stale_lock }}"
-          docker exec content-factory python - "$PID" "$CLEAR_LOCK" <<'PY'
+          docker exec -i content-factory python - "$PID" "$CLEAR_LOCK" <<'PY'
           import json
           import sys
 
