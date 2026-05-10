@@ -316,6 +316,117 @@ jobs:
           PY
           set -e
 
+      - name: n8n Qdrant workflow shape
+        continue-on-error: true
+        run: |
+          set +e
+          python3 - <<'PY' > debug_output/13_n8n_qdrant_workflows.json 2>&1
+          import json
+          import re
+          import subprocess
+
+          WORKFLOWS = {
+              "1O0K76DbveSwtaPG": "RAG Ingestion — Valtyk Knowledge Base",
+              "GArjMF6BN5GT7NfV": "Qdrant Stats API",
+              "jWeH5AUjtox29Fch": "Qdrant Admin API",
+              "NR8t6QPq7zweoGYY": "KB Corrections — Upsert to Qdrant",
+          }
+
+          SECRET_KEY = re.compile(
+              r"(secret|token|password|passwd|api[_ -]?key|authorization|credential|client[_ -]?secret|private[_ -]?key)",
+              re.I,
+          )
+          SECRET_VALUE = re.compile(
+              r"(bearer\s+[a-z0-9._-]+|sk-[a-z0-9_-]+|gh[pousr]_[a-z0-9_]+)",
+              re.I,
+          )
+
+          def redact(value, key=""):
+              if SECRET_KEY.search(str(key)):
+                  return "[REDACTED]"
+              if isinstance(value, dict):
+                  return {str(k): redact(v, k) for k, v in value.items()}
+              if isinstance(value, list):
+                  return [redact(item, key) for item in value[:30]]
+              if isinstance(value, str):
+                  if SECRET_VALUE.search(value):
+                      return "[REDACTED_STRING]"
+                  clean = value.replace("\r", "\\r")
+                  return clean[:900] + ("...[TRUNCATED]" if len(clean) > 900 else "")
+              return value
+
+          def run(cmd, timeout=90):
+              return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+          def export_workflow(workflow_id):
+              container_path = f"/tmp/n8n_export_{workflow_id}.json"
+              export_cmd = [
+                  "docker",
+                  "exec",
+                  "n8n-n8n-1",
+                  "n8n",
+                  "export:workflow",
+                  f"--id={workflow_id}",
+                  f"--output={container_path}",
+              ]
+              exported = run(export_cmd)
+              if exported.returncode != 0:
+                  return {
+                      "id": workflow_id,
+                      "expectedName": WORKFLOWS[workflow_id],
+                      "ok": False,
+                      "exportError": (exported.stderr or exported.stdout)[:800],
+                  }
+
+              cat = run(["docker", "exec", "n8n-n8n-1", "cat", container_path], timeout=30)
+              run(["docker", "exec", "n8n-n8n-1", "rm", "-f", container_path], timeout=20)
+              if cat.returncode != 0:
+                  return {
+                      "id": workflow_id,
+                      "expectedName": WORKFLOWS[workflow_id],
+                      "ok": False,
+                      "readError": (cat.stderr or cat.stdout)[:800],
+                  }
+
+              try:
+                  raw = json.loads(cat.stdout)
+              except Exception as exc:
+                  return {
+                      "id": workflow_id,
+                      "expectedName": WORKFLOWS[workflow_id],
+                      "ok": False,
+                      "parseError": str(exc),
+                      "rawPreview": cat.stdout[:800],
+                  }
+
+              workflow = raw[0] if isinstance(raw, list) and raw else raw
+              nodes = []
+              for node in workflow.get("nodes", []):
+                  nodes.append({
+                      "name": node.get("name"),
+                      "type": node.get("type"),
+                      "typeVersion": node.get("typeVersion"),
+                      "disabled": bool(node.get("disabled")),
+                      "parameters": redact(node.get("parameters") or {}),
+                      "hasCredentials": bool(node.get("credentials")),
+                  })
+
+              return {
+                  "id": workflow_id,
+                  "expectedName": WORKFLOWS[workflow_id],
+                  "ok": True,
+                  "name": workflow.get("name"),
+                  "active": workflow.get("active"),
+                  "nodeCount": len(nodes),
+                  "nodes": nodes,
+                  "connections": redact(workflow.get("connections") or {}),
+              }
+
+          result = {workflow_id: export_workflow(workflow_id) for workflow_id in WORKFLOWS}
+          print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+          PY
+          set -e
+
       - name: Upload debug bundle
         uses: actions/upload-artifact@v4
         with:
