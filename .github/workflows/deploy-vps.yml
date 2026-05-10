@@ -76,6 +76,7 @@ jobs:
           cd /docker/content-factory
           python3 - <<'PY'
           import os
+          import subprocess
           from pathlib import Path
 
           path = Path(".env")
@@ -97,6 +98,36 @@ jobs:
           ]
           updates = {name: os.environ.get(name, "").strip() for name in names}
           updates = {name: value for name, value in updates.items() if value}
+
+          # If the repo secret has not been added yet, reuse the API key from the
+          # existing Qdrant container on the VPS. Do not print the value.
+          if not updates.get("QDRANT_API_KEY"):
+              try:
+                  raw = subprocess.check_output(
+                      ["docker", "inspect", "qdrant", "--format", "{{range .Config.Env}}{{println .}}{{end}}"],
+                      text=True,
+                      stderr=subprocess.DEVNULL,
+                  )
+                  env_map = {}
+                  for item in raw.splitlines():
+                      if "=" in item:
+                          key, value = item.split("=", 1)
+                          env_map[key] = value
+                  for candidate in (
+                      "QDRANT__SERVICE__API_KEY",
+                      "QDRANT__SERVICE__READ_ONLY_API_KEY",
+                      "QDRANT_API_KEY",
+                  ):
+                      value = env_map.get(candidate, "").strip()
+                      if value:
+                          updates["QDRANT_API_KEY"] = value
+                          break
+              except Exception:
+                  pass
+
+          updates.setdefault("QDRANT_URL", "http://qdrant:6333")
+          updates.setdefault("QDRANT_KNOWLEDGE_COLLECTION", "valtyk_knowledge")
+
           if not updates:
               print("No runtime secrets configured; leaving .env unchanged")
               raise SystemExit(0)
