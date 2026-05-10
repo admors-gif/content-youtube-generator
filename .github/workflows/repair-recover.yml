@@ -22,7 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           PID="${{ github.event.inputs.project_id }}"
-          docker exec content-factory python - "$PID" <<'PY'
+          docker exec -i content-factory python - "$PID" <<'PY'
           import json
           import sys
           import urllib.request
