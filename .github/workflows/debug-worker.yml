@@ -345,12 +345,21 @@ jobs:
               if SECRET_KEY.search(str(key)):
                   return "[REDACTED]"
               if isinstance(value, dict):
-                  return {str(k): redact(v, k) for k, v in value.items()}
+                  secret_named_value = SECRET_KEY.search(str(value.get("name", ""))) or SECRET_KEY.search(str(value.get("header", "")))
+                  redacted = {}
+                  for k, v in value.items():
+                      if secret_named_value and str(k).lower() in {"value", "default", "expression"}:
+                          redacted[str(k)] = "[REDACTED]"
+                      else:
+                          redacted[str(k)] = redact(v, k)
+                  return redacted
               if isinstance(value, list):
                   return [redact(item, key) for item in value[:30]]
               if isinstance(value, str):
                   if SECRET_VALUE.search(value):
                       return "[REDACTED_STRING]"
+                  if re.search(r"(apiKey|api-key|api_key|authorization|bearer|token|secret|password)", value, re.I):
+                      return "[REDACTED_STRING_WITH_SECRET_REFERENCE]"
                   clean = value.replace("\r", "\\r")
                   return clean[:900] + ("...[TRUNCATED]" if len(clean) > 900 else "")
               return value
