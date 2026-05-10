@@ -3318,6 +3318,17 @@ def _knowledge_client() -> QdrantKnowledgeClient:
     return QdrantKnowledgeClient()
 
 
+def _knowledge_file_type_from_blob(blob_type: str) -> str:
+    lowered = str(blob_type or "").lower()
+    if "epub" in lowered:
+        return "epub"
+    if "pdf" in lowered:
+        return "pdf"
+    if "json" in lowered:
+        return "json"
+    return ""
+
+
 def _knowledge_public_book(doc_id: str, data: dict) -> dict:
     blob_type = data.get("blobType") or data.get("blob_type") or ""
     return {
@@ -3329,7 +3340,7 @@ def _knowledge_public_book(doc_id: str, data: dict) -> dict:
         "sample": data.get("sample") or "",
         "source": data.get("source") or "",
         "blobType": blob_type,
-        "fileType": "epub" if "epub" in str(blob_type).lower() else "pdf" if "pdf" in str(blob_type).lower() else "",
+        "fileType": _knowledge_file_type_from_blob(blob_type),
         "status": data.get("status") or "indexed",
         "firstSeenAt": _serialize_firestore_value(data.get("firstSeenAt")),
         "lastSyncedAt": _serialize_firestore_value(data.get("lastSyncedAt")),
@@ -3342,7 +3353,7 @@ def _knowledge_public_job(doc_id: str, data: dict) -> dict:
     return {
         "jobId": data.get("jobId") or doc_id,
         "fileName": data.get("fileName") or "",
-        "fileType": data.get("fileType") or ("epub" if "epub" in str(blob_type).lower() else "pdf" if "pdf" in str(blob_type).lower() else ""),
+        "fileType": data.get("fileType") or _knowledge_file_type_from_blob(blob_type),
         "blobType": blob_type,
         "title": data.get("title") or "",
         "category": data.get("category") or "",
@@ -3484,7 +3495,7 @@ def _run_knowledge_ingest_job(job_id: str) -> dict:
     category = re.sub(r"\s+", " ", str(job.get("category") or "General")).strip() or "General"
     path = Path(str(job.get("filePath") or ""))
     blob_type = str(job.get("blobType") or _knowledge_document_blob_type(path, job.get("fileName") or "")).strip()
-    file_type = "epub" if "epub" in blob_type.lower() else "pdf" if "pdf" in blob_type.lower() else "file"
+    file_type = _knowledge_file_type_from_blob(blob_type) or "file"
     reindex = bool(job.get("reindex"))
     client = _knowledge_client()
 
