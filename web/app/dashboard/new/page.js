@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { SYSTEM_AGENTS } from "@/lib/agents";
@@ -311,6 +311,7 @@ function PersonalizationField({
 export default function NewProjectPage() {
   const { user, profile } = useAuth();
   const router = useRouter();
+  const didApplyPrefill = useRef(false);
 
   /* PRESERVADO: state legacy (previewAgent se eliminó porque el kit
    * incorpora los exampleTopics directamente como chips en step 2;
@@ -318,6 +319,7 @@ export default function NewProjectPage() {
   const [step, setStep] = useState(1);
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [topic, setTopic] = useState("");
+  const [prefillSource, setPrefillSource] = useState("");
   const [creating, setCreating] = useState(false);
 
   const [ideaInput, setIdeaInput] = useState("");
@@ -333,6 +335,35 @@ export default function NewProjectPage() {
   const [durationProfile, setDurationProfile] = useState("60m");
   const [sourceGenre, setSourceGenre] = useState("psychology");
   const [personalization, setPersonalization] = useState(EMPTY_PERSONALIZATION);
+
+  useEffect(() => {
+    if (didApplyPrefill.current) return;
+    const searchParams = new URLSearchParams(window.location.search);
+    const prefillAgentId = searchParams.get("agentId") || "";
+    const prefillTopic = searchParams.get("topic") || "";
+    const source = searchParams.get("from") || "";
+    if (!prefillAgentId && !prefillTopic) return;
+
+    const agent = SYSTEM_AGENTS.find((item) => item.agentId === prefillAgentId);
+    const timer = window.setTimeout(() => {
+      if (agent) {
+        setPlatform(agent.platform || "youtube");
+        setSelectedAgent(agent);
+        const defaultProfile = agent.durationProfiles?.find((p) => p.id === (agent.platform === "tiktok" ? "90s" : "60m"))
+          || agent.durationProfiles?.[0];
+        if (defaultProfile) setDurationProfile(defaultProfile.id);
+        if (agent.sourceGenres?.length) setSourceGenre(agent.sourceGenres[0].id);
+      }
+      if (prefillTopic) {
+        setTopic(prefillTopic);
+        setIdeaInput(prefillTopic);
+      }
+      if (source) setPrefillSource(source);
+      if (agent && prefillTopic) setStep(2);
+      didApplyPrefill.current = true;
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const selectAgent = (agent) => {
     setSelectedAgent(agent);
@@ -426,6 +457,12 @@ export default function NewProjectPage() {
         "Tu cuenta aún no tiene créditos activos. Solicita activación antes de producir.",
       );
       return;
+    }
+    if (prefillSource) {
+      const confirmed = window.confirm(
+        "Este paso sí consumirá 1 crédito y creará el proyecto. ¿Quieres continuar?",
+      );
+      if (!confirmed) return;
     }
     setCreating(true);
     try {
@@ -1286,6 +1323,22 @@ export default function NewProjectPage() {
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {prefillSource && (
+              <div
+                style={{
+                  padding: "12px 14px",
+                  border: "1px solid var(--rule-1)",
+                  borderLeft: "3px solid var(--ok)",
+                  borderRadius: "var(--r-2)",
+                  marginBottom: "var(--s-4)",
+                  color: "var(--paper-dim)",
+                  lineHeight: 1.45,
+                }}
+              >
+                Tema preparado desde {prefillSource === "radar" ? "Radar" : "Biblioteca"}. Aún no se ha cobrado ningún crédito; el consumo empieza solo al pulsar el botón final.
               </div>
             )}
 

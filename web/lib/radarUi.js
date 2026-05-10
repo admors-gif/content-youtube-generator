@@ -74,6 +74,14 @@ export function formatRecommendation(value) {
   return key.replace(/_/g, " ");
 }
 
+export function formatRadarSourceType(value) {
+  const key = String(value || "").toLowerCase();
+  if (key === "knowledge") return "Base interna";
+  if (key === "tavily" || key === "tavily_answer") return "Web/Tavily";
+  if (key === "fallback") return "Fallback";
+  return key ? key.replace(/_/g, " ") : "Radar";
+}
+
 export function formatRadarIntent(value) {
   const key = String(value || "viral_topics").toLowerCase();
   const option = RADAR_INTENT_OPTIONS.find((item) => item.id === key);

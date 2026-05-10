@@ -38,12 +38,15 @@ from scripts.radar import (
     RADAR_CACHE_TTL_SECONDS,
     apply_llm_ranking as _radar_apply_llm_ranking,
     build_agent_queries as _radar_build_agent_queries,
+    build_knowledge_queries as _radar_build_knowledge_queries,
     build_ranking_prompt as _radar_build_ranking_prompt,
     cache_key as _radar_cache_key,
     canonical_title_key as _radar_canonical_title_key,
     compact_text as _radar_compact_text,
     dedupe_candidates as _radar_dedupe_candidates,
+    estimate_radar_cost as _radar_estimate_cost,
     fallback_candidates_for_agent as _radar_fallback_candidates_for_agent,
+    knowledge_results_to_candidates as _radar_knowledge_results_to_candidates,
     parse_ranking_response as _radar_parse_ranking_response,
     tavily_results_to_candidates as _radar_tavily_results_to_candidates,
 )
@@ -2905,6 +2908,8 @@ def _radar_doc_to_public(doc_id: str, data: dict | None) -> dict:
         "status": data.get("status") or "empty",
         "items": data.get("items") or [],
         "itemsCount": len(data.get("items") or []),
+        "errors": data.get("errors") or [],
+        "costEstimate": data.get("costEstimate") or {},
         "generatedAt": _serialize_firestore_value(data.get("generatedAt") or data.get("createdAt")),
         "expiresAt": _serialize_firestore_value(data.get("expiresAt")),
         "cached": bool(data.get("cached", False)),
@@ -2979,6 +2984,45 @@ def _radar_search_tavily(query: str) -> dict:
         return {}
 
 
+def _radar_knowledge_enabled() -> bool:
+    return _flag_enabled("CONTENT_FACTORY_RADAR_KNOWLEDGE_ENABLED", default=True) and _knowledge_is_enabled()
+
+
+def _radar_search_knowledge(query: str, *, limit: int = 4) -> dict:
+    if not _radar_knowledge_enabled():
+        return {}
+    try:
+        safe_limit = max(1, min(KNOWLEDGE_MAX_SEARCH_LIMIT, _safe_int(limit, 4)))
+        return _knowledge_search(query, category="", book_title="", limit=safe_limit)
+    except Exception as exc:
+        try:
+            log.warning("radar_knowledge_failed", query=query[:120], error=str(exc)[:200])
+        except Exception:
+            pass
+        return {}
+
+
+def _radar_cost_estimate_for_agents(agents: list[dict], params: dict) -> dict:
+    knowledge_query_limit = max(
+        0,
+        min(
+            3,
+            _safe_int(os.environ.get("CONTENT_FACTORY_RADAR_KNOWLEDGE_QUERY_LIMIT"), min(params.get("queryLimit") or 1, 2)),
+        ),
+    )
+    return _radar_estimate_cost(
+        agents,
+        query_limit=params.get("queryLimit") or 1,
+        intent=params.get("intent") or RADAR_DEFAULT_INTENT,
+        market=params.get("market") or RADAR_DEFAULT_MARKET,
+        language=params.get("language") or RADAR_DEFAULT_LANGUAGE,
+        category=params.get("category") or RADAR_DEFAULT_CATEGORY,
+        search_depth=os.environ.get("CONTENT_FACTORY_RADAR_TAVILY_DEPTH", "basic"),
+        knowledge_enabled=_radar_knowledge_enabled(),
+        knowledge_query_limit=knowledge_query_limit,
+    )
+
+
 def _radar_rank_with_llm(candidates: list[dict], *, scope: str, intent: str) -> list[dict]:
     if not candidates or not os.environ.get("ANTHROPIC_API_KEY"):
         return candidates
@@ -3013,6 +3057,13 @@ def _radar_candidates_for_agent(
     limit: int,
 ) -> list[dict]:
     candidates = []
+    knowledge_query_limit = max(
+        0,
+        min(
+            3,
+            _safe_int(os.environ.get("CONTENT_FACTORY_RADAR_KNOWLEDGE_QUERY_LIMIT"), min(query_limit, 2)),
+        ),
+    )
     for query in _radar_build_agent_queries(
         agent,
         market=market,
@@ -3023,6 +3074,28 @@ def _radar_candidates_for_agent(
     ):
         result = _radar_search_tavily(query)
         candidates.extend(_radar_tavily_results_to_candidates(agent, query, result, limit=5, intent=intent))
+    if knowledge_query_limit:
+        for query in _radar_build_knowledge_queries(
+            agent,
+            market=market,
+            language=language,
+            category=category,
+            intent=intent,
+            max_queries=knowledge_query_limit,
+        ):
+            result = _radar_search_knowledge(
+                query,
+                limit=max(3, min(6, limit)),
+            )
+            candidates.extend(
+                _radar_knowledge_results_to_candidates(
+                    agent,
+                    query,
+                    result,
+                    limit=max(1, min(3, limit)),
+                    intent=intent,
+                )
+            )
     if not candidates:
         candidates = _radar_fallback_candidates_for_agent(agent, limit=limit, intent=intent)
     return _radar_rank_with_llm(candidates, scope="agent", intent=intent)[:limit]
@@ -3057,6 +3130,7 @@ def _radar_run_discovery(db, uid: str, params: dict, *, mode: str) -> dict:
         )[:max_agents]
         params = {**params, "queryLimit": min(params.get("queryLimit") or 1, 1)}
 
+    cost_estimate = _radar_cost_estimate_for_agents(agents, params)
     existing_hashes, existing_titles = _radar_existing_sets(db, uid)
     all_items = []
     errors = []
@@ -3113,6 +3187,7 @@ def _radar_run_discovery(db, uid: str, params: dict, *, mode: str) -> dict:
         "itemsCount": len(all_items),
         "items": all_items,
         "errors": errors,
+        "costEstimate": cost_estimate,
         "generatedAt": generated_at,
         "expiresAt": expires_at,
         "createdAt": generated_at,
@@ -3169,12 +3244,18 @@ def _radar_find_candidate(db, uid: str, candidate_hash: str) -> tuple[dict | Non
 
 
 def _radar_context_from_candidate(candidate: dict) -> dict:
+    summary = candidate.get("summary")
+    if candidate.get("sourceType") == "knowledge":
+        summary = _radar_compact_text(
+            f"Idea detectada desde la biblioteca interna. Tema editorial: {candidate.get('title') or candidate.get('headline') or ''}.",
+            260,
+        )
     return _clean_radar_context_payload({
         "candidateHash": candidate.get("candidateHash"),
         "intent": candidate.get("intent") or candidate.get("radarIntent") or RADAR_DEFAULT_INTENT,
         "title": candidate.get("title") or candidate.get("headline"),
         "angle": candidate.get("angle"),
-        "summary": candidate.get("summary"),
+        "summary": summary,
         "whyNow": candidate.get("whyNow"),
         "riskLevel": candidate.get("riskLevel"),
         "riskReason": candidate.get("riskReason"),
@@ -3208,6 +3289,11 @@ def _radar_upsert_library_candidate(db, firestore, uid: str, candidate: dict, *,
             "reason": candidate.get("riskReason") or "",
         },
         "recommendedFormat": candidate.get("recommendedFormat") or "youtube_long",
+        "seoTitle": candidate.get("seoTitle") or candidate.get("angle") or candidate.get("title"),
+        "seoKeywords": candidate.get("seoKeywords") or [],
+        "searchIntent": candidate.get("searchIntent") or "",
+        "knowledgeSignals": candidate.get("knowledgeSignals") or [],
+        "knowledgeQuery": candidate.get("knowledgeQuery") or "",
         "status": next_status,
         "candidateHash": candidate.get("candidateHash"),
         "candidate": candidate,
@@ -3222,7 +3308,7 @@ def _radar_upsert_library_candidate(db, firestore, uid: str, candidate: dict, *,
 def _radar_project_payload_from_candidate(candidate: dict) -> dict:
     agent_id = candidate.get("agentId")
     payload = {
-        "title": _radar_compact_text(candidate.get("angle") or candidate.get("title"), 180),
+        "title": _radar_compact_text(candidate.get("seoTitle") or candidate.get("angle") or candidate.get("title"), 180),
         "agentId": agent_id,
         "agentFile": candidate.get("agentFile") or f"{agent_id}.md",
         "platform": candidate.get("platform") or ("tiktok" if agent_id in _TIKTOK_AGENT_IDS else "youtube"),
@@ -3255,7 +3341,12 @@ def _library_public_item(doc_id: str, data: dict) -> dict:
         "riskLevel": risk.get("level") or data.get("riskLevel") or "low",
         "riskReason": risk.get("reason") or data.get("riskReason") or "",
         "recommendedFormat": data.get("recommendedFormat") or "youtube_long",
+        "seoTitle": data.get("seoTitle") or ((data.get("candidate") or {}).get("seoTitle") or ""),
+        "seoKeywords": data.get("seoKeywords") or ((data.get("candidate") or {}).get("seoKeywords") or []),
+        "searchIntent": data.get("searchIntent") or ((data.get("candidate") or {}).get("searchIntent") or ""),
         "sources": data.get("sources") or [],
+        "knowledgeSignals": data.get("knowledgeSignals") or ((data.get("candidate") or {}).get("knowledgeSignals") or []),
+        "knowledgeQuery": data.get("knowledgeQuery") or ((data.get("candidate") or {}).get("knowledgeQuery") or ""),
         "projectId": data.get("projectId") or "",
         "updatedAt": _serialize_firestore_value(data.get("updatedAt") or data.get("createdAt")),
     }
@@ -4126,12 +4217,37 @@ def radar_latest(
         "category": category,
         "window": window,
     })
+    if params["scope"] == "agent":
+        estimate_agents = [_radar_agent_by_id(params["agentId"])]
+    elif params["scope"] == "news":
+        estimate_agents = [_radar_agent_by_id(RADAR_NEWS_AGENT_ID)]
+    else:
+        estimate_agents = _radar_agent_catalog()
+        max_agents = max(
+            1,
+            min(
+                len(estimate_agents),
+                _safe_int(os.environ.get("CONTENT_FACTORY_RADAR_MANUAL_GLOBAL_AGENT_LIMIT"), 6),
+            ),
+        )
+        priority = {agent_id: index for index, agent_id in enumerate(_RADAR_PRIORITY_AGENT_IDS)}
+        estimate_agents = sorted(
+            [agent for agent in estimate_agents if agent],
+            key=lambda agent: (
+                priority.get(agent.get("agentId"), len(priority) + 100),
+                agent.get("name") or "",
+            ),
+        )[:max_agents]
+        params = {**params, "queryLimit": min(params.get("queryLimit") or 1, 1)}
+    estimate_agents = [agent for agent in estimate_agents if agent]
+    cost_estimate = _radar_cost_estimate_for_agents(estimate_agents, params)
     try:
         _ensure_firebase_initialized()
         from firebase_admin import firestore
         db = firestore.client()
         cached = _radar_cached_run(db, params)
         if cached:
+            cached["costEstimate"] = cached.get("costEstimate") or cost_estimate
             return cached
         return {
             "runId": "",
@@ -4155,6 +4271,7 @@ def radar_latest(
             "status": "empty",
             "items": [],
             "itemsCount": 0,
+            "costEstimate": cost_estimate,
             "cached": False,
         }
     except Exception as exc:

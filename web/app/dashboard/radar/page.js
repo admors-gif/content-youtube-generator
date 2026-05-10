@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Icon from "@/components/Icon";
@@ -18,6 +19,7 @@ import {
   compactNumber,
   formatRadarDate,
   formatRadarIntent,
+  formatRadarSourceType,
   formatRecommendation,
   ideaStatusMeta,
   riskMeta,
@@ -52,6 +54,61 @@ function buildRadarParams(filters, force = false) {
   return payload;
 }
 
+function estimateRadarCost(filters) {
+  const queryLimit = Number(filters.queryLimit || 2);
+  const knowledgeQueries = filters.scope === "news" ? 0 : Math.min(3, queryLimit);
+  if (filters.scope === "global") {
+    const agentLimit = 6;
+    return {
+      tavilyCredits: agentLimit,
+      tavilyQueries: agentLimit,
+      knowledgeQueries: agentLimit * Math.min(3, 1),
+      embeddingQueries: agentLimit * Math.min(3, 1),
+      label: "estimado local",
+    };
+  }
+  return {
+    tavilyCredits: queryLimit,
+    tavilyQueries: queryLimit,
+    knowledgeQueries,
+    embeddingQueries: knowledgeQueries,
+    label: "estimado local",
+  };
+}
+
+function CostPill({ estimate, cached }) {
+  const cost = estimate || {};
+  return (
+    <div className="cf-card" style={{ padding: "var(--s-4)", display: "grid", gap: 8 }}>
+      <div className="cf-mono-sm">Costo estimado</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <span className="cf-badge cf-badge--neutral">
+          Tavily {cached ? "0 ahora" : `${Number(cost.tavilyCredits || 0)} credit(s)`}
+        </span>
+        <span className="cf-badge cf-badge--neutral">
+          Qdrant {Number(cost.knowledgeQueries || 0)} busq.
+        </span>
+        <span className="cf-badge cf-badge--neutral">
+          Embeddings {Number(cost.embeddingQueries || 0)}
+        </span>
+      </div>
+      <div className="cf-caption">
+        {cached ? "Esta vista vino de cache; refrescar vuelve a consumir." : "Buscar usa cache si existe; refrescar fuerza consumo nuevo."}
+      </div>
+    </div>
+  );
+}
+
+function buildPreparedProjectUrl(item) {
+  const params = new URLSearchParams({
+    agentId: item.agentId || "",
+    topic: item.seoTitle || item.angle || item.title || "",
+    from: "radar",
+  });
+  if (item.candidateHash) params.set("candidateHash", item.candidateHash);
+  return `/dashboard/new?${params.toString()}`;
+}
+
 function Score({ value }) {
   const score = Math.max(0, Math.min(100, Number(value || 0)));
   return (
@@ -83,6 +140,9 @@ function Score({ value }) {
           }}
         />
       </div>
+      <div className="cf-caption" style={{ textAlign: "right" }}>
+        score editorial
+      </div>
     </div>
   );
 }
@@ -91,6 +151,7 @@ function CandidateCard({ item, selected, saving, creating, onSelect, onSave, onC
   const risk = riskMeta(item.riskLevel);
   const status = ideaStatusMeta(item.status);
   const createDisabled = item.riskLevel === "high" || Boolean(item.projectId) || creating;
+  const knowledgeSignals = item.knowledgeSignals || [];
 
   return (
     <article
@@ -125,9 +186,12 @@ function CandidateCard({ item, selected, saving, creating, onSelect, onSave, onC
             <span className="cf-badge cf-badge--neutral">
               {formatRadarIntent(item.intent || item.radarIntent)}
             </span>
+            <span className="cf-badge cf-badge--neutral">
+              {formatRadarSourceType(item.sourceType)}
+            </span>
           </div>
           <h2 className="cf-h3" style={{ margin: "0 0 8px", lineHeight: 1.2 }}>
-            {item.angle || item.title}
+            {item.seoTitle || item.angle || item.title}
           </h2>
           <div className="cf-caption" style={{ marginBottom: 12 }}>
             {agentDisplayName(item.agentId, item.agentName, SYSTEM_AGENTS)}
@@ -153,6 +217,22 @@ function CandidateCard({ item, selected, saving, creating, onSelect, onSave, onC
             >
               {source.domain || source.title}
             </a>
+          ))}
+        </div>
+      )}
+
+      {knowledgeSignals.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: item.sources?.length ? 8 : 16 }}>
+          {knowledgeSignals.slice(0, 3).map((signal) => (
+            <span
+              key={`${signal.title}-${signal.excerpt?.slice(0, 24)}`}
+              className="cf-badge cf-badge--creator"
+              title={signal.excerpt || signal.title}
+              style={{ maxWidth: "100%" }}
+            >
+              <Icon name="bookOpen" size={12} />
+              {signal.title}
+            </span>
           ))}
         </div>
       )}
@@ -192,7 +272,7 @@ function CandidateCard({ item, selected, saving, creating, onSelect, onSave, onC
           title={item.riskLevel === "high" ? "Requiere revision editorial antes de crear proyecto" : ""}
         >
           <Icon name="plus" size={14} />
-          {item.projectId ? "Proyecto creado" : creating ? "Creando" : "Crear proyecto"}
+          {item.projectId ? "Proyecto creado" : creating ? "Preparando" : "Preparar proyecto"}
         </button>
       </div>
     </article>
@@ -214,6 +294,7 @@ function DetailPanel({ item }) {
   }
   const risk = riskMeta(item.riskLevel);
   const scores = item.scores || {};
+  const knowledgeSignals = item.knowledgeSignals || [];
   const scoreRows = [
     ["Audiencia", scores.audience],
     ["Encaje", scores.fit],
@@ -236,16 +317,57 @@ function DetailPanel({ item }) {
         DETALLE EDITORIAL
       </div>
       <h2 className="cf-h3" style={{ margin: "0 0 10px", lineHeight: 1.2 }}>
-        {item.title}
+        {item.seoTitle || item.title}
       </h2>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
         <span className={`cf-badge ${risk.badge}`}>{risk.label}</span>
         <span className="cf-badge cf-badge--neutral">{formatRecommendation(item.recommendedFormat)}</span>
+        <span className="cf-badge cf-badge--neutral">{formatRadarSourceType(item.sourceType)}</span>
       </div>
+      {item.seoKeywords?.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+          {item.seoKeywords.slice(0, 6).map((keyword) => (
+            <span key={keyword} className="cf-badge cf-badge--creator">
+              {keyword}
+            </span>
+          ))}
+        </div>
+      )}
       <p className="cf-body" style={{ marginTop: 0 }}>{item.whyNow || item.summary}</p>
       {item.sourceQuery && (
         <div className="cf-caption" style={{ margin: "-8px 0 16px" }}>
           Query radar: {item.sourceQuery}
+        </div>
+      )}
+      {item.sourceType === "fallback" && (
+        <div
+          style={{
+            border: "1px solid var(--rule-1)",
+            borderLeft: "3px solid var(--warn)",
+            borderRadius: "var(--r-2)",
+            padding: "12px 14px",
+            marginBottom: 18,
+            color: "var(--paper-dim)",
+            lineHeight: 1.45,
+          }}
+        >
+          Fallback significa que esta idea vino del motor editorial seguro porque no hubo suficientes resultados utiles de web o base interna en esa corrida.
+        </div>
+      )}
+
+      {knowledgeSignals.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: item.sources?.length ? 8 : 16 }}>
+          {knowledgeSignals.slice(0, 3).map((signal) => (
+            <span
+              key={`${signal.title}-${signal.excerpt?.slice(0, 24)}`}
+              className="cf-badge cf-badge--creator"
+              title={signal.excerpt || signal.title}
+              style={{ maxWidth: "100%" }}
+            >
+              <Icon name="bookOpen" size={12} />
+              {signal.title}
+            </span>
+          ))}
         </div>
       )}
       {item.riskReason && (
@@ -314,6 +436,42 @@ function DetailPanel({ item }) {
           <div className="cf-caption">Idea evergreen sin fuentes externas.</div>
         )}
       </div>
+
+      {knowledgeSignals.length > 0 && (
+        <div style={{ marginTop: 22 }}>
+          <div className="cf-mono-sm" style={{ marginBottom: 10 }}>
+            BASE INTERNA
+          </div>
+          <div style={{ display: "grid", gap: 10 }}>
+            {knowledgeSignals.slice(0, 4).map((signal) => (
+              <div
+                key={`${signal.title}-${signal.excerpt?.slice(0, 32)}`}
+                className="cf-card"
+                style={{
+                  padding: 12,
+                  borderRadius: "var(--r-2)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, color: "var(--paper)" }}>
+                  <Icon name="bookOpen" size={14} />
+                  <span>{signal.title}</span>
+                </div>
+                <div className="cf-caption" style={{ marginBottom: 8 }}>
+                  {signal.category || "General"}
+                </div>
+                <p className="cf-body" style={{ margin: 0, fontSize: 14, lineHeight: 1.45 }}>
+                  {signal.excerpt}
+                </p>
+              </div>
+            ))}
+          </div>
+          {item.knowledgeQuery && (
+            <div className="cf-caption" style={{ marginTop: 10 }}>
+              Query interna: {item.knowledgeQuery}
+            </div>
+          )}
+        </div>
+      )}
     </aside>
   );
 }
@@ -330,7 +488,7 @@ export default function RadarPage() {
     category: "all",
     window: "today",
     format: "all",
-    limit: 3,
+    limit: 5,
     queryLimit: 2,
   });
   const [query, setQuery] = useState("");
@@ -388,7 +546,15 @@ export default function RadarPage() {
       const formatOk = filters.format === "all" || item.recommendedFormat === filters.format;
       if (!formatOk) return false;
       if (!text) return true;
-      return [item.title, item.angle, item.summary, item.agentName]
+      return [
+        item.title,
+        item.seoTitle,
+        ...(item.seoKeywords || []),
+        item.angle,
+        item.summary,
+        item.agentName,
+        ...(item.knowledgeSignals || []).flatMap((signal) => [signal.title, signal.category, signal.excerpt]),
+      ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
@@ -420,11 +586,17 @@ export default function RadarPage() {
   const stats = useMemo(() => {
     const agentCount = new Set(visibleItems.map((item) => item.agentId)).size;
     const highRisk = visibleItems.filter((item) => item.riskLevel === "high").length;
+    const withKnowledge = visibleItems.filter((item) => (item.knowledgeSignals || []).length > 0).length;
     const avgScore = visibleItems.length
       ? Math.round(visibleItems.reduce((sum, item) => sum + Number(item.editorialScore || 0), 0) / visibleItems.length)
       : 0;
-    return { agentCount, highRisk, avgScore };
+    return { agentCount, highRisk, withKnowledge, avgScore };
   }, [visibleItems]);
+
+  const currentCostEstimate = useMemo(
+    () => run?.costEstimate || estimateRadarCost(filters),
+    [run?.costEstimate, filters],
+  );
 
   const updateCandidate = (hash, patch) => {
     setRun((current) => {
@@ -471,7 +643,7 @@ export default function RadarPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || data.error || "No se pudo guardar la idea.");
       updateCandidate(item.candidateHash, { status: "saved" });
-      setNotice("Idea guardada en biblioteca.");
+      setNotice("Idea guardada en Biblioteca por agente.");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -485,15 +657,7 @@ export default function RadarPage() {
     setError("");
     setNotice("");
     try {
-      const res = await authedFetch(user, `${getApiBase()}/radar/candidates/${item.candidateHash}/create-project`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.projectId) throw new Error(data.detail || data.error || "No se pudo crear el proyecto.");
-      updateCandidate(item.candidateHash, { status: "project_created", projectId: data.projectId });
-      router.push(`/dashboard/project/${data.projectId}`);
+      router.push(buildPreparedProjectUrl(item));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -531,10 +695,14 @@ export default function RadarPage() {
               Radar editorial
             </h1>
             <p className="cf-body" style={{ maxWidth: 680, margin: "12px 0 0" }}>
-              Temas virales, dolores de audiencia, hooks, noticias y creacion ordenada de proyectos.
+              Temas virales, dolores de audiencia, hooks, noticias y senales internas de la biblioteca Qdrant.
             </p>
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Link className="cf-btn cf-btn--ghost" href="/dashboard/library" style={{ textDecoration: "none" }}>
+              <Icon name="bookOpen" size={16} />
+              Biblioteca
+            </Link>
             <button className="cf-btn cf-btn--secondary" onClick={() => runRadar(false)} disabled={running || loading} type="button">
               <Icon name="search" size={16} />
               {running ? "Buscando" : "Buscar"}
@@ -551,7 +719,8 @@ export default function RadarPage() {
         {[
           ["Ideas", compactNumber(visibleItems.length), run?.cached ? "cache" : "actual"],
           ["Agentes", compactNumber(stats.agentCount), "cubiertos"],
-          ["Score prom.", compactNumber(stats.avgScore), "editorial"],
+          ["Score editorial", compactNumber(stats.avgScore), "promedio"],
+          ["Base interna", compactNumber(stats.withKnowledge), "con Qdrant"],
           ["Alto riesgo", compactNumber(stats.highRisk), "bloqueados"],
         ].map(([label, value, sub]) => (
           <div className="cf-card" key={label} style={{ padding: "var(--s-4)" }}>
@@ -561,6 +730,10 @@ export default function RadarPage() {
           </div>
         ))}
       </section>
+
+      <div style={{ marginBottom: "var(--s-5)" }}>
+        <CostPill estimate={currentCostEstimate} cached={run?.cached} />
+      </div>
 
       <section className="cf-card cf-fade cf-fade--1" style={{ padding: "var(--s-5)", marginBottom: "var(--s-5)" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
@@ -646,6 +819,18 @@ export default function RadarPage() {
             >
               {RADAR_WINDOW_OPTIONS.map((option) => (
                 <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <div className="cf-mono-sm" style={{ marginBottom: 8 }}>Ideas</div>
+            <select
+              className="cf-input"
+              value={filters.limit}
+              onChange={(event) => setFilters((current) => ({ ...current, limit: Number(event.target.value) }))}
+            >
+              {[3, 5, 8, 12].map((value) => (
+                <option key={value} value={value}>{value} ideas</option>
               ))}
             </select>
           </label>

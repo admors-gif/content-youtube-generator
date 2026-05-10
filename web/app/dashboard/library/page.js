@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import Icon from "@/components/Icon";
 import { AgentMonogram } from "@/lib/agentVisual";
 import { isAdminUser } from "@/lib/admin";
@@ -39,11 +40,30 @@ function buttonStyle(selected) {
 function matchesText(item, query, agentName) {
   const text = query.trim().toLowerCase();
   if (!text) return true;
-  return [item.title, item.angle, item.summary, item.status, item.recommendedFormat, agentName]
+  return [
+    item.title,
+    item.seoTitle,
+    ...(item.seoKeywords || []),
+    item.angle,
+    item.summary,
+    item.status,
+    item.recommendedFormat,
+    agentName,
+  ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase()
     .includes(text);
+}
+
+function buildPreparedProjectUrl(item) {
+  const params = new URLSearchParams({
+    agentId: item.agentId || "",
+    topic: item.seoTitle || item.angle || item.title || "",
+    from: "library",
+  });
+  if (item.candidateHash) params.set("candidateHash", item.candidateHash);
+  return `/dashboard/new?${params.toString()}`;
 }
 
 function IdeaCard({ item, creating, archiving, onCreate, onArchive }) {
@@ -61,11 +81,34 @@ function IdeaCard({ item, creating, archiving, onCreate, onArchive }) {
             <span className="cf-badge cf-badge--neutral">{formatRecommendation(item.recommendedFormat)}</span>
           </div>
           <h3 className="cf-h3" style={{ margin: "0 0 8px", lineHeight: 1.2 }}>
-            {item.angle || item.title}
+            {item.seoTitle || item.angle || item.title}
           </h3>
+          {item.seoKeywords?.length > 0 && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              {item.seoKeywords.slice(0, 5).map((keyword) => (
+                <span key={keyword} className="cf-badge cf-badge--creator">
+                  {keyword}
+                </span>
+              ))}
+            </div>
+          )}
           <p className="cf-body" style={{ margin: 0, lineHeight: 1.5 }}>
             {item.summary || item.title}
           </p>
+          {item.knowledgeSignals?.length > 0 && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
+              {item.knowledgeSignals.slice(0, 3).map((signal) => (
+                <span
+                  key={`${signal.title}-${signal.excerpt?.slice(0, 24)}`}
+                  className="cf-badge cf-badge--neutral"
+                  title={signal.excerpt || signal.title}
+                >
+                  <Icon name="bookOpen" size={12} />
+                  {signal.title}
+                </span>
+              ))}
+            </div>
+          )}
           {item.sources?.length > 0 && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
               {item.sources.slice(0, 3).map((source) => (
@@ -96,6 +139,9 @@ function IdeaCard({ item, creating, archiving, onCreate, onArchive }) {
             {Number(item.editorialScore || 0)}
           </div>
           <div className="cf-caption">score</div>
+          {item.scores?.audience ? (
+            <div className="cf-caption">audiencia {Number(item.scores.audience || 0)}</div>
+          ) : null}
         </div>
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
@@ -116,7 +162,7 @@ function IdeaCard({ item, creating, archiving, onCreate, onArchive }) {
             type="button"
           >
             <Icon name="plus" size={14} />
-            {creating ? "Creando" : "Crear proyecto"}
+            {creating ? "Preparando" : "Preparar proyecto"}
           </button>
         )}
         {item.status !== "archived" && (
@@ -166,6 +212,7 @@ function ProjectCard({ item }) {
 
 export default function LibraryPage() {
   const { user, profile, loading: authLoading } = useAuth();
+  const router = useRouter();
   const admin = isAdminUser(user, profile);
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -262,15 +309,7 @@ export default function LibraryPage() {
     setError("");
     setNotice("");
     try {
-      const res = await authedFetch(user, `${getApiBase()}/radar/candidates/${item.candidateHash}/create-project`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.projectId) throw new Error(data.detail || data.error || "No se pudo crear el proyecto.");
-      setNotice("Proyecto creado desde biblioteca.");
-      await loadLibrary();
+      router.push(buildPreparedProjectUrl(item));
     } catch (err) {
       setError(err.message);
     } finally {

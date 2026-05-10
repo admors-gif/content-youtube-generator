@@ -23,7 +23,7 @@ DEFAULT_INTENT = "viral_topics"
 MAX_MANUAL_LIMIT = 12
 MAX_AGENT_LIMIT = 5
 RADAR_CACHE_TTL_SECONDS = 3600
-RADAR_CACHE_VERSION = "v3"
+RADAR_CACHE_VERSION = "v4"
 RADAR_INTENTS = {
     "news",
     "viral_topics",
@@ -92,6 +92,49 @@ PODCAST_FALLBACK_SEEDS = {
         "Episodio corto: tres señales de que ya estas negociando tus limites",
         "Episodio profundo: la fantasia de cierre que nunca llega",
         "Episodio derivable: contacto cero para podcast, Shorts y TikTok",
+    ],
+}
+
+KNOWLEDGE_AGENT_HINTS = {
+    "business": "ventas liderazgo emprendimiento marketing negociacion productividad",
+    "biography": "biografia historia liderazgo legado decisiones crisis",
+    "finance": "finanzas inversion riesgo burbujas dinero economia",
+    "history": "historia imperios civilizaciones guerra poder vida cotidiana",
+    "mystery": "misterio investigacion simbolos sociedades secretas enigmas",
+    "philosophy": "filosofia estoicismo sentido disciplina virtud vida moderna",
+    "psychology": "psicologia emociones trauma manipulacion conducta humana",
+    "religion": "religion textos sagrados espiritualidad simbolismo fe",
+    "science": "ciencia tecnologia descubrimientos universo mente futuro",
+    "technology": "inteligencia artificial tecnologia futuro innovacion productividad",
+    "travel": "viajes cultura lugares historia guias experiencias",
+    "wellness": "habitos meditacion bienestar ansiedad descanso autoconocimiento",
+}
+
+PODCAST_KNOWLEDGE_QUERIES = {
+    "viral_topics": [
+        "apego ansioso ghosting contacto cero dependencia emocional limites relaciones",
+        "por que alguien mira historias pero no responde ansiedad apego ruptura",
+        "limerencia breadcrumbing validacion intermitente amor propio relaciones",
+    ],
+    "audience_pain": [
+        "me dejo en visto pero ve mis historias apego ansiedad validacion",
+        "no puedo soltar a mi ex dependencia emocional duelo ruptura",
+        "siento que pedir claridad es rogar limites autoestima relaciones",
+    ],
+    "shorts_hooks": [
+        "frases paradojas apego emocional contacto cero amor propio limites",
+        "senales de ansiedad en relaciones ghosting dependencia emocional",
+        "verdades incomodas ruptura ex validacion intermitente",
+    ],
+    "evergreen": [
+        "diferencia entre amor apego dependencia emocional limites autoestima",
+        "apego evitativo apego ansioso relaciones contacto cero duelo",
+        "autoengano romantizar intensidad amor propio relaciones",
+    ],
+    "calendar_gaps": [
+        "serie editorial apego limites ruptura contacto cero amor propio",
+        "temas complementarios ansiedad relaciones dependencia emocional duelo",
+        "contenido derivado podcast shorts tiktok apego ghosting limites",
     ],
 }
 
@@ -310,6 +353,121 @@ def build_agent_queries(
     return queries[: max(1, max_queries)]
 
 
+def build_knowledge_queries(
+    agent: dict,
+    *,
+    market: str = DEFAULT_MARKET,
+    language: str = DEFAULT_LANGUAGE,
+    category: str = DEFAULT_CATEGORY,
+    intent: str = DEFAULT_INTENT,
+    max_queries: int = 2,
+) -> list[str]:
+    aid = agent_id(agent)
+    intent = normalize_intent(intent)
+    if aid == NEWS_AGENT_ID or intent == "news":
+        return []
+    if aid in PODCAST_AGENT_IDS:
+        return PODCAST_KNOWLEDGE_QUERIES.get(intent, PODCAST_KNOWLEDGE_QUERIES["viral_topics"])[: max(1, max_queries)]
+
+    name = agent_label(agent)
+    description = str(agent.get("description") or "").strip()
+    examples = agent.get("exampleTopics") or agent.get("examples") or []
+    example_hint = " ".join(str(item) for item in examples[:2])
+    agent_category = str(agent.get("category") or category or "general").strip().lower()
+    category_hint = KNOWLEDGE_AGENT_HINTS.get(agent_category, agent_category)
+    language_hint = "en espanol" if normalize_text(language) in {"es", "es-mx", "spanish", "espanol"} else f"en {language}"
+    market_hint = "audiencia Mexico Latinoamerica" if normalize_text(market) in {"mx", "latam", "mexico"} else f"audiencia {market}"
+
+    if intent == "audience_pain":
+        queries = [
+            f"problemas dudas preguntas audiencia {name} {description} {category_hint} {language_hint}",
+            f"dolores conflictos objeciones curiosidades {name} {category_hint} {market_hint}",
+        ]
+    elif intent == "shorts_hooks":
+        queries = [
+            f"ideas breves paradojas mitos senales advertencias {name} {category_hint} {language_hint}",
+            f"hooks frases fuertes lecciones contraintuitivas {name} {category_hint} {market_hint}",
+        ]
+    elif intent == "calendar_gaps":
+        queries = [
+            f"serie temas complementarios calendario editorial {name} {category_hint} {language_hint}",
+            f"huecos contenido subtemas derivados {name} {description} {category_hint}",
+        ]
+    else:
+        queries = [
+            f"temas profundos video YouTube {name} {description} {category_hint} {language_hint}",
+            f"ideas evergreen populares {name} {category_hint} {example_hint} {market_hint}",
+        ]
+    return [compact_text(query, 260) for query in queries if query.strip()][: max(1, max_queries)]
+
+
+def estimate_radar_cost(
+    agents: list[dict],
+    *,
+    query_limit: int = 2,
+    intent: str = DEFAULT_INTENT,
+    market: str = DEFAULT_MARKET,
+    language: str = DEFAULT_LANGUAGE,
+    category: str = DEFAULT_CATEGORY,
+    search_depth: str = "basic",
+    knowledge_enabled: bool = True,
+    knowledge_query_limit: int | None = None,
+) -> dict:
+    safe_query_limit = max(1, min(5, int(query_limit or 1)))
+    depth = normalize_text(search_depth or "basic")
+    tavily_credits_per_query = 2 if depth == "advanced" else 1
+    tavily_queries = 0
+    knowledge_queries = 0
+    per_agent = []
+    for agent in agents or []:
+        web_queries = build_agent_queries(
+            agent,
+            market=market,
+            language=language,
+            category=category,
+            intent=intent,
+            max_queries=safe_query_limit,
+        )
+        tavily_queries += len(web_queries)
+
+        k_queries: list[str] = []
+        if knowledge_enabled:
+            k_limit = safe_query_limit if knowledge_query_limit is None else max(0, min(3, int(knowledge_query_limit or 0)))
+            if k_limit:
+                k_queries = build_knowledge_queries(
+                    agent,
+                    market=market,
+                    language=language,
+                    category=category,
+                    intent=intent,
+                    max_queries=k_limit,
+                )
+                knowledge_queries += len(k_queries)
+        per_agent.append({
+            "agentId": agent_id(agent),
+            "agentName": agent_label(agent),
+            "tavilyQueries": len(web_queries),
+            "tavilyCredits": len(web_queries) * tavily_credits_per_query,
+            "knowledgeQueries": len(k_queries),
+            "embeddingQueries": len(k_queries),
+        })
+    tavily_credits = tavily_queries * tavily_credits_per_query
+    return {
+        "tavilyQueries": tavily_queries,
+        "tavilyCredits": tavily_credits,
+        "tavilyCreditsPerQuery": tavily_credits_per_query,
+        "tavilySearchDepth": depth or "basic",
+        "knowledgeQueries": knowledge_queries,
+        "embeddingQueries": knowledge_queries,
+        "notes": [
+            "Buscar con cache valido no vuelve a gastar Tavily.",
+            "Refrescar fuerza una corrida nueva.",
+            "Cada busqueda interna usa un embedding de OpenAI para consultar Qdrant.",
+        ],
+        "perAgent": per_agent,
+    }
+
+
 def fallback_candidates_for_agent(agent: dict, *, limit: int = 3, intent: str = DEFAULT_INTENT) -> list[dict]:
     aid = agent_id(agent)
     name = agent_label(agent)
@@ -398,6 +556,135 @@ def tavily_results_to_candidates(
             )
         )
     return candidates
+
+
+def knowledge_results_to_candidates(
+    agent: dict,
+    query: str,
+    response: dict | None,
+    *,
+    limit: int = 3,
+    intent: str = DEFAULT_INTENT,
+) -> list[dict]:
+    response = response or {}
+    intent = normalize_intent(intent)
+    items = response.get("items") or response.get("results") or []
+    if not items:
+        return []
+
+    candidates = []
+    for index, item in enumerate(items[: max(1, limit)], 1):
+        content = compact_text(item.get("content") or item.get("text") or "", 620)
+        if not content:
+            continue
+        book_title = compact_text(item.get("title") or item.get("bookTitle") or "Biblioteca interna", 140)
+        category = compact_text(item.get("category") or "General", 120)
+        title = knowledge_candidate_title(agent, query, item, index=index)
+        summary = knowledge_candidate_summary(agent, title, content, book_title, category)
+        angle = knowledge_candidate_angle(agent, title, content)
+        why_now = (
+            "Senal encontrada en la base de conocimiento interna. "
+            "Usala como inspiracion editorial, no como texto literal para el guion."
+        )
+        candidate = shape_candidate(
+            agent=agent,
+            title=title,
+            summary=summary,
+            angle=angle,
+            why_now=why_now,
+            sources=[],
+            query=query,
+            source_type="knowledge",
+            intent=intent,
+            rank_seed=100 + index,
+        )
+        candidate["knowledgeSignals"] = normalize_knowledge_signals([item])
+        candidate["knowledgeQuery"] = compact_text(query, 260)
+        candidate["knowledgeScore"] = safe_float(item.get("score"), 0.0)
+        candidates.append(candidate)
+    return candidates
+
+
+def knowledge_candidate_title(agent: dict, query: str, item: dict, *, index: int = 1) -> str:
+    aid = agent_id(agent)
+    text = normalize_text(f"{query} {item.get('content') or item.get('text') or ''}")
+    if aid in PODCAST_AGENT_IDS:
+        if "visto" in text or "historias" in text:
+            return "Me deja en visto pero sigue mirando mis historias"
+        if "contacto cero" in text:
+            return "Por que el contacto cero duele como abstinencia emocional"
+        if "apego ansioso" in text:
+            return "Cuando el apego ansioso convierte un mensaje en una prueba de amor"
+        if "apego evitativo" in text:
+            return "Por que te atrae alguien emocionalmente no disponible"
+        if "limites" in text or "limite" in text:
+            return "El limite que te cuesta poner porque todavia quieres que te elijan"
+        if "breadcrumbing" in text or "validacion intermitente" in text:
+            return "La migaja emocional que confundes con esperanza"
+        if "limerencia" in text:
+            return "Cuando no amas a la persona: amas la fantasia"
+        if "duelo" in text or "ruptura" in text:
+            return "El duelo invisible de soltar a quien todavia deseas"
+    topic = clean_source_title(query)
+    topic = re.sub(
+        r"\b(temas|profundos|video|youtube|ideas|evergreen|populares|audiencia|mexico|latinoamerica|en espanol)\b",
+        "",
+        topic,
+        flags=re.IGNORECASE,
+    )
+    topic = re.sub(r"\s+", " ", topic).strip(" .,:;")
+    if not topic:
+        topic = clean_source_title(item.get("title") or agent_label(agent))
+    return compact_text(topic[:1].upper() + topic[1:], 160)
+
+
+def knowledge_candidate_summary(agent: dict, title: str, content: str, book_title: str, category: str) -> str:
+    aid = agent_id(agent)
+    if aid in PODCAST_AGENT_IDS:
+        return compact_text(
+            f"Idea nacida de la biblioteca interna sobre relaciones: {content}",
+            650,
+        )
+    return compact_text(
+        f"Base interna ({category}, {book_title}): {content}",
+        650,
+    )
+
+
+def knowledge_candidate_angle(agent: dict, title: str, content: str) -> str:
+    aid = agent_id(agent)
+    if aid in PODCAST_AGENT_IDS:
+        return compact_text(f"{title}: una conversacion emocional con ejemplos reales, limites claros y cierre sanador", 240)
+    if aid in {"agent_autohipnosis", "agent_meditacion_larga", "agent_tiktok_autohypnosis", "agent_tiktok_meditation"}:
+        return compact_text(f"{title}: una experiencia segura de bienestar sin promesas medicas", 240)
+    return compact_text(f"{title}: desarrollado con profundidad desde la biblioteca interna y convertido en historia", 240)
+
+
+def normalize_knowledge_signals(items: list[dict], *, limit: int = 3) -> list[dict]:
+    signals = []
+    seen = set()
+    for item in items[:limit]:
+        title = compact_text(item.get("title") or item.get("bookTitle") or "Biblioteca interna", 140)
+        category = compact_text(item.get("category") or "General", 120)
+        excerpt = compact_text(item.get("content") or item.get("text") or "", 360)
+        key = f"{title}|{excerpt[:80]}"
+        if not excerpt or key in seen:
+            continue
+        seen.add(key)
+        signals.append({
+            "title": title,
+            "category": category,
+            "excerpt": excerpt,
+            "score": safe_float(item.get("score"), 0.0),
+        })
+    return signals
+
+
+def safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
 
 
 def build_angle(agent: dict, title: str, summary: str) -> str:
@@ -509,6 +796,10 @@ def score_candidate(candidate: dict, agent: dict) -> dict:
     arc += min(25, sum(1 for term in ["porque", "detras", "consecuencia", "caida", "ascenso", "misterio"] if term in text) * 6)
     freshness += 25 if candidate.get("sourceType") in {"tavily", "tavily_answer"} else 0
     freshness += 10 if aid == NEWS_AGENT_ID else 0
+    if candidate.get("sourceType") == "knowledge":
+        fit += 12
+        arc += 8
+        ease += 5
     fit += 18 if normalize_text(agent_label(agent)).split(" ")[0] in text else 0
     fit += 20 if aid == NEWS_AGENT_ID and any(term in text for term in ["noticia", "viral", "redes", "polemica"]) else 0
     if aid == "agent_podcast_general":
@@ -519,7 +810,7 @@ def score_candidate(candidate: dict, agent: dict) -> dict:
     if len(sources) >= 2:
         freshness += 10
         risk_score += 5
-    if len(sources) == 0 and candidate.get("sourceType") != "fallback":
+    if len(sources) == 0 and candidate.get("sourceType") not in {"fallback", "knowledge"}:
         risk_score -= 15
     if candidate.get("riskLevel") == "high":
         audience -= 10
@@ -592,6 +883,7 @@ def shape_candidate(
     scores = score_candidate(candidate, agent)
     candidate["scores"] = scores
     candidate["editorialScore"] = scores["overall"]
+    apply_seo_metadata(candidate)
     return candidate
 
 
@@ -608,6 +900,94 @@ def normalize_sources(sources: list[dict]) -> list[dict]:
         seen.add(key)
         normalized.append({"title": title, "url": url, "domain": domain})
     return normalized[:5]
+
+
+def apply_seo_metadata(candidate: dict) -> dict:
+    seo_title = build_seo_title(candidate)
+    keywords = build_seo_keywords(candidate)
+    candidate["seoTitle"] = seo_title
+    candidate["seoKeywords"] = keywords
+    candidate["searchIntent"] = infer_search_intent(candidate)
+    return candidate
+
+
+def build_seo_title(candidate: dict, *, limit: int = 70) -> str:
+    raw = clean_source_title(candidate.get("angle") or candidate.get("title") or "")
+    aid = candidate.get("agentId") or ""
+    text = normalize_text(raw)
+    if aid in PODCAST_AGENT_IDS:
+        if "contacto cero" in text and "apego" not in text:
+            raw = f"{raw}: apego y contacto cero"
+        elif "visto" in text and "apego" not in text:
+            raw = f"{raw}: apego ansioso"
+        elif "ex" in text and "ruptura" not in text:
+            raw = f"{raw}: ruptura y amor propio"
+        elif not any(term in text for term in ["apego", "ruptura", "contacto cero", "ghosting", "amor propio", "limites"]):
+            raw = f"{raw}: relaciones y amor propio"
+    elif candidate.get("agentId") == NEWS_AGENT_ID and "viral" not in text:
+        raw = f"{raw}: noticia viral explicada"
+    return compact_text(raw, limit)
+
+
+def build_seo_keywords(candidate: dict, *, limit: int = 8) -> list[str]:
+    text = normalize_text(" ".join([
+        candidate.get("title") or "",
+        candidate.get("angle") or "",
+        candidate.get("summary") or "",
+    ]))
+    aid = candidate.get("agentId") or ""
+    if aid in PODCAST_AGENT_IDS:
+        vocabulary = [
+            "apego ansioso",
+            "apego evitativo",
+            "contacto cero",
+            "ghosting",
+            "breadcrumbing",
+            "dependencia emocional",
+            "amor propio",
+            "limites",
+            "ruptura",
+            "ex",
+            "duelo amoroso",
+            "validacion emocional",
+        ]
+    elif aid == NEWS_AGENT_ID:
+        vocabulary = ["noticia viral", "tendencia", "redes sociales", "contexto", "que paso", "ultima hora", "debate"]
+    else:
+        vocabulary = [
+            normalize_text(candidate.get("agentName") or "").strip(),
+            normalize_text(candidate.get("category") or "").strip(),
+            "documental",
+            "historia",
+            "explicado",
+            "curiosidades",
+            "youtube",
+        ]
+    matches = []
+    for term in vocabulary:
+        if term and term in text and term not in matches:
+            matches.append(term)
+    for token in re.findall(r"[a-záéíóúñ0-9]{4,}", text):
+        if len(matches) >= limit:
+            break
+        if token not in matches and token not in {"para", "como", "porque", "desde", "sobre", "video"}:
+            matches.append(token)
+    return matches[:limit]
+
+
+def infer_search_intent(candidate: dict) -> str:
+    intent = normalize_intent(candidate.get("intent") or candidate.get("radarIntent"))
+    if intent == "audience_pain":
+        return "dolor de audiencia"
+    if intent == "shorts_hooks":
+        return "hook de descubrimiento"
+    if intent == "evergreen":
+        return "busqueda evergreen"
+    if intent == "calendar_gaps":
+        return "plan editorial"
+    if intent == "news":
+        return "actualidad"
+    return "tema viral"
 
 
 def dedupe_candidates(
@@ -679,8 +1059,12 @@ def apply_llm_ranking(candidates: list[dict], llm_items: list[dict]) -> list[dic
             candidate["riskReason"] = compact_text(llm_item["riskReason"], 260)
         if llm_item.get("recommendationReason"):
             candidate["recommendationReason"] = compact_text(llm_item["recommendationReason"], 260)
+        apply_seo_metadata(candidate)
         ranked.append(candidate)
-    ranked.extend(sorted(by_hash.values(), key=lambda item: item.get("editorialScore", 0), reverse=True))
+    remaining = sorted(by_hash.values(), key=lambda item: item.get("editorialScore", 0), reverse=True)
+    for candidate in remaining:
+        apply_seo_metadata(candidate)
+    ranked.extend(remaining)
     return ranked
 
 
@@ -695,6 +1079,14 @@ def build_ranking_prompt(candidates: list[dict], *, scope: str, intent: str = DE
             "angle": c.get("angle"),
             "intent": c.get("intent") or intent,
             "sources": [s.get("domain") or s.get("url") for s in c.get("sources", [])],
+            "knowledgeSignals": [
+                {
+                    "book": s.get("title"),
+                    "category": s.get("category"),
+                    "excerpt": s.get("excerpt"),
+                }
+                for s in (c.get("knowledgeSignals") or [])[:3]
+            ],
             "riskLevel": c.get("riskLevel"),
             "editorialScore": c.get("editorialScore"),
         }
@@ -711,6 +1103,8 @@ def build_ranking_prompt(candidates: list[dict], *, scope: str, intent: str = DE
         "contacto cero, limites, amor propio, ghosting, ansiedad en relaciones o dependencia emocional.\n"
         "Para shorts_hooks, prioriza frases con punch emocional. Para audience_pain, prioriza situaciones que "
         "la audiencia diria en primera persona. Para evergreen, prioriza temas atemporales.\n"
+        "Si hay knowledgeSignals, usalas solo para detectar temas, tensiones y profundidad; no copies frases largas "
+        "ni conviertas el titulo del libro en el tema del video.\n"
         "Penaliza fuentes debiles, promesas medicas, acusaciones legales sin evidencia y sensacionalismo.\n"
         f"Scope: {scope}\n"
         f"Intent: {intent}\n"

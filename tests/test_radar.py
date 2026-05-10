@@ -2,11 +2,13 @@ from scripts.radar import (
     NEWS_AGENT_ID,
     apply_llm_ranking,
     build_agent_queries,
+    build_knowledge_queries,
     build_news_queries,
     cache_key,
     candidate_hash,
     canonical_title_key,
     dedupe_candidates,
+    knowledge_results_to_candidates,
     parse_ranking_response,
     shape_candidate,
 )
@@ -80,6 +82,49 @@ def test_podcast_queries_search_topics_not_brand_name():
     assert "apego" in combined
     assert "contacto cero" in combined
     assert "audiencia" in combined or "preguntas" in combined
+
+
+def test_podcast_knowledge_queries_search_internal_topics_not_brand_name():
+    queries = build_knowledge_queries(
+        PODCAST_AGENT,
+        market="mx",
+        category="all",
+        intent="audience_pain",
+        max_queries=3,
+    )
+    combined = " ".join(queries).lower()
+
+    assert len(queries) == 3
+    assert "esto no es amor" not in combined
+    assert "apego" in combined
+    assert "visto" in combined
+
+
+def test_knowledge_results_create_internal_signals_without_external_sources():
+    candidates = knowledge_results_to_candidates(
+        PODCAST_AGENT,
+        "me dejo en visto pero ve mis historias apego ansiedad validacion",
+        {
+            "items": [
+                {
+                    "title": "Libro de apego",
+                    "category": "08_Psicologia_y_Emociones",
+                    "content": "El apego ansioso puede convertir la espera de una respuesta en una prueba de valor personal.",
+                    "score": 0.82,
+                }
+            ]
+        },
+        limit=2,
+        intent="audience_pain",
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0]["sourceType"] == "knowledge"
+    assert candidates[0]["sources"] == []
+    assert candidates[0]["knowledgeSignals"][0]["title"] == "Libro de apego"
+    assert candidates[0]["seoTitle"]
+    assert "apego ansioso" in candidates[0]["seoKeywords"]
+    assert "visto" in candidates[0]["title"].lower()
 
 
 def test_news_candidate_with_single_source_requires_medium_risk():
