@@ -1060,6 +1060,8 @@ def build_title_lab(
         title_lab_option(agent, title, seed_topic=seed, group="adjacent", rank=index + 1, knowledge_signals=signals)
         for index, title in enumerate(adjacent_titles)
     ]
+    all_options = seed_options + adjacent_options + trend_options + competitor_options
+    retention_ranking = rank_title_lab_retention(all_options)
     return {
         "agentId": agent_id(agent),
         "agentName": agent_label(agent),
@@ -1070,7 +1072,8 @@ def build_title_lab(
             {"id": "trend", "label": "Tendencias web", "items": trend_options},
             {"id": "competitor", "label": "Competidores YouTube", "items": competitor_options},
         ],
-        "items": seed_options + adjacent_options + trend_options + competitor_options,
+        "items": all_options,
+        "retentionRanking": retention_ranking,
         "knowledgeSignals": signals,
         "trendSignals": trend_signals or [],
         "competitorSignals": competitor_signals or [],
@@ -1213,9 +1216,11 @@ def title_lab_option(
         "seoScore": scores["seo"],
         "clickbaitScore": scores["clickbait"],
         "fitScore": scores["fit"],
+        "retentionScore": scores["retention"],
         "overallScore": scores["overall"],
         "riskLevel": scores["riskLevel"],
         "riskReason": scores["riskReason"],
+        "retentionReason": scores["retentionReason"],
         "recommendedFormat": "youtube_long",
         "knowledgeSignals": (knowledge_signals or [])[:3],
     }
@@ -1249,8 +1254,10 @@ def title_lab_external_options(
             "url": signal.get("url") or "",
             "views": signal.get("views") or 0,
             "viewsPerDay": signal.get("viewsPerDay") or 0,
+            "publishedAt": signal.get("publishedAt") or "",
             "source": signal.get("source") or group,
         }
+        boost_title_lab_option_from_signal(option, signal)
         options.append(option)
     return options
 
@@ -1288,29 +1295,41 @@ def score_title_lab_option(agent: dict, title: str, *, seed_topic: str = "", gro
     seo = 45
     clickbait = 45
     fit = 55
+    retention = 46
     risk_score = 92
 
     if any(word in text for word in TITLE_LAB_POWER_WORDS):
         viral += min(24, sum(1 for word in TITLE_LAB_POWER_WORDS if word in text) * 4)
         clickbait += min(24, sum(1 for word in TITLE_LAB_POWER_WORDS if word in text) * 4)
+        retention += min(18, sum(1 for word in TITLE_LAB_POWER_WORDS if word in text) * 3)
     if "?" in title or text.startswith(("por que", "porque", "cuando", "si ")):
         viral += 8
         clickbait += 8
+        retention += 9
     if ":" in title:
         seo += 6
         clickbait += 4
+        retention += 5
     if 42 <= length <= 72:
         seo += 18
+        retention += 12
     elif 30 <= length <= 90:
         seo += 10
+        retention += 7
     else:
         seo -= 8
+        retention -= 6
     if seed and seed in text:
         seo += 18
         fit += 12
+        retention += 5
     if group == "adjacent":
         viral += 4
         seo -= 3
+        retention += 3
+    if group in {"trend", "competitor"}:
+        viral += 4
+        retention += 5
     if aid in PODCAST_AGENT_IDS:
         podcast_terms = [
             "apego",
@@ -1327,28 +1346,115 @@ def score_title_lab_option(agent: dict, title: str, *, seed_topic: str = "", gro
             "sanando",
         ]
         fit += min(30, sum(1 for term in podcast_terms if term in text) * 5)
+        retention += min(22, sum(1 for term in podcast_terms if term in text) * 4)
+        if any(term in text for term in ["no funciona", "nadie te explica", "antes de", "sigues", "vuelve", "duele"]):
+            retention += 10
         if "cura" in text or "diagnostico" in text:
             risk_score -= 35
     if any(term in text for term in ["acusacion", "denuncia", "fraude", "cura", "milagro"]):
         risk_score -= 30
+        retention -= 12
 
     viral = clamp_score(viral)
     seo = clamp_score(seo)
     clickbait = clamp_score(clickbait)
     fit = clamp_score(fit)
+    retention = clamp_score(retention)
     risk_score = clamp_score(risk_score)
-    overall = clamp_score(viral * 0.35 + seo * 0.25 + clickbait * 0.20 + fit * 0.20)
+    overall = clamp_score(viral * 0.28 + seo * 0.20 + clickbait * 0.19 + fit * 0.18 + retention * 0.15)
     risk_level = "high" if risk_score < 45 else "medium" if risk_score < 75 else "low"
+    retention_reason = title_lab_retention_reason(title, retention, group)
     return {
         "viral": viral,
         "seo": seo,
         "clickbait": clickbait,
         "fit": fit,
+        "retention": retention,
         "risk": risk_score,
         "overall": overall,
         "riskLevel": risk_level,
         "riskReason": "Titulo seguro para exploracion editorial." if risk_level == "low" else "Revisar claims o sensibilidad antes de producir.",
+        "retentionReason": retention_reason,
     }
+
+
+def boost_title_lab_option_from_signal(option: dict, signal: dict) -> None:
+    views_per_day = int(signal.get("viewsPerDay") or 0)
+    views = int(signal.get("views") or 0)
+    boost = 0
+    if views_per_day >= 10000:
+        boost = 12
+    elif views_per_day >= 3000:
+        boost = 9
+    elif views_per_day >= 1000:
+        boost = 6
+    elif views >= 100000:
+        boost = 4
+    if boost <= 0:
+        return
+    scores = option.setdefault("scores", {})
+    scores["retention"] = clamp_score((scores.get("retention") or option.get("retentionScore") or 0) + boost)
+    scores["viral"] = clamp_score((scores.get("viral") or option.get("viralScore") or 0) + min(8, boost))
+    scores["overall"] = clamp_score(
+        scores.get("viral", 0) * 0.28
+        + scores.get("seo", option.get("seoScore") or 0) * 0.20
+        + scores.get("clickbait", option.get("clickbaitScore") or 0) * 0.19
+        + scores.get("fit", option.get("fitScore") or 0) * 0.18
+        + scores.get("retention", 0) * 0.15
+    )
+    scores["retentionReason"] = compact_text(
+        f"Señal competitiva: {views_per_day:,} vistas/dia en el video fuente.".replace(",", "."),
+        140,
+    )
+    option["viralScore"] = scores["viral"]
+    option["retentionScore"] = scores["retention"]
+    option["overallScore"] = scores["overall"]
+    option["retentionReason"] = scores["retentionReason"]
+
+
+def title_lab_retention_reason(title: str, score: int, group: str) -> str:
+    text = normalize_text(title)
+    reasons = []
+    if text.startswith(("por que", "porque", "cuando", "si ", "antes de")):
+        reasons.append("abre un loop de curiosidad desde la primera frase")
+    if any(term in text for term in ["duele", "error", "verdad", "nadie", "incomoda", "ansiedad"]):
+        reasons.append("promete tension emocional concreta")
+    if ":" in title:
+        reasons.append("combina tema SEO con giro editorial")
+    if group in {"trend", "competitor"}:
+        reasons.append("parte de una señal externa de demanda")
+    if not reasons:
+        reasons.append("tiene promesa clara y buen encaje con el nicho")
+    prefix = "Alta retencion probable" if score >= 75 else "Retencion media" if score >= 58 else "Retencion por probar"
+    return compact_text(f"{prefix}: {', '.join(reasons[:2])}.", 180)
+
+
+def rank_title_lab_retention(options: list[dict], *, limit: int = 8) -> list[dict]:
+    ranked = sorted(
+        options,
+        key=lambda item: (
+            item.get("retentionScore") or 0,
+            item.get("overallScore") or 0,
+            item.get("viralScore") or 0,
+        ),
+        reverse=True,
+    )
+    for index, item in enumerate(ranked, start=1):
+        item["retentionRank"] = index
+    return [
+        {
+            "optionId": item.get("optionId"),
+            "candidateHash": item.get("candidateHash"),
+            "title": item.get("title"),
+            "seoTitle": item.get("seoTitle"),
+            "group": item.get("group"),
+            "retentionScore": item.get("retentionScore") or 0,
+            "overallScore": item.get("overallScore") or 0,
+            "viralScore": item.get("viralScore") or 0,
+            "retentionReason": item.get("retentionReason") or "",
+        }
+        for item in ranked[:limit]
+    ]
 
 
 def title_lab_keywords(agent: dict, title: str, seed_topic: str = "") -> list[str]:

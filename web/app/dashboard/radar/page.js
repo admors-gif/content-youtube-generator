@@ -99,6 +99,15 @@ function CostPill({ estimate, cached }) {
   );
 }
 
+function formatShortDate(value) {
+  if (!value) return "";
+  try {
+    return new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
+  } catch {
+    return "";
+  }
+}
+
 function buildPreparedProjectUrl(item) {
   const params = new URLSearchParams({
     agentId: item.agentId || "",
@@ -483,9 +492,13 @@ function TitleLabOptionCard({ item, saving, copied, onCopy, onSave, onPrepare })
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
             <span className="cf-badge cf-badge--creator">Viral {Number(item.viralScore || 0)}</span>
+            <span className="cf-badge cf-badge--creator">Ret {Number(item.retentionScore || 0)}</span>
             <span className="cf-badge cf-badge--neutral">SEO {Number(item.seoScore || 0)}</span>
             <span className="cf-badge cf-badge--neutral">Hook {Number(item.clickbaitScore || 0)}</span>
             <span className="cf-badge cf-badge--neutral">Fit {Number(item.fitScore || 0)}</span>
+            {item.retentionRank && (
+              <span className="cf-badge cf-badge--neutral">#{item.retentionRank} retencion</span>
+            )}
           </div>
           <h3 className="cf-h3" style={{ margin: "0 0 10px", lineHeight: 1.18 }}>
             {item.seoTitle || item.title}
@@ -493,6 +506,11 @@ function TitleLabOptionCard({ item, saving, copied, onCopy, onSave, onPrepare })
           <p className="cf-body" style={{ margin: 0, lineHeight: 1.45 }}>
             {item.hook}
           </p>
+          {item.retentionReason && (
+            <p className="cf-caption" style={{ margin: "8px 0 0", lineHeight: 1.35 }}>
+              {item.retentionReason}
+            </p>
+          )}
           {item.seoKeywords?.length > 0 && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
               {item.seoKeywords.slice(0, 6).map((keyword) => (
@@ -731,12 +749,15 @@ export default function RadarPage() {
           query: competitorQuery,
           seedTopic: titleLabTopic,
           limit: 5,
+          includeVideoSignals: true,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || data.error || "No se pudieron descubrir competidores.");
       setCompetitorResults(data.items || []);
-      setTitleLabNotice(`Busqueda YouTube lista: ${data.items?.length || 0} canal(es).`);
+      setTitleLabNotice(
+        `Busqueda YouTube lista: ${data.items?.length || 0} canal(es), ${Number(data.costEstimate?.youtubeQuotaUnits || 0)} unidades aprox.`,
+      );
     } catch (err) {
       setCompetitorError(err.message);
     } finally {
@@ -999,7 +1020,7 @@ export default function RadarPage() {
             <div>
               <div className="cf-mono-sm" style={{ marginBottom: 6 }}>Competidores curados</div>
               <div className="cf-caption">
-                {competitors.length} guardado(s). Descubrir canales usa YouTube search.list: aprox. 100 unidades por busqueda.
+                {competitors.length} guardado(s). Descubrir usa canales + videos: aprox. 202 unidades por busqueda.
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -1049,6 +1070,8 @@ export default function RadarPage() {
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: 10 }}>
                   {competitorResults.map((item) => {
                     const alreadySaved = competitors.some((entry) => entry.channelId === item.channelId);
+                    const foundByVideo = item.foundByVideo || {};
+                    const publishedAt = formatShortDate(foundByVideo.publishedAt || item.publishedAt);
                     return (
                       <div key={item.channelId} className="cf-card" style={{ padding: 12, borderRadius: "var(--r-2)" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
@@ -1057,6 +1080,30 @@ export default function RadarPage() {
                             <p className="cf-caption" style={{ margin: "6px 0 0", lineHeight: 1.35 }}>
                               {item.description || item.channelId}
                             </p>
+                            {foundByVideo.title && (
+                              <div className="cf-card" style={{ padding: 10, borderRadius: "var(--r-2)", marginTop: 10 }}>
+                                <a
+                                  href={foundByVideo.url || "#"}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="cf-caption"
+                                  style={{ color: "var(--paper)", textDecoration: "none", display: "flex", gap: 6, alignItems: "center" }}
+                                >
+                                  <Icon name="play" size={12} />
+                                  {foundByVideo.title}
+                                </a>
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                                  <span className="cf-badge cf-badge--neutral">{compactNumber(foundByVideo.views || item.views)} views</span>
+                                  <span className="cf-badge cf-badge--creator">{compactNumber(foundByVideo.viewsPerDay || item.viewsPerDay)} / dia</span>
+                                  {publishedAt && <span className="cf-badge cf-badge--neutral">{publishedAt}</span>}
+                                </div>
+                              </div>
+                            )}
+                            {item.whyRelevant && (
+                              <p className="cf-caption" style={{ margin: "8px 0 0", color: "var(--ok)", lineHeight: 1.35 }}>
+                                {item.whyRelevant}
+                              </p>
+                            )}
                           </div>
                           <button
                             className="cf-btn cf-btn--ghost cf-btn--sm"
@@ -1096,6 +1143,47 @@ export default function RadarPage() {
             {titleLabResult.warnings?.length > 0 && (
               <div className="cf-card" style={{ padding: "var(--s-4)", borderColor: "var(--warn)", color: "var(--warn)" }}>
                 {titleLabResult.warnings.join(" ")}
+              </div>
+            )}
+            {titleLabResult.retentionRanking?.length > 0 && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12 }}>
+                  <div>
+                    <div className="cf-h4">Ranking por retencion probable</div>
+                    <div className="cf-caption">Prioriza los titulos con mas tension narrativa, claridad y promesa de quedarse viendo.</div>
+                  </div>
+                  <span className="cf-badge cf-badge--creator">Top {titleLabResult.retentionRanking.length}</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 300px), 1fr))", gap: 10 }}>
+                  {titleLabResult.retentionRanking.slice(0, 6).map((ranked, index) => {
+                    const fullItem = (titleLabResult.items || []).find((entry) => entry.optionId === ranked.optionId) || ranked;
+                    return (
+                      <div key={ranked.optionId} className="cf-card" style={{ padding: 12, borderRadius: "var(--r-2)" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div className="cf-mono-sm" style={{ color: "var(--ember)", marginBottom: 6 }}>
+                              #{index + 1} · Retencion {Number(ranked.retentionScore || 0)}
+                            </div>
+                            <div style={{ color: "var(--paper)", fontWeight: 800, lineHeight: 1.25 }}>
+                              {ranked.seoTitle || ranked.title}
+                            </div>
+                            <p className="cf-caption" style={{ margin: "8px 0 0", lineHeight: 1.35 }}>
+                              {ranked.retentionReason}
+                            </p>
+                          </div>
+                          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                            <button className="cf-btn cf-btn--ghost cf-btn--sm" type="button" onClick={() => copyTitleLabOption(fullItem)}>
+                              <Icon name="copy" size={13} />
+                            </button>
+                            <button className="cf-btn cf-btn--primary cf-btn--sm" type="button" onClick={() => router.push(buildPreparedProjectUrl({ ...fullItem, agentId: titleLabAgentId }))}>
+                              <Icon name="arrowRight" size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
             {titleLabResult.groups.map((group) => (

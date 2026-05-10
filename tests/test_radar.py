@@ -143,6 +143,8 @@ def test_title_lab_generates_seed_and_adjacent_titles():
     assert len(seed_items) == 5
     assert len(adjacent_items) == 5
     assert all(item["viralScore"] > 0 for item in seed_items)
+    assert all(item["retentionScore"] > 0 for item in seed_items)
+    assert lab["retentionRanking"]
     assert any("contacto cero" in item["title"].lower() for item in seed_items)
     assert any("ex" in item["title"].lower() or "sanando" in item["title"].lower() for item in adjacent_items)
 
@@ -152,6 +154,7 @@ def test_title_lab_without_seed_suggests_niche_titles():
 
     assert lab["items"]
     assert lab["seedTopic"] == ""
+    assert lab["retentionRanking"][0]["retentionScore"] >= lab["retentionRanking"][-1]["retentionScore"]
     assert any("apego" in item["title"].lower() or "ex" in item["title"].lower() for item in lab["items"])
 
 

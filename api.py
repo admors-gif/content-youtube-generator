@@ -3108,6 +3108,11 @@ def _radar_competitors_for_agent(db, uid: str, agent_id: str) -> list[dict]:
             "handle": item.get("handle") or "",
             "url": item.get("url") or _youtube_channel_url(channel_id),
             "source": item.get("source") or "manual",
+            "foundByVideo": item.get("foundByVideo") or {},
+            "views": item.get("views") or 0,
+            "viewsPerDay": item.get("viewsPerDay") or 0,
+            "publishedAt": item.get("publishedAt") or "",
+            "whyRelevant": item.get("whyRelevant") or "",
         })
     return out
 
@@ -3197,6 +3202,200 @@ def _youtube_discover_channels(query: str, *, limit: int = 5) -> list[dict]:
             "source": "youtube_search",
         })
     return channels
+
+
+def _youtube_discover_channels_from_videos(query: str, *, limit: int = 5) -> tuple[list[dict], dict]:
+    clean = _radar_compact_text(query, 160).strip()
+    if not clean:
+        return [], {"youtubeQuotaUnits": 0, "videosAnalyzed": 0}
+    search_data = _youtube_request("search", {
+        "part": "snippet",
+        "q": clean,
+        "type": "video",
+        "maxResults": max(5, min(15, _safe_int(limit, 5) * 3)),
+        "relevanceLanguage": "es",
+        "regionCode": "MX",
+        "order": "relevance",
+    })
+    quota_units = 100
+    video_ids = []
+    for item in search_data.get("items") or []:
+        video_id = ((item.get("id") or {}).get("videoId") or "").strip()
+        if video_id and video_id not in video_ids:
+            video_ids.append(video_id)
+    if not video_ids:
+        return [], {"youtubeQuotaUnits": quota_units, "videosAnalyzed": 0, "videoFallbackUsed": True}
+
+    videos_data = _youtube_request("videos", {
+        "part": "snippet,statistics",
+        "id": ",".join(video_ids[:50]),
+        "maxResults": len(video_ids[:50]),
+    })
+    quota_units += 1
+
+    videos = []
+    channel_ids = []
+    for item in videos_data.get("items") or []:
+        snippet = item.get("snippet") or {}
+        stats = item.get("statistics") or {}
+        channel_id = snippet.get("channelId") or ""
+        video_id = item.get("id") or ""
+        if not channel_id or not video_id:
+            continue
+        if channel_id not in channel_ids:
+            channel_ids.append(channel_id)
+        views = _safe_int(stats.get("viewCount"), 0)
+        published_at = snippet.get("publishedAt") or ""
+        videos.append({
+            "videoId": video_id,
+            "videoTitle": snippet.get("title") or "",
+            "videoDescription": snippet.get("description") or "",
+            "channelId": channel_id,
+            "channelTitle": snippet.get("channelTitle") or channel_id,
+            "publishedAt": published_at,
+            "views": views,
+            "viewsPerDay": _youtube_views_per_day(views, published_at),
+            "url": _youtube_video_url(video_id),
+        })
+
+    channel_meta = {}
+    if channel_ids:
+        channels_data = _youtube_request("channels", {
+            "part": "snippet,statistics",
+            "id": ",".join(channel_ids[:50]),
+            "maxResults": len(channel_ids[:50]),
+        })
+        quota_units += 1
+        for item in channels_data.get("items") or []:
+            channel_id = item.get("id") or ""
+            snippet = item.get("snippet") or {}
+            stats = item.get("statistics") or {}
+            channel_meta[channel_id] = {
+                "channelId": channel_id,
+                "title": snippet.get("title") or channel_id,
+                "description": snippet.get("description") or "",
+                "thumbnail": (((snippet.get("thumbnails") or {}).get("default") or {}).get("url") or ""),
+                "subscriberCount": _safe_int(stats.get("subscriberCount"), 0),
+            }
+
+    best_by_channel = {}
+    for video in sorted(videos, key=lambda item: (item.get("viewsPerDay") or 0, item.get("views") or 0), reverse=True):
+        best_by_channel.setdefault(video["channelId"], video)
+
+    results = []
+    for channel_id, video in best_by_channel.items():
+        meta = channel_meta.get(channel_id) or {}
+        found_by = {
+            "videoId": video.get("videoId") or "",
+            "title": video.get("videoTitle") or "",
+            "url": video.get("url") or "",
+            "views": video.get("views") or 0,
+            "viewsPerDay": video.get("viewsPerDay") or 0,
+            "publishedAt": video.get("publishedAt") or "",
+        }
+        results.append({
+            "channelId": channel_id,
+            "title": meta.get("title") or video.get("channelTitle") or channel_id,
+            "description": meta.get("description") or _radar_compact_text(video.get("videoDescription") or "", 360),
+            "thumbnail": meta.get("thumbnail") or "",
+            "subscriberCount": meta.get("subscriberCount") or 0,
+            "url": _youtube_channel_url(channel_id),
+            "source": "youtube_video_fallback",
+            "foundByVideo": found_by,
+            "views": found_by["views"],
+            "viewsPerDay": found_by["viewsPerDay"],
+            "publishedAt": found_by["publishedAt"],
+            "whyRelevant": _youtube_competitor_relevance_reason(clean, video, meta),
+        })
+        if len(results) >= limit:
+            break
+
+    results.sort(key=lambda item: (item.get("viewsPerDay") or 0, item.get("views") or 0), reverse=True)
+    return results[:limit], {
+        "youtubeQuotaUnits": quota_units,
+        "videosAnalyzed": len(videos),
+        "videoFallbackUsed": True,
+    }
+
+
+def _youtube_competitor_relevance_reason(query: str, video: dict, channel: dict) -> str:
+    query_terms = {
+        token
+        for token in re.findall(r"[a-záéíóúñ0-9]{4,}", str(query).lower())
+        if token not in {"podcast", "espanol", "español", "canal", "youtube", "relaciones"}
+    }
+    haystack = " ".join([
+        str(video.get("videoTitle") or ""),
+        str(video.get("videoDescription") or ""),
+        str(channel.get("title") or ""),
+        str(channel.get("description") or ""),
+    ]).lower()
+    matches = [term for term in query_terms if term in haystack]
+    views_per_day = _safe_int(video.get("viewsPerDay"), 0)
+    if views_per_day:
+        return _radar_compact_text(
+            f"Video relevante con {views_per_day:,} vistas/dia y coincidencias: {', '.join(matches[:3]) or 'tema cercano'}.".replace(",", "."),
+            180,
+        )
+    return _radar_compact_text(
+        f"Encontrado por un video que coincide con {', '.join(matches[:3]) or 'la busqueda editorial'}.",
+        180,
+    )
+
+
+def _youtube_merge_discovered_competitors(channel_items: list[dict], video_items: list[dict], *, limit: int = 5) -> list[dict]:
+    merged = {}
+    for item in channel_items:
+        channel_id = item.get("channelId")
+        if channel_id:
+            merged[channel_id] = item
+    for item in video_items:
+        channel_id = item.get("channelId")
+        if not channel_id:
+            continue
+        existing = merged.get(channel_id)
+        if existing:
+            existing.update({
+                "foundByVideo": item.get("foundByVideo") or existing.get("foundByVideo"),
+                "views": item.get("views") or existing.get("views") or 0,
+                "viewsPerDay": item.get("viewsPerDay") or existing.get("viewsPerDay") or 0,
+                "publishedAt": item.get("publishedAt") or existing.get("publishedAt") or "",
+                "whyRelevant": item.get("whyRelevant") or existing.get("whyRelevant") or "",
+                "source": "youtube_channel_and_video",
+            })
+        else:
+            merged[channel_id] = item
+    return sorted(
+        merged.values(),
+        key=lambda item: (
+            1 if item.get("foundByVideo") else 0,
+            item.get("viewsPerDay") or 0,
+            item.get("views") or 0,
+        ),
+        reverse=True,
+    )[:max(1, min(10, _safe_int(limit, 5)))]
+
+
+def _youtube_discover_competitor_channels(
+    query: str,
+    *,
+    limit: int = 5,
+    include_video_signals: bool = True,
+) -> tuple[list[dict], dict]:
+    channel_items = _youtube_discover_channels(query, limit=limit)
+    quota_units = 100
+    video_items = []
+    video_meta = {"youtubeQuotaUnits": 0, "videosAnalyzed": 0, "videoFallbackUsed": False}
+    if include_video_signals or len(channel_items) < max(3, min(limit, 5)):
+        video_items, video_meta = _youtube_discover_channels_from_videos(query, limit=limit)
+        quota_units += video_meta.get("youtubeQuotaUnits") or 0
+    items = _youtube_merge_discovered_competitors(channel_items, video_items, limit=limit)
+    return items, {
+        "youtubeQuotaUnits": quota_units,
+        "channelSearchResults": len(channel_items),
+        "videoFallbackUsed": bool(video_meta.get("videoFallbackUsed")),
+        "videosAnalyzed": video_meta.get("videosAnalyzed") or 0,
+    }
 
 
 def _youtube_competitor_video_signals(competitors: list[dict], *, per_channel_limit: int = 8) -> tuple[list[dict], dict]:
@@ -3669,6 +3868,7 @@ def _radar_candidate_from_title_lab_option(agent: dict, option: dict, *, seed_to
             "viral": scores.get("viral") or 0,
             "seo": scores.get("seo") or 0,
             "clickbait": scores.get("clickbait") or 0,
+            "retention": scores.get("retention") or 0,
         },
         "editorialScore": scores.get("overall") or 0,
         "titleLab": {
@@ -3678,6 +3878,8 @@ def _radar_candidate_from_title_lab_option(agent: dict, option: dict, *, seed_to
             "seoScore": scores.get("seo") or 0,
             "clickbaitScore": scores.get("clickbait") or 0,
             "fitScore": scores.get("fit") or 0,
+            "retentionScore": scores.get("retention") or safe_option.get("retentionScore") or 0,
+            "retentionReason": scores.get("retentionReason") or safe_option.get("retentionReason") or "",
         },
     }
 
@@ -4760,18 +4962,28 @@ async def radar_competitors_discover(request: Request):
             content={
                 "error": "YOUTUBE_DATA_API_KEY no configurado",
                 "items": [],
-                "costEstimate": {"youtubeQuotaUnits": 100, "operation": "search.list"},
+                "costEstimate": {"youtubeQuotaUnits": 202, "operation": "search.list + videos.list"},
             },
         )
     try:
-        items = _youtube_discover_channels(query, limit=limit)
+        items, meta = _youtube_discover_competitor_channels(
+            query,
+            limit=limit,
+            include_video_signals=bool((body or {}).get("includeVideoSignals", True)),
+        )
         return {
             "ok": True,
             "agentId": agent_id,
             "query": query,
             "items": items,
             "count": len(items),
-            "costEstimate": {"youtubeQuotaUnits": 100, "operation": "search.list"},
+            "costEstimate": {
+                "youtubeQuotaUnits": meta.get("youtubeQuotaUnits") or 100,
+                "operation": "channel search + video evidence",
+                "channelSearchResults": meta.get("channelSearchResults") or 0,
+                "videoFallbackUsed": bool(meta.get("videoFallbackUsed")),
+                "videosAnalyzed": meta.get("videosAnalyzed") or 0,
+            },
         }
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": str(exc)[:200], "items": []})
@@ -4808,6 +5020,11 @@ async def radar_competitors_save(request: Request):
             "thumbnail": (body or {}).get("thumbnail") or "",
             "url": (body or {}).get("url") or _youtube_channel_url(channel_id),
             "source": (body or {}).get("source") or "manual",
+            "foundByVideo": (body or {}).get("foundByVideo") or {},
+            "views": _safe_int((body or {}).get("views"), 0),
+            "viewsPerDay": _safe_int((body or {}).get("viewsPerDay"), 0),
+            "publishedAt": (body or {}).get("publishedAt") or "",
+            "whyRelevant": _radar_compact_text((body or {}).get("whyRelevant") or "", 240),
             "active": True,
             "updatedAt": firestore.SERVER_TIMESTAMP,
         }
