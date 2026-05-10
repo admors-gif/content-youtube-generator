@@ -56,9 +56,11 @@ from scripts.knowledge import (
     book_filter as _knowledge_book_filter,
     build_points as _knowledge_build_points,
     chunk_text as _knowledge_chunk_text,
+    document_blob_type as _knowledge_document_blob_type,
     embed_texts as _knowledge_embed_texts,
-    extract_pdf_text as _knowledge_extract_pdf_text,
+    extract_document_text as _knowledge_extract_document_text,
     payload_category as _knowledge_payload_category,
+    payload_blob_type as _knowledge_payload_blob_type,
     payload_content as _knowledge_payload_content,
     payload_book_title as _knowledge_payload_book_title,
     scan_book_index as _knowledge_scan_book_index,
@@ -3282,6 +3284,8 @@ def _library_public_project(doc_id: str, data: dict) -> dict:
 KNOWLEDGE_UPLOAD_DIR = Path(os.environ.get("KNOWLEDGE_UPLOAD_DIR", str(BASE_DIR / "output" / "knowledge_uploads")))
 KNOWLEDGE_MAX_UPLOAD_BYTES = int(os.environ.get("KNOWLEDGE_MAX_UPLOAD_BYTES", str(80 * 1024 * 1024)))
 KNOWLEDGE_SYNC_MAX_POINTS = int(os.environ.get("KNOWLEDGE_SYNC_MAX_POINTS", "300000"))
+KNOWLEDGE_MAX_BOOKS_RESPONSE = int(os.environ.get("KNOWLEDGE_MAX_BOOKS_RESPONSE", "1000"))
+KNOWLEDGE_ALLOWED_EXTENSIONS = {".pdf", ".epub"}
 
 
 def _knowledge_is_enabled() -> bool:
@@ -3315,6 +3319,7 @@ def _knowledge_client() -> QdrantKnowledgeClient:
 
 
 def _knowledge_public_book(doc_id: str, data: dict) -> dict:
+    blob_type = data.get("blobType") or data.get("blob_type") or ""
     return {
         "bookId": data.get("bookId") or doc_id,
         "title": data.get("title") or "Unknown",
@@ -3323,6 +3328,8 @@ def _knowledge_public_book(doc_id: str, data: dict) -> dict:
         "chunksCount": _safe_int(data.get("chunksCount"), 0),
         "sample": data.get("sample") or "",
         "source": data.get("source") or "",
+        "blobType": blob_type,
+        "fileType": "epub" if "epub" in str(blob_type).lower() else "pdf" if "pdf" in str(blob_type).lower() else "",
         "status": data.get("status") or "indexed",
         "firstSeenAt": _serialize_firestore_value(data.get("firstSeenAt")),
         "lastSyncedAt": _serialize_firestore_value(data.get("lastSyncedAt")),
@@ -3331,9 +3338,12 @@ def _knowledge_public_book(doc_id: str, data: dict) -> dict:
 
 
 def _knowledge_public_job(doc_id: str, data: dict) -> dict:
+    blob_type = data.get("blobType") or data.get("blob_type") or ""
     return {
         "jobId": data.get("jobId") or doc_id,
         "fileName": data.get("fileName") or "",
+        "fileType": data.get("fileType") or ("epub" if "epub" in str(blob_type).lower() else "pdf" if "pdf" in str(blob_type).lower() else ""),
+        "blobType": blob_type,
         "title": data.get("title") or "",
         "category": data.get("category") or "",
         "collection": data.get("collection") or _knowledge_collection(),
@@ -3401,7 +3411,7 @@ def _knowledge_sync_index(db, firestore_module) -> dict:
 
 
 def _knowledge_list_books(db, *, category: str = "", query: str = "", limit: int = 80) -> list[dict]:
-    limit = max(1, min(250, _safe_int(limit, 80)))
+    limit = max(1, min(KNOWLEDGE_MAX_BOOKS_RESPONSE, _safe_int(limit, 80)))
     text = (query or "").strip().lower()
     collection = _knowledge_collection()
     books: list[dict] = []
@@ -3430,6 +3440,7 @@ def _knowledge_chunk_from_point(point: dict) -> dict:
         "score": point.get("score"),
         "title": _knowledge_payload_book_title(payload),
         "category": _knowledge_payload_category(payload),
+        "blobType": _knowledge_payload_blob_type(payload),
         "content": _knowledge_payload_content(payload, limit=900),
         "metadata": payload.get("metadata") or {},
     }
@@ -3472,13 +3483,15 @@ def _run_knowledge_ingest_job(job_id: str) -> dict:
     title = re.sub(r"\s+", " ", str(job.get("title") or "")).strip()
     category = re.sub(r"\s+", " ", str(job.get("category") or "General")).strip() or "General"
     path = Path(str(job.get("filePath") or ""))
+    blob_type = str(job.get("blobType") or _knowledge_document_blob_type(path, job.get("fileName") or "")).strip()
+    file_type = "epub" if "epub" in blob_type.lower() else "pdf" if "pdf" in blob_type.lower() else "file"
     reindex = bool(job.get("reindex"))
     client = _knowledge_client()
 
     try:
         _knowledge_update_job(db, firestore, job_id, status="extracting", progress=10, error="")
         if not path.exists():
-            raise KnowledgeError("archivo PDF no encontrado")
+            raise KnowledgeError("archivo no encontrado")
 
         exact_filter = _knowledge_book_filter(title, category)
         existing_count = client.count(exact_filter)
@@ -3491,6 +3504,8 @@ def _run_knowledge_ingest_job(job_id: str) -> dict:
                 "collection": client.config.collection,
                 "chunksCount": existing_count,
                 "source": "qdrant",
+                "blobType": blob_type,
+                "fileType": file_type,
                 "status": "indexed",
                 "lastSyncedAt": firestore.SERVER_TIMESTAMP,
                 "updatedAt": firestore.SERVER_TIMESTAMP,
@@ -3507,13 +3522,13 @@ def _run_knowledge_ingest_job(job_id: str) -> dict:
             )
             return {"ok": True, "jobId": job_id, "duplicate": True, "chunksCount": existing_count}
 
-        text = _knowledge_extract_pdf_text(path)
+        text = _knowledge_extract_document_text(path, blob_type=blob_type)
         if not text:
-            raise KnowledgeError("PDF sin texto extraible")
+            raise KnowledgeError("archivo sin texto extraible")
         _knowledge_update_job(db, firestore, job_id, status="chunking", progress=28)
         chunks = _knowledge_chunk_text(text, chunk_size=1200, overlap=200)
         if not chunks:
-            raise KnowledgeError("PDF sin chunks validos")
+            raise KnowledgeError("archivo sin chunks validos")
 
         if reindex and existing_count > 0:
             client.delete_by_filter(exact_filter)
@@ -3537,6 +3552,7 @@ def _run_knowledge_ingest_job(job_id: str) -> dict:
                 chunks=batch,
                 vectors=vectors,
                 source=job.get("fileName") or path.name,
+                blob_type=blob_type,
                 start_index=start,
             ))
 
@@ -3550,6 +3566,8 @@ def _run_knowledge_ingest_job(job_id: str) -> dict:
             "chunksCount": len(chunks),
             "sample": chunks[0][:320],
             "source": job.get("fileName") or path.name,
+            "blobType": blob_type,
+            "fileType": file_type,
             "status": "indexed",
             "firstSeenAt": firestore.SERVER_TIMESTAMP,
             "lastSyncedAt": firestore.SERVER_TIMESTAMP,
@@ -3828,7 +3846,7 @@ def knowledge_summary(request: Request):
         except Exception as exc:
             qdrant = {"ok": False, "error": str(exc)[:220]}
 
-        books = _knowledge_list_books(db, limit=250)
+        books = _knowledge_list_books(db, limit=KNOWLEDGE_MAX_BOOKS_RESPONSE)
         categories = sorted({book.get("category") or "General" for book in books})
         meta_snap = db.collection("knowledgeMeta").document("summary").get()
         meta = meta_snap.to_dict() if meta_snap.exists else {}
@@ -3843,7 +3861,7 @@ def knowledge_summary(request: Request):
             "config": config,
             "qdrant": qdrant,
             "collection": config["collection"],
-            "booksCount": len(books),
+            "booksCount": max(len(books), _safe_int(meta.get("booksCount"), 0)),
             "chunksCount": sum(_safe_int(book.get("chunksCount"), 0) for book in books),
             "categories": categories,
             "lastSyncedAt": _serialize_firestore_value(meta.get("lastSyncedAt")),
@@ -3952,8 +3970,9 @@ async def knowledge_search(request: Request):
         return JSONResponse(status_code=500, content={"error": str(exc)[:220], "items": []})
 
 
+@app.post("/knowledge/ingest/file")
 @app.post("/knowledge/ingest/pdf")
-async def knowledge_ingest_pdf(
+async def knowledge_ingest_file(
     request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -3966,9 +3985,12 @@ async def knowledge_ingest_pdf(
     clean_category = re.sub(r"\s+", " ", str(category or "General")).strip() or "General"
     if len(clean_title) < 2:
         raise HTTPException(status_code=400, detail="title required")
-    filename = Path(file.filename or "upload.pdf").name
-    if not filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="solo PDF")
+    filename = Path(file.filename or "upload").name
+    suffix = Path(filename).suffix.lower()
+    if suffix not in KNOWLEDGE_ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="solo PDF o EPUB")
+    blob_type = _knowledge_document_blob_type(filename, filename)
+    file_type = "epub" if suffix == ".epub" else "pdf"
 
     try:
         _ensure_firebase_initialized()
@@ -3978,9 +4000,9 @@ async def knowledge_ingest_pdf(
         job_id = job_ref.id
         folder = KNOWLEDGE_UPLOAD_DIR / job_id
         folder.mkdir(parents=True, exist_ok=True)
-        pdf_path = folder / filename
+        file_path = folder / filename
         total = 0
-        with pdf_path.open("wb") as out:
+        with file_path.open("wb") as out:
             while True:
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
@@ -3988,7 +4010,7 @@ async def knowledge_ingest_pdf(
                 total += len(chunk)
                 if total > KNOWLEDGE_MAX_UPLOAD_BYTES:
                     try:
-                        pdf_path.unlink()
+                        file_path.unlink()
                     except Exception:
                         pass
                     raise HTTPException(status_code=413, detail="PDF demasiado grande")
@@ -3997,8 +4019,10 @@ async def knowledge_ingest_pdf(
         job_ref.set({
             "jobId": job_id,
             "fileName": filename,
-            "filePath": str(pdf_path),
+            "filePath": str(file_path),
             "fileSize": total,
+            "fileType": file_type,
+            "blobType": blob_type,
             "title": clean_title,
             "category": clean_category,
             "collection": _knowledge_collection(),
@@ -4013,7 +4037,20 @@ async def knowledge_ingest_pdf(
         })
         task_id = _enqueue_knowledge_ingest(job_id, background_tasks)
         job_ref.set({"taskId": task_id, "updatedAt": firestore.SERVER_TIMESTAMP}, merge=True)
-        return {"ok": True, "job": _knowledge_public_job(job_id, {"jobId": job_id, "fileName": filename, "title": clean_title, "category": clean_category, "status": "queued", "progress": 0}), "taskId": task_id}
+        return {
+            "ok": True,
+            "job": _knowledge_public_job(job_id, {
+                "jobId": job_id,
+                "fileName": filename,
+                "fileType": file_type,
+                "blobType": blob_type,
+                "title": clean_title,
+                "category": clean_category,
+                "status": "queued",
+                "progress": 0,
+            }),
+            "taskId": task_id,
+        }
     except HTTPException:
         raise
     except Exception as exc:

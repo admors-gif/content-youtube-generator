@@ -110,7 +110,7 @@ def publish_tiktok_inbox(self, uid: str, job_id: str):
     retry_jitter=True,
 )
 def ingest_knowledge_pdf(self, job_id: str):
-    """Extract, chunk, embed and upsert a PDF into the Knowledge Hub collection."""
+    """Extract, chunk, embed and upsert a Knowledge Hub document."""
     try:
         import sentry_sdk
         sentry_sdk.set_tag("knowledge_job_id", job_id)

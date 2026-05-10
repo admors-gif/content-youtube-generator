@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import os
 import re
 import uuid
+import zipfile
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
+from xml.etree import ElementTree as ET
 
 import requests
 
@@ -171,12 +176,39 @@ def stable_point_id(collection: str, title: str, category: str, chunk_index: int
 
 def payload_book_title(payload: dict[str, Any]) -> str:
     metadata = payload.get("metadata") or {}
-    return normalize_text(metadata.get("book_title") or metadata.get("title") or payload.get("book_title") or "Unknown")
+    return normalize_text(
+        metadata.get("book_title")
+        or metadata.get("bookTitle")
+        or metadata.get("title")
+        or metadata.get("file_name")
+        or metadata.get("filename")
+        or payload.get("book_title")
+        or payload.get("bookTitle")
+        or payload.get("title")
+        or payload.get("file_name")
+        or payload.get("filename")
+        or "Unknown"
+    )
 
 
 def payload_category(payload: dict[str, Any]) -> str:
     metadata = payload.get("metadata") or {}
     return normalize_text(metadata.get("category") or payload.get("category") or "General")
+
+
+def payload_blob_type(payload: dict[str, Any]) -> str:
+    metadata = payload.get("metadata") or {}
+    return normalize_text(
+        metadata.get("blobType")
+        or metadata.get("blob_type")
+        or metadata.get("mimeType")
+        or metadata.get("mime_type")
+        or payload.get("blobType")
+        or payload.get("blob_type")
+        or payload.get("mimeType")
+        or payload.get("mime_type")
+        or ""
+    )
 
 
 def payload_content(payload: dict[str, Any], limit: int = 420) -> str:
@@ -233,11 +265,14 @@ def scan_book_index(
                     "chunksCount": 0,
                     "sample": "",
                     "source": ((payload.get("metadata") or {}).get("source") or ""),
+                    "blobType": payload_blob_type(payload),
                 },
             )
             item["chunksCount"] += 1
             if not item["sample"]:
                 item["sample"] = payload_content(payload, limit=320)
+            if not item.get("blobType"):
+                item["blobType"] = payload_blob_type(payload)
         scanned += len(points)
         offset = result.get("next_page_offset")
         if not offset or scanned >= max_points:
@@ -261,6 +296,179 @@ def extract_pdf_text(path: str | Path) -> str:
         if text.strip():
             parts.append(text)
     return "\n\n".join(parts).strip()
+
+
+class _EpubTextParser(HTMLParser):
+    _BLOCK_TAGS = {
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "br",
+        "div",
+        "figcaption",
+        "footer",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "hr",
+        "li",
+        "main",
+        "nav",
+        "ol",
+        "p",
+        "pre",
+        "section",
+        "table",
+        "tr",
+        "ul",
+    }
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag in {"script", "style", "svg"}:
+            self._skip_depth += 1
+        if tag in self._BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in {"script", "style", "svg"} and self._skip_depth:
+            self._skip_depth -= 1
+        if tag in self._BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        clean = normalize_text(html.unescape(data))
+        if clean:
+            self.parts.append(clean)
+            self.parts.append(" ")
+
+    def text(self) -> str:
+        raw = "".join(self.parts)
+        lines = [normalize_text(line) for line in raw.splitlines()]
+        return "\n\n".join(line for line in lines if line).strip()
+
+
+def _epub_join_path(base: str, href: str) -> str:
+    base_dir = str(Path(base).parent).replace("\\", "/")
+    if base_dir == ".":
+        base_dir = ""
+    combined = f"{base_dir}/{href}" if base_dir else href
+    parts: list[str] = []
+    for part in unquote(combined).replace("\\", "/").split("/"):
+        if not part or part == ".":
+            continue
+        if part == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(part)
+    return "/".join(parts)
+
+
+def _epub_spine_paths(zf: zipfile.ZipFile) -> list[str]:
+    try:
+        container_xml = zf.read("META-INF/container.xml")
+        container = ET.fromstring(container_xml)
+        rootfile = container.find(".//{*}rootfile")
+        opf_path = rootfile.attrib.get("full-path", "") if rootfile is not None else ""
+    except Exception:
+        opf_path = ""
+
+    if not opf_path:
+        return []
+
+    try:
+        package = ET.fromstring(zf.read(opf_path))
+    except Exception:
+        return []
+
+    manifest: dict[str, dict[str, str]] = {}
+    for item in package.findall(".//{*}manifest/{*}item"):
+        item_id = item.attrib.get("id")
+        href = item.attrib.get("href")
+        if not item_id or not href:
+            continue
+        manifest[item_id] = {
+            "href": _epub_join_path(opf_path, href),
+            "media_type": item.attrib.get("media-type", ""),
+            "properties": item.attrib.get("properties", ""),
+        }
+
+    ordered: list[str] = []
+    for itemref in package.findall(".//{*}spine/{*}itemref"):
+        item = manifest.get(itemref.attrib.get("idref") or "")
+        if not item:
+            continue
+        media_type = item.get("media_type") or ""
+        if media_type in {"application/xhtml+xml", "text/html"}:
+            ordered.append(item["href"])
+    return ordered
+
+
+def extract_epub_text(path: str | Path) -> str:
+    epub_path = Path(path)
+    try:
+        zf = zipfile.ZipFile(epub_path)
+    except Exception as exc:
+        raise KnowledgeError("EPUB invalido o corrupto") from exc
+
+    with zf:
+        names = set(zf.namelist())
+        html_paths = [p for p in _epub_spine_paths(zf) if p in names]
+        if not html_paths:
+            html_paths = sorted(
+                name for name in names
+                if name.lower().endswith((".xhtml", ".html", ".htm"))
+                and not name.lower().endswith(("nav.xhtml", "toc.xhtml"))
+            )
+        parts: list[str] = []
+        for name in html_paths:
+            try:
+                raw = zf.read(name)
+            except Exception:
+                continue
+            parser = _EpubTextParser()
+            try:
+                parser.feed(raw.decode("utf-8", errors="replace"))
+                parser.close()
+            except Exception:
+                continue
+            text = parser.text()
+            if text:
+                parts.append(text)
+    return "\n\n".join(parts).strip()
+
+
+def document_blob_type(path: str | Path, filename: str | None = None) -> str:
+    value = str(filename or path or "").lower()
+    if value.endswith(".epub"):
+        return "application/epub+zip"
+    if value.endswith(".pdf"):
+        return "application/pdf"
+    return "application/octet-stream"
+
+
+def extract_document_text(path: str | Path, *, blob_type: str | None = None) -> str:
+    kind = (blob_type or document_blob_type(path)).lower()
+    suffix = Path(path).suffix.lower()
+    if "epub" in kind or suffix == ".epub":
+        return extract_epub_text(path)
+    if "pdf" in kind or suffix == ".pdf":
+        return extract_pdf_text(path)
+    raise KnowledgeError("formato no soportado")
 
 
 def chunk_text(text: str, *, chunk_size: int = 1200, overlap: int = 200) -> list[str]:
@@ -309,6 +517,7 @@ def build_points(
     chunks: list[str],
     vectors: list[list[float]],
     source: str,
+    blob_type: str = "application/octet-stream",
     start_index: int = 0,
 ) -> list[dict[str, Any]]:
     if len(chunks) != len(vectors):
@@ -326,7 +535,7 @@ def build_points(
                         "book_title": title,
                         "category": category,
                         "source": source,
-                        "blobType": "application/pdf",
+                        "blobType": blob_type,
                         "chunk_index": index,
                     },
                 },

@@ -1,0 +1,134 @@
+name: Knowledge Qdrant audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_points:
+        description: "Maximum Qdrant points to scan"
+        required: false
+        default: "300000"
+
+concurrency:
+  group: knowledge-qdrant-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Count books and file types in Qdrant
+    runs-on: [self-hosted, linux, vps, docker]
+    timeout-minutes: 12
+
+    steps:
+      - name: Audit valtyk_knowledge collection
+        run: |
+          set -euo pipefail
+          MAX_POINTS="${{ github.event.inputs.max_points }}"
+          docker exec -i content-factory python - "$MAX_POINTS" <<'PY'
+          import json
+          import sys
+          from collections import Counter, defaultdict
+
+          from scripts.knowledge import (
+              QdrantKnowledgeClient,
+              normalize_text,
+              payload_blob_type,
+              payload_book_title,
+              payload_category,
+          )
+
+          max_points = int(sys.argv[1] or "300000")
+          client = QdrantKnowledgeClient()
+          info = client.collection_info()
+          books = {}
+          blob_counts = Counter()
+          category_counts = Counter()
+          unknown_title_points = 0
+          unknown_blob_points = 0
+          sample_titles_by_blob = defaultdict(list)
+          offset = None
+          scanned = 0
+
+          include = [
+              "content",
+              "text",
+              "book_title",
+              "title",
+              "category",
+              "blobType",
+              "blob_type",
+              "mimeType",
+              "mime_type",
+              "metadata.book_title",
+              "metadata.bookTitle",
+              "metadata.title",
+              "metadata.category",
+              "metadata.source",
+              "metadata.blobType",
+              "metadata.blob_type",
+              "metadata.mimeType",
+              "metadata.mime_type",
+          ]
+
+          while True:
+              result = client.scroll(limit=512, offset=offset, with_payload={"include": include})
+              points = result.get("points") or []
+              if not points:
+                  break
+              for point in points:
+                  payload = point.get("payload") or {}
+                  title = payload_book_title(payload)
+                  category = payload_category(payload)
+                  blob_type = payload_blob_type(payload) or "unknown"
+                  if title == "Unknown":
+                      unknown_title_points += 1
+                  if blob_type == "unknown":
+                      unknown_blob_points += 1
+                  key = (normalize_text(title).lower(), normalize_text(category).lower())
+                  item = books.setdefault(key, {"title": title, "category": category, "chunks": 0, "blobTypes": Counter()})
+                  item["chunks"] += 1
+                  item["blobTypes"][blob_type] += 1
+                  blob_counts[blob_type] += 1
+                  category_counts[category or "General"] += 1
+                  if len(sample_titles_by_blob[blob_type]) < 10 and title not in sample_titles_by_blob[blob_type]:
+                      sample_titles_by_blob[blob_type].append(title)
+
+              scanned += len(points)
+              offset = result.get("next_page_offset")
+              if not offset or scanned >= max_points:
+                  break
+
+          books_by_type = Counter()
+          for item in books.values():
+              dominant = item["blobTypes"].most_common(1)[0][0] if item["blobTypes"] else "unknown"
+              books_by_type[dominant] += 1
+
+          largest_books = sorted(
+              (
+                  {
+                      "title": item["title"],
+                      "category": item["category"],
+                      "chunks": item["chunks"],
+                      "blobTypes": dict(item["blobTypes"]),
+                  }
+                  for item in books.values()
+              ),
+              key=lambda row: row["chunks"],
+              reverse=True,
+          )[:20]
+
+          report = {
+              "ok": True,
+              "collection": client.config.collection,
+              "qdrantPointsCount": info.get("points_count"),
+              "scannedPoints": scanned,
+              "uniqueBooks": len(books),
+              "booksByDominantBlobType": dict(books_by_type),
+              "pointsByBlobType": dict(blob_counts),
+              "unknownTitlePoints": unknown_title_points,
+              "unknownBlobPoints": unknown_blob_points,
+              "topCategoriesByPoints": category_counts.most_common(20),
+              "sampleTitlesByBlobType": dict(sample_titles_by_blob),
+              "largestBooksByChunks": largest_books,
+          }
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY

@@ -66,6 +66,7 @@ function StatCard({ label, value, sub }) {
 }
 
 function BookCard({ book, selected, onSelect }) {
+  const fileType = (book.fileType || "").toUpperCase();
   return (
     <article
       className="cf-card"
@@ -89,6 +90,7 @@ function BookCard({ book, selected, onSelect }) {
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
             <span className="cf-badge cf-badge--neutral">{book.category || "General"}</span>
+            {fileType && <span className="cf-badge cf-badge--neutral">{fileType}</span>}
             <span className="cf-badge cf-badge--ok">{compactNumber(book.chunksCount)} chunks</span>
           </div>
           <h2 className="cf-h3" style={{ margin: "0 0 8px", lineHeight: 1.2 }}>
@@ -154,7 +156,7 @@ export default function KnowledgePage() {
     const params = new URLSearchParams();
     if (filters.category !== "all") params.set("category", filters.category);
     if (filters.q.trim()) params.set("q", filters.q.trim());
-    params.set("limit", "120");
+    params.set("limit", "700");
     const res = await authedFetch(user, `${getApiBase()}/knowledge/books?${params.toString()}`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || data.error || "No se pudieron leer los libros.");
@@ -297,7 +299,7 @@ export default function KnowledgePage() {
   const submitIngest = async (event) => {
     event.preventDefault();
     if (!ingest.file) {
-      setError("Selecciona un PDF.");
+      setError("Selecciona un PDF o EPUB.");
       return;
     }
     setUploading(true);
@@ -309,7 +311,7 @@ export default function KnowledgePage() {
       form.append("title", ingest.title);
       form.append("category", ingest.category || "General");
       form.append("reindex", ingest.reindex ? "true" : "false");
-      const res = await authedFetch(user, `${getApiBase()}/knowledge/ingest/pdf`, {
+      const res = await authedFetch(user, `${getApiBase()}/knowledge/ingest/file`, {
         method: "POST",
         body: form,
       });
@@ -353,7 +355,7 @@ export default function KnowledgePage() {
           <div>
             <h1 className="cf-h1" style={{ margin: 0 }}>Libros y Qdrant</h1>
             <p className="cf-body" style={{ maxWidth: 720, margin: "12px 0 0" }}>
-              Visualiza libros vectorizados, busca fragmentos por tema e ingesta PDFs para enriquecer futuros agentes.
+              Visualiza libros vectorizados, busca fragmentos por tema e ingesta PDFs o EPUBs para enriquecer futuros agentes.
             </p>
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -462,11 +464,11 @@ export default function KnowledgePage() {
         {activeTab === "ingest" && (
           <form onSubmit={submitIngest} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, alignItems: "end" }}>
             <label>
-              <div className="cf-mono-sm" style={{ marginBottom: 8 }}>PDF</div>
+              <div className="cf-mono-sm" style={{ marginBottom: 8 }}>PDF o EPUB</div>
               <input
                 className="cf-input"
                 type="file"
-                accept="application/pdf,.pdf"
+                accept="application/pdf,application/epub+zip,.pdf,.epub"
                 onChange={(event) => setIngest((current) => ({ ...current, file: event.target.files?.[0] || null }))}
               />
             </label>
@@ -498,7 +500,7 @@ export default function KnowledgePage() {
             </label>
             <button className="cf-btn cf-btn--primary" type="submit" disabled={uploading}>
               <Icon name="uploadCloud" size={16} />
-              {uploading ? "Subiendo" : "Subir PDF"}
+              {uploading ? "Subiendo" : "Subir archivo"}
             </button>
           </form>
         )}
@@ -539,6 +541,7 @@ export default function KnowledgePage() {
                 <h2 className="cf-h2" style={{ margin: 0 }}>{selectedBook.title}</h2>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
                   <span className="cf-badge cf-badge--neutral">{selectedBook.category}</span>
+                  {selectedBook.fileType && <span className="cf-badge cf-badge--neutral">{selectedBook.fileType.toUpperCase()}</span>}
                   <span className="cf-badge cf-badge--ok">{compactNumber(selectedBook.chunksCount)} chunks</span>
                   <span className="cf-badge cf-badge--neutral">Sync {formatDate(selectedBook.lastSyncedAt)}</span>
                 </div>
