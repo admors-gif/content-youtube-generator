@@ -171,6 +171,89 @@ TITLE_LAB_POWER_WORDS = {
     "extranas",
 }
 
+PODCAST_TOPIC_PROFILES = [
+    {
+        "id": "contacto_cero",
+        "keywords": ["contacto cero", "no contact", "silencio"],
+        "titles": [
+            "Contacto cero no funciona si lo haces desde la esperanza",
+            "La parte del contacto cero que nadie te explica",
+            "Por que el contacto cero duele como abstinencia emocional",
+            "El error que arruina el contacto cero aunque parezca fuerza",
+            "Cuando haces contacto cero pero sigues revisando sus historias",
+            "Contacto cero no es castigo: es recuperar tu dignidad",
+            "Si rompiste contacto cero por ansiedad, escucha esto antes de culparte",
+            "El lado del contacto cero que solo entiendes cuando todavia duele",
+        ],
+        "adjacent": [
+            "Volvio cuando menos lo necesitabas: por que eso te confunde",
+            "Si te busca despues del silencio, no siempre significa amor",
+            "La migaja emocional que te hace empezar de cero",
+            "Por que quieres cerrar una historia que ya te cerro a ti",
+        ],
+    },
+    {
+        "id": "amor_propio",
+        "keywords": ["amor propio", "autoestima", "dignidad", "autovalor"],
+        "titles": [
+            "Cuando dices que te amas, pero sigues aceptando migajas",
+            "Amor propio no es bloquearlo: es dejar de negociarte",
+            "La parte del amor propio que mas duele despues de una ruptura",
+            "Por que el amor propio se siente como soledad al principio",
+            "Si todavia esperas que vuelva, este limite no esta puesto",
+            "Amor propio es dejar de pedirle claridad a quien te confunde",
+            "El dia que eliges tu paz tambien pierdes una fantasia",
+            "No es amor propio si todavia necesitas que te elija",
+        ],
+        "adjacent": [
+            "El limite que te cuesta poner porque aun quieres que te elijan",
+            "Cuando dejar de rogar se siente como abandonar la historia",
+            "La paz que llega cuando dejas de demostrar tu valor",
+            "Por que sanar tambien se siente como perder",
+        ],
+    },
+    {
+        "id": "ghosting",
+        "keywords": ["ghosting", "visto", "me dejo en visto", "no responde", "silencio"],
+        "titles": [
+            "Me dejo en visto pero ve mis historias: la trampa emocional",
+            "Por que esperas una respuesta de quien ya respondio con silencio",
+            "La ansiedad de mirar el celular como si fuera una prueba de amor",
+            "Si aparece y desaparece, esto es lo que esta entrenando en ti",
+            "Cuando el silencio de alguien decide tu valor",
+            "No te falta cierre: te sobra esperanza",
+            "Ghosting: cuando la incertidumbre se vuelve una adiccion",
+            "Por que duele mas que no respondan a que te digan no",
+        ],
+        "adjacent": [
+            "La migaja emocional que te mantiene disponible",
+            "Cuando una notificacion decide tu autoestima",
+            "Si te busca solo cuando te alejas, no es amor",
+            "La fantasia de cierre que nunca llega",
+        ],
+    },
+    {
+        "id": "apego_ansioso",
+        "keywords": ["apego ansioso", "ansiedad", "dependencia emocional", "limerencia"],
+        "titles": [
+            "No extrañas a esa persona: extrañas calmar tu ansiedad",
+            "Cuando un mensaje se vuelve una prueba de amor",
+            "Apego ansioso: por que amar se siente como esperar permiso",
+            "La parte de la dependencia emocional que nadie quiere mirar",
+            "Si necesitas certeza todo el tiempo, esto puede estar pasando",
+            "Por que la calma de alguien mas controla tu dia",
+            "Cuando confundes intensidad con conexion",
+            "El amor que te acelera no siempre te elige",
+        ],
+        "adjacent": [
+            "La paz que llega cuando dejas de perseguir señales",
+            "El limite que protege tu sistema nervioso",
+            "Por que confundes intensidad con destino",
+            "Cuando pedir claridad se siente como rogar amor",
+        ],
+    },
+]
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -1107,22 +1190,21 @@ def title_lab_seed_titles(agent: dict, seed_topic: str, *, limit: int = 10) -> l
                 f"La historia oculta que convierte {name} en un gran video",
             ]
         return dedupe_title_strings(base)[:limit]
-
     if aid in PODCAST_AGENT_IDS:
-        base = [
-            f"{seed} no funciona si lo haces para que vuelva",
-            f"La parte de {seed} que nadie te explica",
-            f"Por que {seed} duele como abstinencia emocional",
-            f"El error que arruina {seed} sin que te des cuenta",
-            f"Cuando haces {seed} pero sigues revisando sus historias",
-            f"{seed} no es castigo: es recuperar tu dignidad",
-            f"Si rompiste {seed} por ansiedad, escucha esto antes de culparte",
-            f"La verdad incomoda sobre {seed}",
-            f"Lo que {seed} revela sobre tu apego",
-            f"{seed}: cuando dejar de escribir se siente como perderlo todo",
-            f"El lado de {seed} que solo entiendes cuando todavia duele",
-            f"Antes de romper {seed}, escucha esto",
-        ]
+        profile = podcast_topic_profile(seed)
+        if profile:
+            base = list(profile.get("titles") or [])
+        else:
+            base = [
+                f"La verdad incomoda sobre {seed} que casi nadie quiere mirar",
+                f"Por que {seed} toca una herida mas profunda de lo que parece",
+                f"Cuando {seed} se vuelve una forma de buscar validacion",
+                f"El limite que cambia todo cuando aparece {seed}",
+                f"Lo que {seed} revela sobre tu forma de amar",
+                f"Antes de romantizar {seed}, escucha esto",
+                f"{seed}: la parte emocional que no se ve desde fuera",
+                f"Cuando {seed} deja de ser amor y empieza a ser ansiedad",
+            ]
     else:
         base = [
             f"Lo que nadie esta explicando sobre {seed}",
@@ -1148,23 +1230,9 @@ def title_lab_adjacent_titles(
     seed = normalize_text(seed_topic)
     if aid in PODCAST_AGENT_IDS:
         pool = list(PODCAST_TITLE_ADJACENT_TOPICS)
-        if "contacto cero" in seed:
-            pool = [
-                "Volvio cuando menos lo necesitabas: por que eso te confunde",
-                "No extrañas a tu ex: extrañas la ansiedad que te daba",
-                "La migaja emocional que te hace empezar de cero",
-                "Por que quieres cerrar una historia que ya te cerro a ti",
-                "Cuando dejar de esperar se siente como traicionar lo que sentias",
-                "Si te busca despues del silencio, no siempre significa amor",
-            ] + pool
-        elif "ghosting" in seed or "visto" in seed:
-            pool = [
-                "Me dejo en visto pero ve mis historias: la trampa emocional",
-                "Por que esperas una respuesta de quien ya te respondio con silencio",
-                "La ansiedad de mirar el celular como si fuera una prueba de amor",
-                "Si aparece y desaparece, esto es lo que esta entrenando en ti",
-                "Cuando el silencio de alguien decide tu valor",
-            ] + pool
+        profile = podcast_topic_profile(seed)
+        if profile:
+            pool = list(profile.get("adjacent") or []) + pool
         for signal in knowledge_signals:
             text = normalize_text(signal.get("excerpt") or "")
             if "apego ansioso" in text:
@@ -1183,6 +1251,20 @@ def title_lab_adjacent_titles(
             f"Un angulo inesperado para crecer en {name}",
         ]
     return dedupe_title_strings(pool)[:limit]
+
+
+def podcast_topic_profile(seed_topic: str) -> dict | None:
+    seed = normalize_text(seed_topic)
+    if not seed:
+        return None
+    best = None
+    best_hits = 0
+    for profile in PODCAST_TOPIC_PROFILES:
+        hits = sum(1 for keyword in profile.get("keywords", []) if normalize_text(keyword) in seed)
+        if hits > best_hits:
+            best = profile
+            best_hits = hits
+    return best
 
 
 def title_lab_option(

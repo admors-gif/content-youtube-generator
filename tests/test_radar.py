@@ -158,6 +158,15 @@ def test_title_lab_without_seed_suggests_niche_titles():
     assert any("apego" in item["title"].lower() or "ex" in item["title"].lower() for item in lab["items"])
 
 
+def test_title_lab_uses_semantic_profile_for_amor_propio():
+    lab = build_title_lab(PODCAST_AGENT, seed_topic="amor propio", seed_limit=6, adjacent_limit=3)
+    titles = [item["title"].lower() for item in lab["groups"][0]["items"]]
+
+    assert any("migajas" in title or "negociarte" in title for title in titles)
+    assert not any("para que vuelva" in title for title in titles)
+    assert not any("abstinencia emocional" in title for title in titles)
+
+
 def test_title_lab_adds_trend_and_competitor_groups_without_copying_verbatim():
     lab = build_title_lab(
         PODCAST_AGENT,

@@ -99,6 +99,49 @@ function CostPill({ estimate, cached }) {
   );
 }
 
+function PanelSection({ title, caption, badge, defaultOpen = true, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section
+      style={{
+        border: "1px solid var(--rule-1)",
+        borderRadius: "var(--r-3)",
+        background: "var(--ink-1)",
+        overflow: "hidden",
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="cf-btn"
+        style={{
+          width: "100%",
+          justifyContent: "space-between",
+          border: 0,
+          borderRadius: 0,
+          background: "transparent",
+          padding: "var(--s-4)",
+          color: "var(--paper)",
+        }}
+      >
+        <span style={{ display: "grid", gap: 4, textAlign: "left" }}>
+          <span style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <span className="cf-h4">{title}</span>
+            {badge && <span className="cf-badge cf-badge--creator">{badge}</span>}
+          </span>
+          {caption && <span className="cf-caption">{caption}</span>}
+        </span>
+        <Icon name={open ? "chevronDown" : "chevronRight"} size={18} />
+      </button>
+      {open && (
+        <div style={{ padding: "0 var(--s-4) var(--s-4)" }}>
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function formatShortDate(value) {
   if (!value) return "";
   try {
@@ -510,6 +553,28 @@ function TitleLabOptionCard({ item, saving, copied, onCopy, onSave, onPrepare })
             <p className="cf-caption" style={{ margin: "8px 0 0", lineHeight: 1.35 }}>
               {item.retentionReason}
             </p>
+          )}
+          {(item.evidence || item.inspiredBy?.title) && (
+            <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+              {item.evidence && (
+                <p className="cf-caption" style={{ margin: 0, color: "var(--ok)", lineHeight: 1.35 }}>
+                  {item.evidence}
+                </p>
+              )}
+              {item.inspiredBy?.title && (
+                <a
+                  href={item.inspiredBy.url || "#"}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="cf-caption"
+                  style={{ color: "var(--paper-mute)", textDecoration: "none", display: "flex", gap: 6, alignItems: "center" }}
+                >
+                  <Icon name="externalLink" size={12} />
+                  {item.inspiredBy.channelTitle ? `${item.inspiredBy.channelTitle}: ` : ""}
+                  {item.inspiredBy.title}
+                </a>
+              )}
+            </div>
           )}
           {item.seoKeywords?.length > 0 && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
@@ -961,6 +1026,12 @@ export default function RadarPage() {
           </button>
         </div>
 
+        <div style={{ display: "grid", gap: 12 }}>
+          <PanelSection
+            title="1. Idea y fuentes"
+            caption="Elige el agente, escribe una semilla opcional y decide que señales usar."
+            defaultOpen
+          >
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: 12 }}>
           <label>
             <div className="cf-mono-sm" style={{ marginBottom: 8 }}>Nicho / agente</div>
@@ -1014,8 +1085,14 @@ export default function RadarPage() {
             </span>
           </label>
         </div>
+          </PanelSection>
 
-        <div className="cf-card" style={{ padding: "var(--s-4)", borderRadius: "var(--r-2)", marginTop: 14 }}>
+          <PanelSection
+            title="2. Competidores curados"
+            caption={`${competitors.length} guardado(s). Descubrir usa canales + videos: aprox. 202 unidades por busqueda.`}
+            badge={competitorResults.length ? `${competitorResults.length} sugeridos` : ""}
+            defaultOpen={competitorResults.length > 0 || competitors.length === 0}
+          >
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
             <div>
               <div className="cf-mono-sm" style={{ marginBottom: 6 }}>Competidores curados</div>
@@ -1122,6 +1199,7 @@ export default function RadarPage() {
               )}
             </div>
           )}
+          </PanelSection>
         </div>
 
         {(titleLabError || titleLabNotice) && (
@@ -1139,21 +1217,45 @@ export default function RadarPage() {
         )}
 
         {titleLabResult?.groups?.length > 0 && (
-          <div style={{ display: "grid", gap: "var(--s-5)", marginTop: "var(--s-5)" }}>
+          <PanelSection
+            title="3. Resultados"
+            caption={titleLabResult.generationMode === "llm_v2" ? "Sintesis generada con señales del agente, fuentes y competidores." : "Fallback semantico local, sin llamada LLM."}
+            badge={titleLabResult.generationMode === "llm_v2" ? "v2 inteligente" : "fallback"}
+            defaultOpen
+          >
+          <div style={{ display: "grid", gap: "var(--s-5)" }}>
             {titleLabResult.warnings?.length > 0 && (
               <div className="cf-card" style={{ padding: "var(--s-4)", borderColor: "var(--warn)", color: "var(--warn)" }}>
                 {titleLabResult.warnings.join(" ")}
               </div>
             )}
-            {titleLabResult.retentionRanking?.length > 0 && (
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12 }}>
-                  <div>
-                    <div className="cf-h4">Ranking por retencion probable</div>
-                    <div className="cf-caption">Prioriza los titulos con mas tension narrativa, claridad y promesa de quedarse viendo.</div>
+            {titleLabResult.topicDiagnosis && Object.keys(titleLabResult.topicDiagnosis).length > 0 && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+                  gap: 10,
+                }}
+              >
+                {[
+                  ["Tension", titleLabResult.topicDiagnosis.coreTension],
+                  ["Audiencia", titleLabResult.topicDiagnosis.audienceState],
+                  ["Evitar", titleLabResult.topicDiagnosis.avoid],
+                ].filter(([, value]) => value).map(([label, value]) => (
+                  <div key={label} style={{ border: "1px solid var(--rule-1)", borderRadius: "var(--r-2)", padding: 12 }}>
+                    <div className="cf-mono-sm" style={{ marginBottom: 6 }}>{label}</div>
+                    <div className="cf-caption" style={{ lineHeight: 1.4 }}>{value}</div>
                   </div>
-                  <span className="cf-badge cf-badge--creator">Top {titleLabResult.retentionRanking.length}</span>
-                </div>
+                ))}
+              </div>
+            )}
+            {titleLabResult.retentionRanking?.length > 0 && (
+              <PanelSection
+                title="Ranking por retencion probable"
+                caption="Prioriza los titulos con mas tension narrativa, claridad y promesa de quedarse viendo."
+                badge={`Top ${titleLabResult.retentionRanking.length}`}
+                defaultOpen
+              >
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 300px), 1fr))", gap: 10 }}>
                   {titleLabResult.retentionRanking.slice(0, 6).map((ranked, index) => {
                     const fullItem = (titleLabResult.items || []).find((entry) => entry.optionId === ranked.optionId) || ranked;
@@ -1184,19 +1286,16 @@ export default function RadarPage() {
                     );
                   })}
                 </div>
-              </div>
+              </PanelSection>
             )}
             {titleLabResult.groups.map((group) => (
-              <div key={group.id}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12 }}>
-                  <div>
-                    <div className="cf-h4">{group.label}</div>
-                    <div className="cf-caption">{group.items.length} opcion(es)</div>
-                  </div>
-                  {group.id === "adjacent" && (
-                    <span className="cf-badge cf-badge--neutral">extra para explorar</span>
-                  )}
-                </div>
+              <PanelSection
+                key={group.id}
+                title={group.label}
+                caption={`${group.items.length} opcion(es)`}
+                badge={group.id === "ai" ? "recomendado" : group.id === "adjacent" ? "extra" : ""}
+                defaultOpen={group.id === "ai" || group.id === "competitor"}
+              >
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 12 }}>
                   {group.items.map((item) => (
                     <TitleLabOptionCard
@@ -1210,12 +1309,14 @@ export default function RadarPage() {
                     />
                   ))}
                 </div>
-              </div>
+              </PanelSection>
             ))}
             <div className="cf-caption">
               Costo: Tavily {Number(titleLabResult.costEstimate?.tavilyCredits || 0)} credito(s). YouTube {Number(titleLabResult.costEstimate?.youtubeQuotaUnits || 0)} unidad(es). Qdrant {Number(titleLabResult.costEstimate?.knowledgeQueries || 0)} busq. Embeddings {Number(titleLabResult.costEstimate?.embeddingQueries || 0)}.
+              {Number(titleLabResult.costEstimate?.llmCalls || 0) > 0 && ` LLM ${Number(titleLabResult.costEstimate?.llmCalls || 0)} llamada(s).`}
             </div>
           </div>
+          </PanelSection>
         )}
       </section>
 

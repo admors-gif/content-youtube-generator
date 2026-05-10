@@ -49,6 +49,7 @@ from scripts.radar import (
     fallback_candidates_for_agent as _radar_fallback_candidates_for_agent,
     knowledge_results_to_candidates as _radar_knowledge_results_to_candidates,
     parse_ranking_response as _radar_parse_ranking_response,
+    rank_title_lab_retention as _radar_rank_title_lab_retention,
     title_lab_option as _radar_title_lab_option,
     tavily_results_to_candidates as _radar_tavily_results_to_candidates,
 )
@@ -3543,6 +3544,207 @@ def _radar_rank_with_llm(candidates: list[dict], *, scope: str, intent: str) -> 
         return candidates
 
 
+def _radar_json_from_model_text(text: str):
+    clean = (text or "").strip()
+    if clean.startswith("```"):
+        clean = clean.split("\n", 1)[1] if "\n" in clean else clean
+        clean = clean.rsplit("```", 1)[0].strip()
+    return json.loads(clean)
+
+
+def _radar_title_lab_source_pack(
+    knowledge_signals: list[dict],
+    trend_signals: list[dict],
+    competitor_signals: list[dict],
+) -> dict:
+    return {
+        "knowledge": [
+            {
+                "book": item.get("title") or item.get("bookTitle") or "",
+                "category": item.get("category") or "",
+                "excerpt": _radar_compact_text(item.get("excerpt") or item.get("content") or "", 260),
+            }
+            for item in (knowledge_signals or [])[:5]
+        ],
+        "trends": [
+            {
+                "title": item.get("title") or item.get("topic") or "",
+                "url": item.get("url") or "",
+                "domain": item.get("domain") or "",
+                "query": item.get("query") or "",
+            }
+            for item in (trend_signals or [])[:6]
+        ],
+        "competitors": [
+            {
+                "videoTitle": item.get("videoTitle") or item.get("title") or "",
+                "channelTitle": item.get("channelTitle") or "",
+                "url": item.get("url") or "",
+                "views": item.get("views") or 0,
+                "viewsPerDay": item.get("viewsPerDay") or 0,
+                "publishedAt": item.get("publishedAt") or "",
+            }
+            for item in (competitor_signals or [])[:10]
+        ],
+    }
+
+
+def _radar_title_lab_prompt(
+    agent: dict,
+    *,
+    seed_topic: str,
+    knowledge_signals: list[dict],
+    trend_signals: list[dict],
+    competitor_signals: list[dict],
+    count: int = 8,
+) -> str:
+    context = {
+        "agent": {
+            "agentId": agent.get("agentId"),
+            "name": agent.get("name"),
+            "description": agent.get("description"),
+            "category": agent.get("category"),
+            "format": agent.get("format"),
+        },
+        "seedTopic": seed_topic,
+        "sourceSignals": _radar_title_lab_source_pack(knowledge_signals, trend_signals, competitor_signals),
+        "count": count,
+    }
+    return (
+        "Eres estratega editorial senior para canales de YouTube en español.\n"
+        "Objetivo: generar titulos NUEVOS con alta probabilidad de retencion para el agente indicado.\n\n"
+        "Reglas criticas:\n"
+        "- No hagas sustitucion mecanica de la idea semilla en plantillas.\n"
+        "- Primero interpreta la tension psicologica/narrativa del tema.\n"
+        "- Usa los competidores solo como evidencia de demanda; no copies sus titulos.\n"
+        "- Si una frase suena rara con la semilla, descartala.\n"
+        "- Titulos en español natural, 38-78 caracteres cuando sea posible.\n"
+        "- Mantén el tono del agente. Para 'Esto no es amor': noir emocional, apego, limites, ruptura, dignidad; evita sonar clinico o generico.\n"
+        "- No prometas curas ni diagnosticos.\n"
+        "- Devuelve SOLO JSON valido, sin markdown.\n\n"
+        "Formato exacto:\n"
+        "{\n"
+        '  "topicDiagnosis": {"coreTension": "...", "audienceState": "...", "avoid": "..."},\n'
+        '  "items": [\n'
+        "    {\n"
+        '      "title": "titulo final",\n'
+        '      "hook": "hook oral de 1 frase",\n'
+        '      "angle": "angulo editorial",\n'
+        '      "seoKeywords": ["keyword", "keyword"],\n'
+        '      "viralScore": 0,\n'
+        '      "seoScore": 0,\n'
+        '      "clickbaitScore": 0,\n'
+        '      "fitScore": 0,\n'
+        '      "retentionScore": 0,\n'
+        '      "retentionReason": "razon concreta",\n'
+        '      "evidence": "video/libro/tendencia que inspira el patron, si existe"\n'
+        "    }\n"
+        "  ]\n"
+        "}\n\n"
+        "Datos:\n"
+        f"{json.dumps(context, ensure_ascii=False)}"
+    )
+
+
+def _radar_generate_title_lab_with_llm(
+    agent: dict,
+    *,
+    seed_topic: str,
+    knowledge_signals: list[dict],
+    trend_signals: list[dict],
+    competitor_signals: list[dict],
+) -> tuple[list[dict], dict, str]:
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return [], {}, ""
+    if not _flag_enabled("CONTENT_FACTORY_TITLE_LAB_LLM_ENABLED", default=True):
+        return [], {}, ""
+    has_context = bool(seed_topic or knowledge_signals or trend_signals or competitor_signals)
+    if not has_context:
+        return [], {}, ""
+    try:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        model = os.environ.get("CONTENT_FACTORY_TITLE_LAB_MODEL", os.environ.get("CONTENT_FACTORY_RADAR_MODEL", "claude-haiku-4-5-20251001"))
+        resp = client.messages.create(
+            model=model,
+            max_tokens=2600,
+            messages=[{
+                "role": "user",
+                "content": _radar_title_lab_prompt(
+                    agent,
+                    seed_topic=seed_topic,
+                    knowledge_signals=knowledge_signals,
+                    trend_signals=trend_signals,
+                    competitor_signals=competitor_signals,
+                    count=8,
+                ),
+            }],
+        )
+        parsed = _radar_json_from_model_text(resp.content[0].text)
+        items = parsed.get("items") if isinstance(parsed, dict) else []
+        if not isinstance(items, list):
+            return [], {}, model
+        options = []
+        seen_titles = set()
+        for raw in items[:10]:
+            if not isinstance(raw, dict):
+                continue
+            title = _radar_compact_text(raw.get("title") or "", 110).strip()
+            title_key = title.lower()
+            if not title or title_key in seen_titles:
+                continue
+            seen_titles.add(title_key)
+            option = _radar_title_lab_option(
+                agent,
+                title,
+                seed_topic=seed_topic,
+                group="ai",
+                rank=len(options) + 1,
+                knowledge_signals=knowledge_signals[:3],
+            )
+            scores = option.setdefault("scores", {})
+            for source_key, out_key in [
+                ("viralScore", "viral"),
+                ("seoScore", "seo"),
+                ("clickbaitScore", "clickbait"),
+                ("fitScore", "fit"),
+                ("retentionScore", "retention"),
+            ]:
+                if raw.get(source_key) is not None:
+                    scores[out_key] = max(0, min(100, _safe_int(raw.get(source_key), scores.get(out_key, 0))))
+            scores["overall"] = max(0, min(100, round(
+                scores.get("viral", 0) * 0.28
+                + scores.get("seo", 0) * 0.20
+                + scores.get("clickbait", 0) * 0.19
+                + scores.get("fit", 0) * 0.18
+                + scores.get("retention", 0) * 0.15
+            )))
+            option.update({
+                "group": "ai",
+                "hook": _radar_compact_text(raw.get("hook") or option.get("hook") or "", 180),
+                "angle": _radar_compact_text(raw.get("angle") or option.get("angle") or "", 220),
+                "seoKeywords": [str(item).strip() for item in (raw.get("seoKeywords") or option.get("seoKeywords") or []) if str(item).strip()][:8],
+                "viralScore": scores.get("viral") or 0,
+                "seoScore": scores.get("seo") or 0,
+                "clickbaitScore": scores.get("clickbait") or 0,
+                "fitScore": scores.get("fit") or 0,
+                "retentionScore": scores.get("retention") or 0,
+                "overallScore": scores.get("overall") or 0,
+                "retentionReason": _radar_compact_text(raw.get("retentionReason") or option.get("retentionReason") or "", 180),
+                "evidence": _radar_compact_text(raw.get("evidence") or "", 220),
+                "generationMode": "llm_v2",
+            })
+            options.append(option)
+        diagnosis = parsed.get("topicDiagnosis") if isinstance(parsed, dict) and isinstance(parsed.get("topicDiagnosis"), dict) else {}
+        return options, diagnosis, model
+    except Exception as exc:
+        try:
+            log.warning("title_lab_llm_failed", error=str(exc)[:220])
+        except Exception:
+            pass
+        return [], {}, ""
+
+
 def _radar_candidates_for_agent(
     agent: dict,
     *,
@@ -3857,6 +4059,7 @@ def _radar_candidate_from_title_lab_option(agent: dict, option: dict, *, seed_to
         "seoKeywords": safe_option.get("seoKeywords") or [],
         "searchIntent": "laboratorio de titulos",
         "knowledgeSignals": safe_option.get("knowledgeSignals") or [],
+        "evidence": option.get("evidence") or option.get("inspiredBy") or {},
         "scores": {
             "audience": scores.get("viral") or 0,
             "fit": scores.get("fit") or 0,
@@ -3874,6 +4077,7 @@ def _radar_candidate_from_title_lab_option(agent: dict, option: dict, *, seed_to
         "titleLab": {
             "seedTopic": seed_topic,
             "group": group,
+            "generationMode": option.get("generationMode") or "",
             "viralScore": scores.get("viral") or 0,
             "seoScore": scores.get("seo") or 0,
             "clickbaitScore": scores.get("clickbait") or 0,
@@ -4905,6 +5109,32 @@ async def radar_title_lab(request: Request):
         seed_limit=seed_limit,
         adjacent_limit=adjacent_limit,
     )
+    ai_options, topic_diagnosis, title_lab_model = _radar_generate_title_lab_with_llm(
+        agent,
+        seed_topic=seed_topic,
+        knowledge_signals=knowledge_signals,
+        trend_signals=trend_signals,
+        competitor_signals=competitor_signals,
+    )
+    if ai_options:
+        existing_titles = {str(item.get("title") or "").strip().lower() for item in lab.get("items", [])}
+        unique_ai_options = []
+        for item in ai_options:
+            key = str(item.get("title") or "").strip().lower()
+            if key and key not in existing_titles:
+                existing_titles.add(key)
+                unique_ai_options.append(item)
+        if unique_ai_options:
+            lab["groups"] = [
+                {"id": "ai", "label": "Sintesis inteligente", "items": unique_ai_options},
+                *(lab.get("groups") or []),
+            ]
+            lab["items"] = unique_ai_options + (lab.get("items") or [])
+            lab["retentionRanking"] = _radar_rank_title_lab_retention(lab["items"])
+            lab["topicDiagnosis"] = topic_diagnosis
+            lab["generationMode"] = "llm_v2"
+    else:
+        lab["generationMode"] = "semantic_fallback"
     lab["costEstimate"] = {
         "tavilyCredits": _radar_tavily_credit_cost(len(trend_queries)),
         "tavilyQueries": len(trend_queries),
@@ -4913,6 +5143,8 @@ async def radar_title_lab(request: Request):
         "youtubeQuotaUnits": competitor_meta.get("youtubeQuotaUnits") or 0,
         "youtubeChannels": competitor_meta.get("channels") or 0,
         "youtubeVideosAnalyzed": competitor_meta.get("videosAnalyzed") or 0,
+        "llmCalls": 1 if ai_options else 0,
+        "llmModel": title_lab_model,
         "notes": ["El laboratorio no crea proyecto ni consume creditos de produccion."],
     }
     lab["warnings"] = warnings
