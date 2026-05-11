@@ -1,0 +1,100 @@
+name: Build project thumbnails
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: "Firestore project id"
+        required: true
+      force:
+        description: "Regenerate even if thumbnails already exist"
+        required: false
+        default: "false"
+      premium:
+        description: "Use premium image generation instead of scene-image fallback"
+        required: false
+        default: "false"
+
+concurrency:
+  group: build-thumbnails-${{ github.event.inputs.project_id }}
+  cancel-in-progress: false
+
+jobs:
+  thumbnails:
+    name: Generate thumbnails only
+    runs-on: [self-hosted, linux, vps, docker]
+    timeout-minutes: 20
+
+    steps:
+      - name: Build thumbnail assets from existing project files
+        run: |
+          set -euo pipefail
+          PID="${{ github.event.inputs.project_id }}"
+          FORCE="${{ github.event.inputs.force }}"
+          PREMIUM="${{ github.event.inputs.premium }}"
+          docker exec -i content-factory python - "$PID" "$FORCE" "$PREMIUM" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          import api
+
+          def truthy(value):
+              return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+          project_id = sys.argv[1]
+          force = truthy(sys.argv[2] if len(sys.argv) > 2 else "")
+          premium = truthy(sys.argv[3] if len(sys.argv) > 3 else "")
+
+          api._ensure_firebase_initialized()
+          from firebase_admin import firestore
+
+          db = firestore.client()
+          doc_ref = db.collection("projects").document(project_id)
+          snap = doc_ref.get()
+          if not snap.exists:
+              raise SystemExit(f"project not found: {project_id}")
+
+          data = snap.to_dict() or {}
+          existing = data.get("thumbnails") if isinstance(data.get("thumbnails"), list) else []
+          if existing and len(existing) >= 3 and not force:
+              print(json.dumps({
+                  "ok": True,
+                  "projectId": project_id,
+                  "cached": True,
+                  "thumbnailsCount": len(existing),
+              }, ensure_ascii=False, indent=2))
+              raise SystemExit(0)
+
+          folder = data.get("videoFolder") or ""
+          if not folder:
+              raise SystemExit("project has no videoFolder")
+
+          video_dir = Path("/app/output/videos") / folder
+          if not video_dir.is_dir():
+              raise SystemExit(f"video folder not found: {video_dir}")
+
+          results = api.build_thumbnails_for_project(
+              video_dir,
+              project_id,
+              data.get("title") or "",
+              agent_id=data.get("agentId") or "",
+              premium=premium,
+          )
+          if results:
+              doc_ref.update({
+                  "thumbnails": results,
+                  "thumbnailsBuiltAt": firestore.SERVER_TIMESTAMP,
+              })
+
+          print(json.dumps({
+              "ok": bool(results),
+              "projectId": project_id,
+              "cached": False,
+              "premium": premium,
+              "thumbnailsCount": len(results or []),
+              "thumbnailPaths": [item.get("gs_path") for item in (results or [])],
+          }, ensure_ascii=False, indent=2))
+          if not results:
+              raise SystemExit("thumbnail generation returned no results")
+          PY
