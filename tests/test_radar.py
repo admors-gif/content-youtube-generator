@@ -5,6 +5,7 @@ from scripts.radar import (
     build_knowledge_queries,
     build_news_queries,
     build_title_lab,
+    build_viral_opportunities,
     cache_key,
     candidate_hash,
     canonical_title_key,
@@ -236,6 +237,44 @@ def test_title_lab_external_groups_remix_each_signal_for_amor_propio():
     assert any("perderte" in title or "relacion" in title for title in competitor_titles)
     assert any("historia" in title for title in competitor_titles)
     assert any("madurez" in title or "me elijo" in title or "migajas" in title for title in trend_titles)
+
+
+def test_viral_opportunities_cluster_evidence_before_titles():
+    result = build_viral_opportunities(
+        PODCAST_AGENT,
+        seed_topic="amor propio",
+        trend_signals=[
+            {"title": "Se llama Madurez y Amor Propio", "url": "https://example.com/a", "score": 0.8},
+        ],
+        competitor_signals=[
+            {
+                "videoTitle": "Amar tambien es dejar ser",
+                "channelTitle": "Se Regalan Dudas Podcast",
+                "url": "https://youtube.com/watch?v=1",
+                "views": 900000,
+                "viewsPerDay": 13000,
+                "publishedAt": "2026-05-01T00:00:00Z",
+            },
+            {
+                "videoTitle": "Esta es la clave para una relacion sana",
+                "channelTitle": "Se Regalan Dudas Podcast",
+                "url": "https://youtube.com/watch?v=2",
+                "views": 300000,
+                "viewsPerDay": 7600,
+                "publishedAt": "2026-05-03T00:00:00Z",
+            },
+        ],
+        limit=4,
+    )
+
+    assert result["items"]
+    top = result["items"][0]
+    assert top["opportunityScore"] >= 70
+    assert top["evidenceScore"] >= 70
+    assert top["evidence"]
+    assert top["suggestedTitles"]
+    assert "tu audiencia si quiere escuchar" not in " ".join(top["suggestedTitles"]).lower()
+    assert top["sourceBreakdown"]["maxViewsPerDay"] >= 7600
 
 
 def test_news_candidate_with_single_source_requires_medium_risk():

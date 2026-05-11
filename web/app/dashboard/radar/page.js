@@ -611,6 +611,97 @@ function TitleLabOptionCard({ item, saving, copied, onCopy, onSave, onPrepare })
   );
 }
 
+function ViralOpportunityCard({ item, saving, onSave, onPrepare }) {
+  const risk = riskMeta(item.riskLevel);
+  const evidence = item.evidence || [];
+  const suggestedTitles = item.suggestedTitles || [];
+  return (
+    <article className="cf-card" style={{ padding: "var(--s-5)", borderRadius: "var(--r-3)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 18, alignItems: "flex-start" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            <span className="cf-badge cf-badge--creator">Oportunidad {Number(item.opportunityScore || 0)}</span>
+            <span className="cf-badge cf-badge--creator">Evidencia {Number(item.evidenceScore || 0)}</span>
+            <span className="cf-badge cf-badge--neutral">Ret {Number(item.retentionScore || 0)}</span>
+            <span className={`cf-badge ${risk.badge}`}>{risk.label}</span>
+          </div>
+          <h3 className="cf-h2" style={{ margin: "0 0 8px", lineHeight: 1.08 }}>
+            {item.cluster || item.topic || item.title}
+          </h3>
+          {item.audienceTension && (
+            <p className="cf-body" style={{ margin: "0 0 10px", color: "var(--paper)", lineHeight: 1.45 }}>
+              {item.audienceTension}
+            </p>
+          )}
+          <p className="cf-caption" style={{ margin: 0, lineHeight: 1.45 }}>
+            {item.whyItCanWork || item.corePattern}
+          </p>
+        </div>
+        <div style={{ textAlign: "right", minWidth: 86 }}>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 42, lineHeight: 1, fontWeight: 800, color: "var(--ok)" }}>
+            {Number(item.opportunityScore || 0)}
+          </div>
+          <div className="cf-caption">score</div>
+        </div>
+      </div>
+
+      {evidence.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div className="cf-mono-sm" style={{ marginBottom: 8 }}>EVIDENCIA</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {evidence.slice(0, 3).map((source) => (
+              <a
+                key={source.url || source.title}
+                href={source.url || "#"}
+                target="_blank"
+                rel="noreferrer"
+                className="cf-card"
+                style={{ padding: 12, borderRadius: "var(--r-2)", textDecoration: "none", display: "grid", gap: 6 }}
+              >
+                <div style={{ color: "var(--paper)", fontWeight: 800, lineHeight: 1.25 }}>
+                  {source.channelTitle ? `${source.channelTitle}: ` : ""}
+                  {source.title}
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {source.views > 0 && <span className="cf-badge cf-badge--neutral">{compactNumber(source.views)} views</span>}
+                  {source.viewsPerDay > 0 && <span className="cf-badge cf-badge--creator">{compactNumber(source.viewsPerDay)} / dia</span>}
+                  {source.publishedAt && <span className="cf-badge cf-badge--neutral">{formatShortDate(source.publishedAt)}</span>}
+                </div>
+                {source.whyRelevant && <div className="cf-caption" style={{ color: "var(--ok)" }}>{source.whyRelevant}</div>}
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {suggestedTitles.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div className="cf-mono-sm" style={{ marginBottom: 8 }}>TITULOS PROPUESTOS</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {suggestedTitles.slice(0, 4).map((title, index) => (
+              <div key={title} className="cf-card" style={{ padding: 12, borderRadius: "var(--r-2)", display: "flex", gap: 10 }}>
+                <span className="cf-mono-sm" style={{ color: "var(--ember)" }}>{String(index + 1).padStart(2, "0")}</span>
+                <span style={{ color: "var(--paper)", fontWeight: 750, lineHeight: 1.25 }}>{title}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
+        <button className="cf-btn cf-btn--secondary cf-btn--sm" type="button" onClick={onSave} disabled={saving}>
+          <Icon name="bookOpen" size={14} />
+          {saving ? "Guardando" : "Guardar en temas"}
+        </button>
+        <button className="cf-btn cf-btn--primary cf-btn--sm" type="button" onClick={onPrepare}>
+          <Icon name="arrowRight" size={14} />
+          Preparar proyecto
+        </button>
+      </div>
+    </article>
+  );
+}
+
 export default function RadarPage() {
   const router = useRouter();
   const { user, profile, loading: authLoading } = useAuth();
@@ -636,6 +727,15 @@ export default function RadarPage() {
   const [titleLabCopiedId, setTitleLabCopiedId] = useState("");
   const [titleLabUseTrends, setTitleLabUseTrends] = useState(false);
   const [titleLabUseCompetitors, setTitleLabUseCompetitors] = useState(false);
+  const [viralTopic, setViralTopic] = useState("");
+  const [viralUseTrends, setViralUseTrends] = useState(true);
+  const [viralUseCompetitors, setViralUseCompetitors] = useState(true);
+  const [viralUseKnowledge, setViralUseKnowledge] = useState(true);
+  const [viralResult, setViralResult] = useState(null);
+  const [viralLoading, setViralLoading] = useState(false);
+  const [viralError, setViralError] = useState("");
+  const [viralNotice, setViralNotice] = useState("");
+  const [viralSavingId, setViralSavingId] = useState("");
   const [competitors, setCompetitors] = useState([]);
   const [competitorsLoading, setCompetitorsLoading] = useState(false);
   const [competitorQuery, setCompetitorQuery] = useState("");
@@ -772,6 +872,71 @@ export default function RadarPage() {
     () => run?.costEstimate || estimateRadarCost(filters),
     [run?.costEstimate, filters],
   );
+
+  const runViralOpportunities = async () => {
+    setViralLoading(true);
+    setViralError("");
+    setViralNotice("");
+    try {
+      const res = await authedFetch(user, `${getApiBase()}/radar/viral-opportunities`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: titleLabAgentId,
+          seedTopic: viralTopic,
+          useTrends: viralUseTrends,
+          useCompetitors: viralUseCompetitors,
+          useKnowledge: viralUseKnowledge,
+          limit: 6,
+          trendQueryLimit: 2,
+          perChannelLimit: 8,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.error || "No se pudo ejecutar el Radar Viral v3.");
+      setViralResult(data);
+      setViralNotice(`Radar Viral listo: ${data.items?.length || 0} oportunidad(es) detectada(s).`);
+    } catch (err) {
+      setViralError(err.message);
+    } finally {
+      setViralLoading(false);
+    }
+  };
+
+  const saveViralOpportunity = async (item) => {
+    setViralSavingId(item.opportunityId || item.candidateHash);
+    setViralError("");
+    setViralNotice("");
+    try {
+      const res = await authedFetch(user, `${getApiBase()}/radar/viral-opportunities/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: titleLabAgentId,
+          seedTopic: viralResult?.seedTopic || viralTopic,
+          opportunity: item,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.error || "No se pudo guardar la oportunidad.");
+      setViralNotice("Oportunidad guardada en Temas.");
+    } catch (err) {
+      setViralError(err.message);
+    } finally {
+      setViralSavingId("");
+    }
+  };
+
+  const prepareViralOpportunity = (item) => {
+    const title = item.suggestedTitles?.[0] || item.seoTitle || item.title;
+    router.push(buildPreparedProjectUrl({
+      ...item,
+      agentId: titleLabAgentId,
+      title,
+      seoTitle: title,
+      angle: item.corePattern || item.title,
+    }));
+  };
 
   const runTitleLab = async () => {
     setTitleLabLoading(true);
@@ -1008,6 +1173,140 @@ export default function RadarPage() {
           </div>
         </div>
       </header>
+
+      <section className="cf-card cf-fade cf-fade--1" style={{ padding: "var(--s-5)", marginBottom: "var(--s-5)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 16 }}>
+          <div>
+            <div className="cf-eyebrow" style={{ color: "var(--ember)", marginBottom: 8 }}>
+              RADAR VIRAL V3
+            </div>
+            <h2 className="cf-h2" style={{ margin: 0 }}>Oportunidades basadas en evidencia</h2>
+            <p className="cf-body" style={{ margin: "10px 0 0", maxWidth: 800 }}>
+              Primero detecta patrones que ya muestran demanda en competidores, tendencias y Qdrant; despues propone titulos para producir.
+            </p>
+          </div>
+          <button className="cf-btn cf-btn--primary" onClick={runViralOpportunities} disabled={viralLoading} type="button">
+            <Icon name="trendingUp" size={16} />
+            {viralLoading ? "Analizando" : "Encontrar oportunidades"}
+          </button>
+        </div>
+
+        <PanelSection
+          title="Fuentes y territorio"
+          caption="Usa competidores guardados como senal principal. Tavily y Qdrant ayudan con contexto y profundidad."
+          defaultOpen
+        >
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))", gap: 12 }}>
+            <label>
+              <div className="cf-mono-sm" style={{ marginBottom: 8 }}>Nicho / agente</div>
+              <select
+                className="cf-input"
+                value={titleLabAgentId}
+                onChange={(event) => setTitleLabAgentId(event.target.value)}
+              >
+                {SYSTEM_AGENTS.map((agent) => (
+                  <option key={agent.agentId} value={agent.agentId}>{agent.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <div className="cf-mono-sm" style={{ marginBottom: 8 }}>Territorio opcional</div>
+              <input
+                className="cf-input"
+                value={viralTopic}
+                placeholder="Ej: amor propio, contacto cero, ghosting"
+                onChange={(event) => setViralTopic(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") runViralOpportunities();
+                }}
+              />
+            </label>
+            <div>
+              <div className="cf-mono-sm" style={{ marginBottom: 8 }}>Competidores guardados</div>
+              <div className="cf-card" style={{ padding: 12, borderRadius: "var(--r-2)" }}>
+                <div style={{ fontFamily: "var(--font-display)", fontSize: 30, lineHeight: 1, fontWeight: 800 }}>
+                  {compactNumber(competitors.length)}
+                </div>
+                <div className="cf-caption">canal(es) para este agente</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))", gap: 12, marginTop: 14 }}>
+            {[
+              ["Competidores YouTube", "La senal mas importante: videos reales, views y views/dia.", viralUseCompetitors, setViralUseCompetitors],
+              ["Tendencias Tavily", "Contexto web actual para detectar lenguaje y demanda.", viralUseTrends, setViralUseTrends],
+              ["Qdrant libros", "Profundidad conceptual para mejorar el angulo, no para decidir viralidad.", viralUseKnowledge, setViralUseKnowledge],
+            ].map(([label, caption, checked, setter]) => (
+              <label key={label} className="cf-card" style={{ padding: "var(--s-4)", borderRadius: "var(--r-2)", display: "flex", gap: 12, alignItems: "flex-start" }}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(event) => setter(event.target.checked)}
+                  style={{ marginTop: 5 }}
+                />
+                <span>
+                  <span className="cf-mono-sm" style={{ display: "block", color: "var(--paper)" }}>{label}</span>
+                  <span className="cf-caption">{caption}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </PanelSection>
+
+        {(viralError || viralNotice) && (
+          <div
+            className="cf-card"
+            style={{
+              padding: "var(--s-4)",
+              marginTop: 14,
+              borderColor: viralError ? "var(--bad)" : "var(--ok)",
+              color: viralError ? "var(--bad)" : "var(--ok)",
+            }}
+          >
+            {viralError || viralNotice}
+          </div>
+        )}
+
+        {viralResult?.items?.length > 0 && (
+          <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
+            {viralResult.warnings?.length > 0 && (
+              <div className="cf-card" style={{ padding: "var(--s-4)", borderColor: "var(--warn)", color: "var(--warn)" }}>
+                {viralResult.warnings.join(" ")}
+              </div>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+              {[
+                ["Oportunidades", viralResult.summary?.opportunities || viralResult.items.length],
+                ["Senales", viralResult.summary?.signalsAnalyzed || 0],
+                ["Top score", viralResult.summary?.topScore || 0],
+                ["Views/dia", viralResult.summary?.topViewsPerDay || 0],
+              ].map(([label, value]) => (
+                <div key={label} className="cf-card" style={{ padding: 12, borderRadius: "var(--r-2)" }}>
+                  <div className="cf-mono-sm" style={{ marginBottom: 8 }}>{label}</div>
+                  <div style={{ fontFamily: "var(--font-display)", fontSize: 30, lineHeight: 1, fontWeight: 800 }}>
+                    {compactNumber(value)}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: 14 }}>
+              {viralResult.items.map((item) => (
+                <ViralOpportunityCard
+                  key={item.opportunityId || item.candidateHash}
+                  item={item}
+                  saving={viralSavingId === (item.opportunityId || item.candidateHash)}
+                  onSave={() => saveViralOpportunity(item)}
+                  onPrepare={() => prepareViralOpportunity(item)}
+                />
+              ))}
+            </div>
+            <div className="cf-caption">
+              Costo: Tavily {Number(viralResult.costEstimate?.tavilyCredits || 0)} credito(s). YouTube {Number(viralResult.costEstimate?.youtubeQuotaUnits || 0)} unidad(es). Qdrant {Number(viralResult.costEstimate?.knowledgeQueries || 0)} busq. No crea proyectos ni consume creditos de produccion.
+            </div>
+          </div>
+        )}
+      </section>
 
       <section className="cf-card cf-fade cf-fade--1" style={{ padding: "var(--s-5)", marginBottom: "var(--s-5)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 16 }}>

@@ -41,6 +41,7 @@ from scripts.radar import (
     build_knowledge_queries as _radar_build_knowledge_queries,
     build_ranking_prompt as _radar_build_ranking_prompt,
     build_title_lab as _radar_build_title_lab,
+    build_viral_opportunities as _radar_build_viral_opportunities,
     cache_key as _radar_cache_key,
     canonical_title_key as _radar_canonical_title_key,
     compact_text as _radar_compact_text,
@@ -4091,6 +4092,80 @@ def _radar_candidate_from_title_lab_option(agent: dict, option: dict, *, seed_to
     }
 
 
+def _radar_candidate_from_viral_opportunity(agent: dict, opportunity: dict, *, seed_topic: str = "") -> dict:
+    title = _radar_compact_text(
+        opportunity.get("seoTitle")
+        or opportunity.get("title")
+        or ((opportunity.get("suggestedTitles") or [""])[0])
+        or seed_topic,
+        180,
+    )
+    scores = opportunity.get("scores") or {}
+    evidence = opportunity.get("evidence") or []
+    sources = []
+    for item in evidence[:5]:
+        url = item.get("url") or ""
+        if not url:
+            continue
+        sources.append({
+            "title": item.get("title") or item.get("channelTitle") or item.get("domain") or "Fuente",
+            "url": url,
+            "domain": item.get("domain") or urllib.parse.urlparse(url).netloc.replace("www.", ""),
+        })
+    candidate_hash = opportunity.get("candidateHash") or hashlib.sha1(
+        f"{agent.get('agentId')}:{title}:{opportunity.get('clusterId')}".encode("utf-8")
+    ).hexdigest()[:20]
+    return {
+        "candidateHash": candidate_hash,
+        "agentId": agent.get("agentId"),
+        "agentName": agent.get("name"),
+        "agentFile": agent.get("promptFile") or f"{agent.get('agentId')}.md",
+        "platform": agent.get("platform") or "youtube",
+        "format": agent.get("format") or "",
+        "category": agent.get("category") or "",
+        "intent": "viral_topics",
+        "radarIntent": "viral_topics",
+        "title": title,
+        "headline": title,
+        "summary": _radar_compact_text(opportunity.get("whyItCanWork") or opportunity.get("corePattern") or "", 650),
+        "angle": _radar_compact_text(opportunity.get("corePattern") or title, 240),
+        "whyNow": _radar_compact_text(opportunity.get("whyNow") or "", 420),
+        "sources": sources,
+        "recommendedFormat": opportunity.get("recommendedFormat") or "youtube_long",
+        "riskLevel": opportunity.get("riskLevel") or "low",
+        "riskReason": opportunity.get("riskReason") or "",
+        "sourceQuery": seed_topic or opportunity.get("cluster") or "viral-opportunity",
+        "sourceType": "viral_opportunity",
+        "seoTitle": opportunity.get("seoTitle") or title,
+        "seoKeywords": opportunity.get("seoKeywords") or [],
+        "searchIntent": "oportunidad viral basada en evidencia",
+        "knowledgeSignals": opportunity.get("knowledgeSignals") or [],
+        "evidence": evidence,
+        "scores": {
+            "audience": scores.get("evidence") or opportunity.get("evidenceScore") or 0,
+            "fit": scores.get("fit") or opportunity.get("fitScore") or 0,
+            "storyArc": scores.get("retention") or opportunity.get("retentionScore") or 0,
+            "freshness": scores.get("freshness") or opportunity.get("freshnessScore") or 0,
+            "productionEase": scores.get("productionEase") or 80,
+            "risk": 90,
+            "overall": scores.get("overall") or opportunity.get("opportunityScore") or 0,
+            "viral": scores.get("opportunity") or opportunity.get("opportunityScore") or 0,
+            "retention": scores.get("retention") or opportunity.get("retentionScore") or 0,
+            "evidence": scores.get("evidence") or opportunity.get("evidenceScore") or 0,
+        },
+        "editorialScore": scores.get("overall") or opportunity.get("opportunityScore") or 0,
+        "viralOpportunity": {
+            "seedTopic": seed_topic,
+            "clusterId": opportunity.get("clusterId") or "",
+            "cluster": opportunity.get("cluster") or "",
+            "audienceTension": opportunity.get("audienceTension") or "",
+            "corePattern": opportunity.get("corePattern") or "",
+            "suggestedTitles": opportunity.get("suggestedTitles") or [],
+            "sourceBreakdown": opportunity.get("sourceBreakdown") or {},
+        },
+    }
+
+
 def _library_public_item(doc_id: str, data: dict) -> dict:
     risk = data.get("risk") or {}
     candidate = data.get("candidate") or {}
@@ -4110,6 +4185,7 @@ def _library_public_item(doc_id: str, data: dict) -> dict:
         "editorialScore": data.get("editorialScore") or (data.get("scores") or {}).get("overall") or 0,
         "scores": data.get("scores") or candidate.get("scores") or {},
         "titleLab": title_lab,
+        "viralOpportunity": data.get("viralOpportunity") or candidate.get("viralOpportunity") or {},
         "riskLevel": risk.get("level") or data.get("riskLevel") or "low",
         "riskReason": risk.get("reason") or data.get("riskReason") or "",
         "recommendedFormat": data.get("recommendedFormat") or "youtube_long",
@@ -5156,6 +5232,119 @@ async def radar_title_lab(request: Request):
     }
     lab["warnings"] = warnings
     return {"ok": True, **lab}
+
+
+@app.post("/radar/viral-opportunities")
+async def radar_viral_opportunities(request: Request):
+    principal = _radar_require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    agent_id = str((body or {}).get("agentId") or "agent_podcast_general").strip()
+    agent = _radar_agent_by_id(agent_id)
+    if not agent:
+        raise HTTPException(status_code=400, detail="invalid radar agentId")
+    seed_topic = _radar_compact_text((body or {}).get("seedTopic") or (body or {}).get("topic") or "", 140).strip()
+    limit = max(3, min(10, _safe_int((body or {}).get("limit"), 6)))
+    use_trends = bool((body or {}).get("useTrends", True))
+    use_competitors = bool((body or {}).get("useCompetitors", True))
+    use_knowledge = bool((body or {}).get("useKnowledge", True))
+    trend_limit = max(1, min(2, _safe_int((body or {}).get("trendQueryLimit"), 2)))
+    per_channel_limit = max(3, min(12, _safe_int((body or {}).get("perChannelLimit"), 8)))
+    warnings = []
+    knowledge_signals = []
+    knowledge_queries = []
+    trend_signals = []
+    trend_queries = []
+    competitor_signals = []
+    competitor_meta = {"youtubeQuotaUnits": 0, "channels": 0, "videosAnalyzed": 0}
+
+    if use_knowledge and _radar_knowledge_enabled():
+        base_query = seed_topic or f"{agent.get('name')} {agent.get('description')} oportunidades virales"
+        knowledge_queries = [
+            f"{base_query} dolor audiencia tension emocional retencion",
+            f"{base_query} preguntas frecuentes objeciones conflictos",
+        ]
+        for query in knowledge_queries[:2]:
+            result = _radar_search_knowledge(query, limit=5)
+            knowledge_signals.extend(result.get("items") or [])
+
+    if use_trends:
+        trend_queries = _radar_title_lab_trend_queries(agent, seed_topic, limit=trend_limit)
+        for query in trend_queries:
+            result = _radar_search_tavily(query)
+            if result:
+                trend_signals.extend(_radar_tavily_title_signals(query, result, limit=8))
+        if not trend_signals:
+            warnings.append("Tavily no devolvio tendencias utiles o no esta configurado.")
+
+    if use_competitors:
+        try:
+            _ensure_firebase_initialized()
+            from firebase_admin import firestore
+            db = firestore.client()
+            competitors = _radar_competitors_for_agent(db, principal["uid"], agent_id)
+            competitor_signals, competitor_meta = _youtube_competitor_video_signals(
+                competitors,
+                per_channel_limit=per_channel_limit,
+            )
+            if not competitors:
+                warnings.append("No hay competidores guardados para este agente; guarda canales para mejorar el radar viral.")
+            elif not competitor_signals:
+                warnings.append("No se pudieron leer videos recientes de competidores.")
+        except Exception as exc:
+            warnings.append(f"YouTube competidores no disponible: {str(exc)[:160]}")
+
+    result = _radar_build_viral_opportunities(
+        agent,
+        seed_topic=seed_topic,
+        knowledge_signals=knowledge_signals,
+        trend_signals=trend_signals,
+        competitor_signals=competitor_signals,
+        limit=limit,
+    )
+    result["generationMode"] = "evidence_v3" if (trend_signals or competitor_signals) else "hypothesis_fallback"
+    result["warnings"] = warnings
+    result["costEstimate"] = {
+        "tavilyCredits": _radar_tavily_credit_cost(len(trend_queries)),
+        "tavilyQueries": len(trend_queries),
+        "knowledgeQueries": len(knowledge_queries),
+        "embeddingQueries": len(knowledge_queries),
+        "youtubeQuotaUnits": competitor_meta.get("youtubeQuotaUnits") or 0,
+        "youtubeChannels": competitor_meta.get("channels") or 0,
+        "youtubeVideosAnalyzed": competitor_meta.get("videosAnalyzed") or 0,
+        "notes": ["No crea proyectos ni consume creditos de produccion."],
+    }
+    return {"ok": True, **result}
+
+
+@app.post("/radar/viral-opportunities/save")
+async def radar_viral_opportunities_save(request: Request):
+    principal = _radar_require_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    agent_id = str((body or {}).get("agentId") or "agent_podcast_general").strip()
+    agent = _radar_agent_by_id(agent_id)
+    if not agent:
+        raise HTTPException(status_code=400, detail="invalid radar agentId")
+    opportunity = (body or {}).get("opportunity") if isinstance((body or {}).get("opportunity"), dict) else body or {}
+    if not opportunity.get("title") and not opportunity.get("seoTitle"):
+        raise HTTPException(status_code=400, detail="opportunity title required")
+    seed_topic = _radar_compact_text((body or {}).get("seedTopic") or opportunity.get("seedTopic") or "", 140)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        candidate = _radar_candidate_from_viral_opportunity(agent, opportunity, seed_topic=seed_topic)
+        item = _radar_upsert_library_candidate(db, firestore, principal["uid"], candidate, status="saved")
+        return {"ok": True, "item": _library_public_item(item["itemId"], item), "candidateHash": candidate["candidateHash"]}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200]})
 
 
 @app.get("/radar/competitors")

@@ -254,6 +254,81 @@ PODCAST_TOPIC_PROFILES = [
     },
 ]
 
+PODCAST_VIRAL_CLUSTERS = [
+    {
+        "id": "contacto_cero_ansiedad",
+        "label": "Contacto cero desde ansiedad",
+        "keywords": ["contacto cero", "no contact", "silencio", "bloquear", "no responder"],
+        "pattern": "La audiencia conecta cuando el contacto cero deja de sonar a tecnica y se revela como una lucha interna entre dignidad y esperanza.",
+        "tension": "quiero soltar, pero sigo esperando que vuelva",
+        "titleSeeds": [
+            "Contacto cero no te esta sanando si sigues esperando que vuelva",
+            "El contacto cero que parece amor propio pero todavia es ansiedad",
+            "La parte del contacto cero que nadie quiere admitir",
+        ],
+    },
+    {
+        "id": "amor_propio_dolor",
+        "label": "Amor propio que duele",
+        "keywords": ["amor propio", "autoestima", "dignidad", "valor", "me amo", "me elijo", "madurez"],
+        "pattern": "Funciona cuando amor propio no se presenta como frase bonita, sino como una perdida concreta: dejar de rogar, aceptar migajas o negociar tu valor.",
+        "tension": "se que debo elegirme, pero todavia quiero que me elija",
+        "titleSeeds": [
+            "Amor propio no es decir me amo: es dejar de aceptar migajas",
+            "Cuando eliges tu paz tambien pierdes una fantasia",
+            "La parte del amor propio que mas duele despues de rogar",
+        ],
+    },
+    {
+        "id": "ghosting_validacion",
+        "label": "Ghosting y validacion",
+        "keywords": ["ghosting", "visto", "no responde", "silencio", "historias", "mensaje", "celular"],
+        "pattern": "Alta identificacion: convierte una conducta digital pequena en una herida grande de valor personal, espera y validacion.",
+        "tension": "una notificacion decide si me siento suficiente",
+        "titleSeeds": [
+            "Me dejo en visto pero ve mis historias: la trampa emocional",
+            "Por que esperas una respuesta de quien ya respondio con silencio",
+            "Cuando el silencio de alguien decide tu valor",
+        ],
+    },
+    {
+        "id": "apego_ansioso_certeza",
+        "label": "Apego ansioso y certeza",
+        "keywords": ["apego ansioso", "ansiedad", "dependencia emocional", "limerencia", "certeza", "intensidad"],
+        "pattern": "Retiene porque explica una sensacion cotidiana: necesitar senales constantes y confundir calma con abandono.",
+        "tension": "necesito certeza para no sentir que me abandonan",
+        "titleSeeds": [
+            "No extranas a esa persona: extranas calmar tu ansiedad",
+            "Cuando un mensaje se vuelve una prueba de amor",
+            "Apego ansioso: por que amar se siente como esperar permiso",
+        ],
+    },
+    {
+        "id": "volver_ex_confusion",
+        "label": "El regreso que confunde",
+        "keywords": ["vuelve", "volvio", "regreso", "ex", "buscar", "te busca", "otra vez"],
+        "pattern": "Promete claridad en un momento con carga emocional: cuando alguien reaparece y la audiencia no sabe si es amor, costumbre o control.",
+        "tension": "si vuelve, quiero creer que ahora si significa algo",
+        "titleSeeds": [
+            "Si vuelve cuando ya estabas sanando, escucha esto antes de abrir la puerta",
+            "No siempre vuelve por amor: a veces vuelve por control",
+            "Cuando su regreso se siente como prueba de destino",
+        ],
+    },
+    {
+        "id": "limites_sin_culpa",
+        "label": "Limites sin culpa",
+        "keywords": ["limite", "limites", "culpa", "claridad", "rogar", "paz", "soltar"],
+        "pattern": "Buen arco narrativo: del miedo a perder a alguien a recuperar dignidad, paz y decision.",
+        "tension": "poner un limite se siente como abandonar la historia",
+        "titleSeeds": [
+            "El limite que te cuesta poner porque aun quieres que te elijan",
+            "Cuando pedir claridad se siente como rogar amor",
+            "Poner limites tambien duele cuando todavia amas",
+        ],
+    },
+]
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -1104,6 +1179,408 @@ def infer_search_intent(candidate: dict) -> str:
     if intent == "news":
         return "actualidad"
     return "tema viral"
+
+
+def build_viral_opportunities(
+    agent: dict,
+    *,
+    seed_topic: str = "",
+    knowledge_signals: list[dict] | None = None,
+    trend_signals: list[dict] | None = None,
+    competitor_signals: list[dict] | None = None,
+    limit: int = 6,
+) -> dict:
+    seed = compact_text(seed_topic, 120).strip()
+    knowledge = normalize_knowledge_signals(knowledge_signals or [], limit=5)
+    source_signals = viral_opportunity_source_signals(
+        trend_signals=trend_signals or [],
+        competitor_signals=competitor_signals or [],
+    )
+    groups: dict[str, dict] = {}
+    for signal in source_signals:
+        cluster = viral_opportunity_cluster(agent, signal, seed_topic=seed)
+        cluster_id = cluster["id"]
+        if cluster_id not in groups:
+            groups[cluster_id] = {"cluster": cluster, "signals": []}
+        groups[cluster_id]["signals"].append(signal)
+
+    if not groups:
+        for cluster in fallback_viral_clusters(agent, seed_topic=seed):
+            groups[cluster["id"]] = {"cluster": cluster, "signals": []}
+
+    opportunities = [
+        viral_opportunity_from_group(agent, item["cluster"], item["signals"], seed_topic=seed, knowledge_signals=knowledge)
+        for item in groups.values()
+    ]
+    opportunities = [item for item in opportunities if item.get("title")]
+    opportunities.sort(
+        key=lambda item: (
+            item.get("opportunityScore") or 0,
+            item.get("evidenceScore") or 0,
+            item.get("retentionScore") or 0,
+        ),
+        reverse=True,
+    )
+    opportunities = opportunities[:max(1, min(12, int(limit or 6)))]
+    return {
+        "agentId": agent_id(agent),
+        "agentName": agent_label(agent),
+        "seedTopic": seed,
+        "items": opportunities,
+        "knowledgeSignals": knowledge,
+        "sourceSignals": source_signals[:40],
+        "summary": viral_opportunity_summary(opportunities, source_signals),
+    }
+
+
+def viral_opportunity_source_signals(*, trend_signals: list[dict], competitor_signals: list[dict]) -> list[dict]:
+    out = []
+    seen = set()
+    for raw in (competitor_signals or []) + (trend_signals or []):
+        title = compact_text(raw.get("videoTitle") or raw.get("title") or raw.get("topic") or "", 150)
+        if not title:
+            continue
+        url = str(raw.get("url") or "").strip()
+        key = url or normalize_text(title)
+        if key in seen:
+            continue
+        seen.add(key)
+        source = raw.get("source") or ("youtube_competitor" if raw.get("videoId") or raw.get("channelId") else "tavily_trend")
+        out.append({
+            "source": source,
+            "title": title,
+            "videoTitle": raw.get("videoTitle") or title,
+            "channelTitle": raw.get("channelTitle") or "",
+            "url": url,
+            "domain": raw.get("domain") or source_domain(url),
+            "views": int(raw.get("views") or 0),
+            "viewsPerDay": int(raw.get("viewsPerDay") or 0),
+            "publishedAt": raw.get("publishedAt") or "",
+            "query": raw.get("query") or "",
+            "score": raw.get("score") or 0,
+        })
+    out.sort(key=lambda item: (item.get("viewsPerDay") or 0, item.get("views") or 0, item.get("score") or 0), reverse=True)
+    return out
+
+
+def viral_opportunity_cluster(agent: dict, signal: dict, *, seed_topic: str = "") -> dict:
+    aid = agent_id(agent)
+    text = normalize_text(" ".join([
+        signal.get("title") or "",
+        signal.get("videoTitle") or "",
+        signal.get("channelTitle") or "",
+        seed_topic or "",
+    ]))
+    if aid in PODCAST_AGENT_IDS:
+        best = None
+        best_hits = 0
+        for cluster in PODCAST_VIRAL_CLUSTERS:
+            hits = sum(1 for keyword in cluster.get("keywords", []) if normalize_text(keyword) in text)
+            if hits > best_hits:
+                best = cluster
+                best_hits = hits
+        if best:
+            return best
+        profile = podcast_topic_profile(seed_topic)
+        if profile:
+            return {
+                "id": f"profile_{profile['id']}",
+                "label": clean_seed_topic(seed_topic) or profile["id"].replace("_", " "),
+                "keywords": profile.get("keywords") or [],
+                "pattern": "Oportunidad cercana al territorio emocional del canal, validada por senales externas aunque el cluster no sea canonico.",
+                "tension": "la audiencia busca nombrar algo que vive pero no sabe explicar",
+                "titleSeeds": profile.get("titles") or [],
+            }
+        return {
+            "id": "relaciones_autoengano",
+            "label": clean_seed_topic(seed_topic) or "Relacion y autoengano",
+            "keywords": [],
+            "pattern": "Patron emocional con potencial si se aterriza en una contradiccion concreta, no en un consejo generico.",
+            "tension": "lo que llamo amor puede estar cubriendo miedo, apego o necesidad de validacion",
+            "titleSeeds": [
+                "La verdad incomoda sobre lo que llamas amor",
+                "Cuando amar tambien se parece a perderte",
+                "El patron emocional que repites sin darte cuenta",
+            ],
+        }
+    label = clean_seed_topic(seed_topic) or clean_source_title(signal.get("title") or agent_label(agent))
+    return {
+        "id": f"general_{canonical_title_key(label)[:32]}",
+        "label": label,
+        "keywords": [],
+        "pattern": "Senales externas muestran interes en este territorio; conviene convertirlo en una pregunta concreta con conflicto narrativo.",
+        "tension": "curiosidad, consecuencia y una promesa clara de contexto",
+        "titleSeeds": [
+            f"Lo que nadie esta explicando sobre {label}",
+            f"La verdad incomoda detras de {label}",
+            f"El detalle de {label} que cambia toda la historia",
+        ],
+    }
+
+
+def fallback_viral_clusters(agent: dict, *, seed_topic: str = "") -> list[dict]:
+    if agent_id(agent) in PODCAST_AGENT_IDS:
+        seed = normalize_text(seed_topic)
+        if seed:
+            profile = podcast_topic_profile(seed)
+            if profile:
+                return [viral_opportunity_cluster(agent, {"title": seed_topic}, seed_topic=seed_topic)]
+        return PODCAST_VIRAL_CLUSTERS[:4]
+    return [viral_opportunity_cluster(agent, {"title": seed_topic or agent_label(agent)}, seed_topic=seed_topic)]
+
+
+def viral_opportunity_from_group(
+    agent: dict,
+    cluster: dict,
+    signals: list[dict],
+    *,
+    seed_topic: str = "",
+    knowledge_signals: list[dict] | None = None,
+) -> dict:
+    evidence = viral_opportunity_evidence(signals)
+    evidence_count = len(evidence)
+    max_views_per_day = max([item.get("viewsPerDay") or 0 for item in evidence] or [0])
+    total_views = sum(item.get("views") or 0 for item in evidence)
+    channels = {item.get("channelTitle") for item in evidence if item.get("channelTitle")}
+    trend_count = sum(1 for item in evidence if "tavily" in str(item.get("source") or ""))
+    competitor_count = sum(1 for item in evidence if "youtube" in str(item.get("source") or ""))
+    evidence_score = viral_evidence_score(
+        evidence_count=evidence_count,
+        max_views_per_day=max_views_per_day,
+        total_views=total_views,
+        channel_count=len(channels),
+        trend_count=trend_count,
+        competitor_count=competitor_count,
+    )
+    retention = viral_cluster_retention_score(cluster, evidence, seed_topic=seed_topic)
+    fit = viral_cluster_fit_score(agent, cluster, seed_topic=seed_topic, knowledge_signals=knowledge_signals or [])
+    freshness = viral_freshness_score(evidence)
+    production = 82 if agent_id(agent) in PODCAST_AGENT_IDS else 72
+    opportunity_score = clamp_score(
+        evidence_score * 0.34
+        + retention * 0.26
+        + fit * 0.20
+        + freshness * 0.14
+        + production * 0.06
+    )
+    titles = viral_opportunity_titles(agent, cluster, evidence, seed_topic=seed_topic)
+    recommended_title = titles[0] if titles else cluster.get("label") or seed_topic
+    opportunity_id = candidate_hash(agent_id(agent), recommended_title, f"viral-opportunity-{cluster.get('id')}")
+    return {
+        "opportunityId": opportunity_id,
+        "candidateHash": opportunity_id,
+        "agentId": agent_id(agent),
+        "agentName": agent_label(agent),
+        "title": recommended_title,
+        "seoTitle": compact_text(recommended_title, 70),
+        "topic": cluster.get("label") or seed_topic or recommended_title,
+        "clusterId": cluster.get("id") or "",
+        "cluster": cluster.get("label") or "",
+        "corePattern": cluster.get("pattern") or "",
+        "audienceTension": cluster.get("tension") or "",
+        "whyItCanWork": viral_why_it_can_work(cluster, evidence, evidence_score, retention),
+        "whyNow": viral_why_now(evidence),
+        "suggestedTitles": titles,
+        "evidence": evidence,
+        "evidenceCount": evidence_count,
+        "sourceBreakdown": {
+            "competitorVideos": competitor_count,
+            "webTrends": trend_count,
+            "channels": len(channels),
+            "maxViewsPerDay": max_views_per_day,
+            "totalViews": total_views,
+        },
+        "scores": {
+            "opportunity": opportunity_score,
+            "evidence": evidence_score,
+            "retention": retention,
+            "fit": fit,
+            "freshness": freshness,
+            "productionEase": production,
+            "overall": opportunity_score,
+        },
+        "opportunityScore": opportunity_score,
+        "evidenceScore": evidence_score,
+        "retentionScore": retention,
+        "fitScore": fit,
+        "freshnessScore": freshness,
+        "recommendedFormat": "youtube_long",
+        "riskLevel": "low",
+        "riskReason": "Oportunidad editorial segura; revisar claims si se convierte en guion factual.",
+        "seoKeywords": viral_opportunity_keywords(agent, cluster, recommended_title),
+        "sourceType": "viral_opportunity",
+        "searchIntent": "oportunidad viral basada en evidencia",
+        "knowledgeSignals": knowledge_signals or [],
+    }
+
+
+def viral_opportunity_evidence(signals: list[dict], *, limit: int = 6) -> list[dict]:
+    evidence = []
+    seen = set()
+    for signal in sorted(signals or [], key=lambda item: (item.get("viewsPerDay") or 0, item.get("views") or 0, item.get("score") or 0), reverse=True):
+        title = compact_text(signal.get("videoTitle") or signal.get("title") or "", 150)
+        url = signal.get("url") or ""
+        key = url or normalize_text(title)
+        if not title or key in seen:
+            continue
+        seen.add(key)
+        views_per_day = int(signal.get("viewsPerDay") or 0)
+        views = int(signal.get("views") or 0)
+        evidence.append({
+            "source": signal.get("source") or "",
+            "title": title,
+            "channelTitle": signal.get("channelTitle") or "",
+            "url": url,
+            "domain": signal.get("domain") or source_domain(url),
+            "views": views,
+            "viewsPerDay": views_per_day,
+            "publishedAt": signal.get("publishedAt") or "",
+            "whyRelevant": viral_evidence_reason(signal),
+        })
+        if len(evidence) >= limit:
+            break
+    return evidence
+
+
+def viral_evidence_reason(signal: dict) -> str:
+    views_per_day = int(signal.get("viewsPerDay") or 0)
+    if views_per_day >= 10000:
+        return f"Sobreperforming fuerte: {views_per_day:,} vistas/dia.".replace(",", ".")
+    if views_per_day >= 3000:
+        return f"Buena traccion reciente: {views_per_day:,} vistas/dia.".replace(",", ".")
+    if int(signal.get("views") or 0) >= 100000:
+        return "Volumen alto de interes acumulado."
+    if "tavily" in str(signal.get("source") or ""):
+        return "Senal web util para contexto y busqueda."
+    return "Senal competitiva cercana al nicho."
+
+
+def viral_evidence_score(*, evidence_count: int, max_views_per_day: int, total_views: int, channel_count: int, trend_count: int, competitor_count: int) -> int:
+    score = 18
+    score += min(24, evidence_count * 6)
+    score += min(16, channel_count * 5)
+    score += min(14, trend_count * 4)
+    score += min(18, competitor_count * 5)
+    if max_views_per_day >= 20000:
+        score += 28
+    elif max_views_per_day >= 10000:
+        score += 22
+    elif max_views_per_day >= 3000:
+        score += 16
+    elif max_views_per_day >= 1000:
+        score += 10
+    elif total_views >= 200000:
+        score += 8
+    if evidence_count == 0:
+        score = 28
+    return clamp_score(score)
+
+
+def viral_cluster_retention_score(cluster: dict, evidence: list[dict], *, seed_topic: str = "") -> int:
+    text = normalize_text(" ".join([cluster.get("label") or "", cluster.get("pattern") or "", seed_topic or ""] + [item.get("title") or "" for item in evidence[:4]]))
+    score = 54
+    if any(term in text for term in ["duele", "dolor", "ansiedad", "culpa", "abandono", "rechazo", "silencio"]):
+        score += 16
+    if any(term in text for term in ["verdad", "error", "nadie", "incomoda", "trampa", "admitir"]):
+        score += 12
+    if any(term in text for term in ["contacto cero", "ghosting", "apego", "ex", "amor propio"]):
+        score += 10
+    if evidence:
+        score += min(12, len(evidence) * 3)
+    return clamp_score(score)
+
+
+def viral_cluster_fit_score(agent: dict, cluster: dict, *, seed_topic: str = "", knowledge_signals: list[dict] | None = None) -> int:
+    if agent_id(agent) in PODCAST_AGENT_IDS:
+        text = normalize_text(" ".join([cluster.get("label") or "", cluster.get("pattern") or "", seed_topic or ""]))
+        score = 62
+        for term in ["apego", "contacto cero", "ghosting", "amor propio", "limite", "limites", "ex", "ansiedad"]:
+            if term in text:
+                score += 6
+        if knowledge_signals:
+            score += 6
+        return clamp_score(score)
+    return 72
+
+
+def viral_freshness_score(evidence: list[dict]) -> int:
+    if not evidence:
+        return 45
+    scores = []
+    now = datetime.now(timezone.utc)
+    for item in evidence:
+        published = item.get("publishedAt") or ""
+        try:
+            dt = datetime.fromisoformat(str(published).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            days = max(1, (now - dt).total_seconds() / 86400)
+            if days <= 14:
+                scores.append(88)
+            elif days <= 45:
+                scores.append(76)
+            elif days <= 120:
+                scores.append(62)
+            else:
+                scores.append(48)
+        except Exception:
+            scores.append(58 if "tavily" in str(item.get("source") or "") else 50)
+    return clamp_score(sum(scores) / max(1, len(scores)))
+
+
+def viral_opportunity_titles(agent: dict, cluster: dict, evidence: list[dict], *, seed_topic: str = "") -> list[str]:
+    titles = []
+    for title in cluster.get("titleSeeds") or []:
+        titles.append(title)
+    for item in evidence[:3]:
+        titles.extend(remix_external_title_candidates(agent, item.get("title") or "", seed_topic=seed_topic or cluster.get("label") or "", group="competitor"))
+    return dedupe_title_strings(titles)[:6]
+
+
+def viral_why_it_can_work(cluster: dict, evidence: list[dict], evidence_score: int, retention: int) -> str:
+    if evidence:
+        best = evidence[0]
+        source = best.get("channelTitle") or best.get("domain") or "una fuente externa"
+        metric = f"{best.get('viewsPerDay'):,} vistas/dia".replace(",", ".") if best.get("viewsPerDay") else f"{best.get('views'):,} views".replace(",", ".")
+        return compact_text(
+            f"{cluster.get('pattern')} La senal mas fuerte viene de {source} con {metric}. Evidencia {evidence_score}/100, retencion {retention}/100.",
+            360,
+        )
+    return compact_text(
+        f"{cluster.get('pattern')} Aun necesita validacion externa: usalo como hipotesis editorial y busca evidencia antes de producir caro.",
+        320,
+    )
+
+
+def viral_why_now(evidence: list[dict]) -> str:
+    if not evidence:
+        return "No hay evidencia externa suficiente todavia; oportunidad para explorar manualmente."
+    best = evidence[0]
+    if best.get("viewsPerDay"):
+        return f"Hay traccion medible ahora: {best.get('viewsPerDay'):,} vistas por dia en la senal principal.".replace(",", ".")
+    return "Aparece en fuentes recientes y puede servir como punto de partida editorial."
+
+
+def viral_opportunity_keywords(agent: dict, cluster: dict, title: str) -> list[str]:
+    fake_candidate = {
+        "agentId": agent_id(agent),
+        "agentName": agent_label(agent),
+        "category": agent.get("category") or "",
+        "title": title,
+        "angle": cluster.get("label") or "",
+        "summary": cluster.get("pattern") or "",
+    }
+    return build_seo_keywords(fake_candidate, limit=8)
+
+
+def viral_opportunity_summary(opportunities: list[dict], source_signals: list[dict]) -> dict:
+    return {
+        "opportunities": len(opportunities),
+        "signalsAnalyzed": len(source_signals or []),
+        "topScore": max([item.get("opportunityScore") or 0 for item in opportunities] or [0]),
+        "topEvidenceScore": max([item.get("evidenceScore") or 0 for item in opportunities] or [0]),
+        "topViewsPerDay": max([item.get("sourceBreakdown", {}).get("maxViewsPerDay") or 0 for item in opportunities] or [0]),
+    }
 
 
 def build_title_lab(
