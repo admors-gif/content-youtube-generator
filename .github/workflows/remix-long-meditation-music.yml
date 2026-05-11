@@ -1,0 +1,250 @@
+name: Remix long meditation music
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: "Firestore project id"
+        required: true
+      force_procedural:
+        description: "Ignore curated assets and generate procedural ambient bed"
+        required: false
+        default: "false"
+
+concurrency:
+  group: remix-long-meditation-music-${{ github.event.inputs.project_id }}
+  cancel-in-progress: false
+
+jobs:
+  remix:
+    name: Rebuild final video with background music only
+    runs-on: [self-hosted, linux, vps, docker]
+    timeout-minutes: 35
+
+    steps:
+      - name: Mix music into existing masters and upload final
+        run: |
+          set -euo pipefail
+          PID="${{ github.event.inputs.project_id }}"
+          FORCE_PROCEDURAL="${{ github.event.inputs.force_procedural }}"
+          docker exec -i content-factory python - "$PID" "$FORCE_PROCEDURAL" <<'PY'
+          import json
+          import math
+          import subprocess
+          import sys
+          import unicodedata
+          from pathlib import Path
+
+          import api
+          from scripts import factory
+
+          def truthy(value):
+              return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+          def normalize(value):
+              raw = unicodedata.normalize("NFKD", str(value or ""))
+              return "".join(ch for ch in raw if not unicodedata.combining(ch)).lower()
+
+          def select_manifest_track(title, project_data):
+              manifest_path = factory.AUTOHYPNOSIS_MUSIC_DIR / "manifest.json"
+              if not manifest_path.is_file():
+                  return None
+              try:
+                  manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+              except Exception:
+                  return None
+              tracks = manifest.get("tracks") if isinstance(manifest, dict) else []
+              if not isinstance(tracks, list):
+                  return None
+
+              personalization = project_data.get("personalization") or {}
+              search_text = normalize(" ".join([
+                  title or "",
+                  personalization.get("purpose") or "",
+                  personalization.get("anchor_phrase") or personalization.get("anchorPhrase") or "",
+              ]))
+              best = None
+              best_key = (-math.inf, math.inf)
+              default = None
+              for index, track in enumerate(tracks):
+                  if not isinstance(track, dict):
+                      continue
+                  formats = track.get("formats") or []
+                  if formats and factory.LONG_MEDITATION_FORMAT not in formats:
+                      continue
+                  filename = Path(str(track.get("file") or "")).name
+                  if not filename or not (factory.AUTOHYPNOSIS_MUSIC_DIR / filename).is_file():
+                      continue
+                  if track.get("default") and default is None:
+                      default = {**track, "file": filename}
+
+                  score = 0.0
+                  first_pos = math.inf
+                  for keyword in track.get("keywords") or []:
+                      kw = normalize(keyword)
+                      if not kw or kw not in search_text:
+                          continue
+                      pos = search_text.find(kw)
+                      first_pos = min(first_pos, pos)
+                      score += 2.0 if " " in kw else 1.0
+                  if score > best_key[0] or (score == best_key[0] and first_pos < best_key[1]):
+                      best_key = (score, first_pos)
+                      best = {**track, "file": filename}
+
+              selected = best if best_key[0] > 0 else default
+              if not selected:
+                  return None
+              volume = selected.get("volume_db")
+              if isinstance(volume, dict):
+                  volume_db = volume.get(factory.LONG_MEDITATION_FORMAT, -19)
+              else:
+                  volume_db = volume if volume is not None else -19
+              try:
+                  volume_db = float(volume_db)
+              except Exception:
+                  volume_db = -19.0
+              return {
+                  "enabled": True,
+                  "asset": factory.AUTOHYPNOSIS_MUSIC_DIR / selected["file"],
+                  "volume_db": max(-36.0, min(-16.0, volume_db)),
+                  "track_id": selected.get("id") or "",
+                  "label": selected.get("label") or selected.get("id") or selected["file"],
+                  "source": "manifest_fallback",
+              }
+
+          def remux(master_visual, mixed_audio, output):
+              video_ok, video_dur, video_err = api._is_valid_media_file(master_visual, min_duration_seconds=30)
+              audio_ok, audio_dur, audio_err = api._is_valid_media_file(mixed_audio, min_duration_seconds=30)
+              if not video_ok or not audio_ok:
+                  raise SystemExit(f"invalid masters: video={video_err or video_dur}, audio={audio_err or audio_dur}")
+
+              audio_deficit = audio_dur - video_dur
+              if audio_deficit > 0.05:
+                  cmd = [
+                      "ffmpeg", "-y",
+                      "-i", str(master_visual),
+                      "-i", str(mixed_audio),
+                      "-filter_complex", f"[0:v]tpad=stop_mode=clone:stop_duration={audio_deficit + 0.5:.3f}[v]",
+                      "-map", "[v]", "-map", "1:a",
+                      "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                      "-pix_fmt", "yuv420p", "-r", "30",
+                      "-c:a", "aac", "-b:a", "192k",
+                      "-shortest", "-movflags", "+faststart",
+                      str(output),
+                  ]
+              else:
+                  cmd = [
+                      "ffmpeg", "-y",
+                      "-i", str(master_visual),
+                      "-i", str(mixed_audio),
+                      "-c:v", "copy",
+                      "-c:a", "aac", "-b:a", "192k",
+                      "-shortest", "-movflags", "+faststart",
+                      str(output),
+                  ]
+              result = subprocess.run(cmd, capture_output=True, text=True, timeout=2100)
+              if result.returncode != 0:
+                  raise SystemExit(f"ffmpeg remux failed: {(result.stderr or '')[-500:]}")
+
+              final_ok, final_dur, final_err = api._is_valid_media_file(output, min_duration_seconds=30)
+              if not final_ok:
+                  raise SystemExit(f"final invalid: {final_err or final_dur}")
+              return final_dur
+
+          project_id = sys.argv[1]
+          force_procedural = truthy(sys.argv[2] if len(sys.argv) > 2 else "")
+
+          api._ensure_firebase_initialized()
+          from firebase_admin import firestore
+
+          db = firestore.client()
+          doc_ref = db.collection("projects").document(project_id)
+          snap = doc_ref.get()
+          if not snap.exists:
+              raise SystemExit(f"project not found: {project_id}")
+
+          data = snap.to_dict() or {}
+          folder = data.get("videoFolder") or ""
+          if not folder:
+              raise SystemExit("project has no videoFolder")
+          video_dir = Path("/app/output/videos") / folder
+          if not video_dir.is_dir():
+              raise SystemExit(f"video folder not found: {video_dir}")
+
+          master_visual = video_dir / "master_visual.mp4"
+          master_audio = video_dir / "master_audio.mp3"
+          if not master_visual.is_file() or not master_audio.is_file():
+              raise SystemExit("master_visual.mp4 or master_audio.mp3 missing")
+
+          # Firestore projects may not carry format in older runs; infer it from the agent.
+          if not data.get("format") and data.get("agentId") == "agent_meditacion_larga":
+              data["format"] = factory.LONG_MEDITATION_FORMAT
+
+          existing_mixed = video_dir / "master_audio_with_music.mp3"
+          mix_source = ""
+          if existing_mixed.is_file():
+              ok, dur, _ = api._is_valid_media_file(existing_mixed, min_duration_seconds=30)
+              if ok:
+                  mixed_audio = existing_mixed
+                  mix_source = "existing_master_audio_with_music"
+              else:
+                  mixed_audio = None
+          else:
+              mixed_audio = None
+
+          if mixed_audio is None:
+              if force_procedural:
+                  music_cfg = {"enabled": True, "procedural": True, "volume_db": -24.0}
+                  mix_source = "forced_procedural"
+              else:
+                  music_cfg = factory._get_autohypnosis_music_config(data)
+                  mix_source = "project_metadata"
+                  if not music_cfg.get("enabled"):
+                      selected = select_manifest_track(data.get("title") or data.get("topic") or "", data)
+                      if selected:
+                          music_cfg = selected
+                          mix_source = f"manifest:{selected.get('track_id') or selected.get('label')}"
+                      else:
+                          music_cfg = {"enabled": True, "procedural": True, "volume_db": -24.0}
+                          mix_source = "procedural_fallback"
+              mixed_audio = factory._mix_background_music(master_audio, video_dir, music_cfg)
+              if mixed_audio == master_audio:
+                  raise SystemExit("music mix did not produce a new audio bed")
+
+          final_path = video_dir / f"FINAL_RECOVERED_WITH_MUSIC_{folder}.mp4"
+          final_duration = remux(master_visual, mixed_audio, final_path)
+          storage = api._upload_video_to_storage(final_path, project_id)
+          if not storage:
+              raise SystemExit("storage upload failed")
+
+          doc_ref.update({
+              "status": "completed",
+              "progress.percent": 100,
+              "progress.stepName": "Entrega recuperada con música",
+              "videoPath": str(final_path),
+              "videoFolder": folder,
+              "videoStoragePath": storage["gs_path"],
+              "videoUrl": storage["signed_url"],
+              "videoUrlExpiresAt": firestore.SERVER_TIMESTAMP,
+              "videoSizeMB": round(final_path.stat().st_size / (1024 * 1024), 1),
+              "videoDurationSeconds": round(final_duration, 1),
+              "backgroundMusicRecovered": True,
+              "backgroundMusicRecoveredAt": firestore.SERVER_TIMESTAMP,
+              "backgroundMusicRecovery": {
+                  "mixedAudio": mixed_audio.name,
+                  "source": mix_source,
+                  "finalFile": final_path.name,
+              },
+          })
+
+          print(json.dumps({
+              "ok": True,
+              "projectId": project_id,
+              "source": mix_source,
+              "mixedAudio": mixed_audio.name,
+              "final": final_path.name,
+              "durationSeconds": round(final_duration, 1),
+              "sizeMB": round(final_path.stat().st_size / (1024 * 1024), 1),
+              "storagePath": storage["gs_path"],
+          }, ensure_ascii=False, indent=2))
+          PY
