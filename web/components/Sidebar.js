@@ -300,6 +300,7 @@ export default function Sidebar() {
         ...NAV.slice(0, 2),
         ...(RADAR_ENABLED ? [{ id: "radar", icon: "trendingUp", label: "Radar", href: "/dashboard/radar" }] : []),
         ...(KNOWLEDGE_ENABLED ? [{ id: "knowledge", icon: "bookOpen", label: "Conocimiento", href: "/dashboard/knowledge" }] : []),
+        { id: "topics", icon: "fileText", label: "Temas", href: "/dashboard/topics" },
         ...NAV.slice(2),
         { id: "admin", icon: "lock", label: "Admin", href: "/dashboard/admin" },
       ]

@@ -3615,9 +3615,12 @@ def _radar_title_lab_prompt(
         "Objetivo: generar titulos NUEVOS con alta probabilidad de retencion para el agente indicado.\n\n"
         "Reglas criticas:\n"
         "- No hagas sustitucion mecanica de la idea semilla en plantillas.\n"
+        "- No repitas la misma estructura entre items; cada titulo debe tener una promesa distinta.\n"
+        "- Si hay señales externas, cada item debe transformar un video/tendencia concreta en un angulo nuevo y visible.\n"
         "- Primero interpreta la tension psicologica/narrativa del tema.\n"
         "- Usa los competidores solo como evidencia de demanda; no copies sus titulos.\n"
         "- Si una frase suena rara con la semilla, descartala.\n"
+        "- Evita frases comodin como 'tu audiencia si quiere escuchar' o titulos que solo cambian una palabra.\n"
         "- Titulos en español natural, 38-78 caracteres cuando sea posible.\n"
         "- Mantén el tono del agente. Para 'Esto no es amor': noir emocional, apego, limites, ruptura, dignidad; evita sonar clinico o generico.\n"
         "- No prometas curas ni diagnosticos.\n"
@@ -4090,6 +4093,8 @@ def _radar_candidate_from_title_lab_option(agent: dict, option: dict, *, seed_to
 
 def _library_public_item(doc_id: str, data: dict) -> dict:
     risk = data.get("risk") or {}
+    candidate = data.get("candidate") or {}
+    title_lab = candidate.get("titleLab") or data.get("titleLab") or {}
     return {
         "itemId": doc_id,
         "type": "idea",
@@ -4103,6 +4108,8 @@ def _library_public_item(doc_id: str, data: dict) -> dict:
         "radarIntent": data.get("intent") or data.get("radarIntent") or RADAR_DEFAULT_INTENT,
         "candidateHash": data.get("candidateHash") or "",
         "editorialScore": data.get("editorialScore") or (data.get("scores") or {}).get("overall") or 0,
+        "scores": data.get("scores") or candidate.get("scores") or {},
+        "titleLab": title_lab,
         "riskLevel": risk.get("level") or data.get("riskLevel") or "low",
         "riskReason": risk.get("reason") or data.get("riskReason") or "",
         "recommendedFormat": data.get("recommendedFormat") or "youtube_long",

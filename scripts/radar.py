@@ -1317,11 +1317,20 @@ def title_lab_external_options(
     limit: int = 5,
 ) -> list[dict]:
     options = []
+    seen_titles = set()
     for signal in signals[:limit]:
         source_title = compact_text(signal.get("title") or signal.get("videoTitle") or signal.get("topic") or "", 120)
         if not source_title:
             continue
-        remixed = remix_external_title(agent, source_title, seed_topic=seed_topic, group=group)
+        remixed = ""
+        for candidate_title in remix_external_title_candidates(agent, source_title, seed_topic=seed_topic, group=group):
+            key = normalize_text(candidate_title)
+            if key and key not in seen_titles:
+                remixed = candidate_title
+                seen_titles.add(key)
+                break
+        if not remixed:
+            continue
         option = title_lab_option(
             agent,
             remixed,
@@ -1345,26 +1354,128 @@ def title_lab_external_options(
 
 
 def remix_external_title(agent: dict, source_title: str, *, seed_topic: str = "", group: str = "trend") -> str:
+    return remix_external_title_candidates(agent, source_title, seed_topic=seed_topic, group=group)[0]
+
+
+def remix_external_title_candidates(agent: dict, source_title: str, *, seed_topic: str = "", group: str = "trend") -> list[str]:
     seed = clean_seed_topic(seed_topic)
     text = normalize_text(source_title)
     aid = agent_id(agent)
     if aid in PODCAST_AGENT_IDS:
+        titles = remix_podcast_external_title_candidates(source_title, seed_topic=seed, group=group)
+        if titles:
+            return titles
         if seed and "contacto cero" in normalize_text(seed):
             if "error" in text:
-                return "El error que arruina el contacto cero aunque parezca fuerza"
+                return ["El error que arruina el contacto cero aunque parezca fuerza"]
             if "no contact" in text or "contacto cero" in text:
-                return "Contacto cero no funciona si lo haces desde la esperanza"
-            return f"{seed}: la parte emocional que casi nadie te explica"
+                return ["Contacto cero no funciona si lo haces desde la esperanza"]
+            return [f"{seed}: la parte emocional que casi nadie te explica"]
         if "ex" in text:
-            return "No extrañas a tu ex: extrañas la ansiedad que te daba"
+            return ["No extrañas a tu ex: extrañas la ansiedad que te daba"]
         if "silencio" in text or "visto" in text or "ghost" in text:
-            return "Cuando el silencio de alguien decide tu valor"
+            return ["Cuando el silencio de alguien decide tu valor"]
         if seed:
-            return f"{seed}: la verdad incomoda que tu audiencia si quiere escuchar"
-        return "La verdad incomoda sobre amar desde la ansiedad"
+            return [f"{seed}: lo que esta señal revela sobre tu forma de amar"]
+        return ["La verdad incomoda sobre amar desde la ansiedad"]
     if seed:
-        return f"{seed}: lo que esta tendencia revela de verdad"
-    return f"{clean_source_title(source_title)}: explicado con un angulo nuevo"
+        return [f"{seed}: lo que esta tendencia revela de verdad"]
+    return [f"{clean_source_title(source_title)}: explicado con un angulo nuevo"]
+
+
+def remix_podcast_external_title_candidates(source_title: str, *, seed_topic: str = "", group: str = "trend") -> list[str]:
+    seed = clean_seed_topic(seed_topic)
+    seed_norm = normalize_text(seed)
+    topic = seed or "Este patron"
+    topic_mid = lower_first(topic)
+    text = normalize_text(source_title)
+    source = clean_source_title(source_title)
+    source_short = lower_first(compact_text(source, 46))
+    titles = []
+
+    def add(title: str) -> None:
+        clean = compact_text(title, 110).strip(" .,:;")
+        if clean:
+            titles.append(clean)
+
+    if seed_norm and "contacto cero" in seed_norm:
+        if any(term in text for term in ["error", "mistake", "equivoc"]):
+            add("El error que arruina el contacto cero aunque parezca fuerza")
+        if any(term in text for term in ["relacion sana", "relación sana", "healthy relationship", "clave"]):
+            add("Contacto cero tambien es aprender a elegir una relacion sana")
+        if any(term in text for term in ["dejar ser", "dejar ir", "suelta", "soltar", "let go"]):
+            add("Contacto cero no es desaparecer: es dejar de perseguir respuestas")
+        if any(term in text for term in ["historia", "borrar", "memoria"]):
+            add("La parte de tu historia que el contacto cero te obliga a mirar")
+        if any(term in text for term in ["senal", "señal", "signo", "abuelo"]):
+            add("La señal que confundes con destino cuando estas en contacto cero")
+        if any(term in text for term in ["buenas cosas", "good things", "mereces"]):
+            add("Contacto cero es recordar que todavia pueden pasarte cosas buenas")
+        add(f"Contacto cero: el patron detras de {source_short}")
+        return dedupe_title_strings(titles)
+
+    if seed_norm and any(term in seed_norm for term in ["amor propio", "autoestima", "dignidad", "autovalor"]):
+        if any(term in text for term in ["me amo", "aceptar", "acepto", "migaja"]):
+            add("Amor propio no es decir me amo: es dejar de aceptar migajas")
+        if any(term in text for term in ["dejar ser", "dejar ir", "suelta", "soltar", "let go", "dejar de aceptar"]):
+            add("Amor propio tambien es dejar de perseguir lo que ya se fue")
+        if any(term in text for term in ["relacion sana", "relación sana", "pareja", "clave", "healthy relationship"]):
+            add("La clave de amor propio para no perderte en una relacion")
+        if any(term in text for term in ["historia", "borrar", "parte de mi", "memoria"]):
+            add("La parte de tu historia que el amor propio te obliga a mirar")
+        if any(term in text for term in ["buenas cosas", "good things", "pueden pasar", "mereces"]):
+            add("Amor propio es recordar que todavia pueden pasarte cosas buenas")
+        if any(term in text for term in ["senal", "señal", "signo", "abuelo"]):
+            add("La señal que te recuerda volver a ti cuando dudas de tu valor")
+        if any(term in text for term in ["madurez", "mature"]):
+            add("Amor propio no es madurez perfecta: es dejar de aceptarlo todo")
+        if any(term in text for term in ["me elijo", "elijo otra vez", "elegirme", "choose myself"]):
+            add("Me elijo otra vez: amor propio cuando volver tambien dolia")
+        if any(term in text for term in ["desamor", "desapego", "heartbreak"]):
+            add("Y un dia sueltas: amor propio despues del desamor")
+        add(f"Amor propio: lo que {source_short} revela sobre tu valor")
+        return dedupe_title_strings(titles)
+
+    if seed_norm and any(term in seed_norm for term in ["ghosting", "visto", "silencio", "no responde"]):
+        if any(term in text for term in ["historia", "borrar", "memoria"]):
+            add("La historia que inventas cuando alguien no responde")
+        if any(term in text for term in ["senal", "señal", "signo"]):
+            add("La señal que buscas cuando el silencio te dispara ansiedad")
+        if any(term in text for term in ["buenas cosas", "mereces"]):
+            add("Despues del ghosting tambien pueden pasarte cosas buenas")
+        add(f"Ghosting: lo que {source_short} revela sobre tu ansiedad")
+        return dedupe_title_strings(titles)
+
+    if seed_norm and any(term in seed_norm for term in ["apego ansioso", "ansiedad", "dependencia emocional"]):
+        if any(term in text for term in ["relacion sana", "relación sana", "clave", "pareja"]):
+            add("La clave que tu apego ansioso necesita para amar sin perseguir")
+        if any(term in text for term in ["dejar ser", "dejar ir", "suelta", "soltar"]):
+            add("Apego ansioso: por que soltar se siente como perder amor")
+        if any(term in text for term in ["historia", "borrar", "memoria"]):
+            add("La parte de tu historia que activa tu apego ansioso")
+        add(f"Apego ansioso: el patron detras de {source_short}")
+        return dedupe_title_strings(titles)
+
+    if seed:
+        if any(term in text for term in ["relacion", "relación", "pareja", "clave"]):
+            add(f"La clave de {topic_mid} para no perderte cuando amas")
+        if any(term in text for term in ["dejar", "suelta", "soltar", "aceptar"]):
+            add(f"{topic}: cuando soltar tambien es elegirte")
+        if any(term in text for term in ["historia", "borrar", "memoria"]):
+            add(f"La parte de tu historia que {topic_mid} te obliga a mirar")
+        if any(term in text for term in ["buenas cosas", "mereces", "good things"]):
+            add(f"{topic}: recordar que todavia pueden pasarte cosas buenas")
+        add(f"{topic}: el patron emocional detras de {source_short}")
+        return dedupe_title_strings(titles)
+
+    add(f"Lo que {source_short} revela sobre tu forma de amar")
+    add("La verdad incomoda sobre amar desde la ansiedad")
+    return dedupe_title_strings(titles)
+
+
+def lower_first(value: str) -> str:
+    text = str(value or "")
+    return text[:1].lower() + text[1:] if text else ""
 
 
 def score_title_lab_option(agent: dict, title: str, *, seed_topic: str = "", group: str = "seed") -> dict:

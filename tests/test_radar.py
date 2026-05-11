@@ -193,6 +193,51 @@ def test_title_lab_adds_trend_and_competitor_groups_without_copying_verbatim():
     assert by_group["competitor"]["items"][0]["inspiredBy"]["channelTitle"] == "Competitor"
 
 
+def test_title_lab_external_groups_remix_each_signal_for_amor_propio():
+    lab = build_title_lab(
+        PODCAST_AGENT,
+        seed_topic="amor propio",
+        trend_signals=[
+            {"title": "Se llama Madurez y Amor Propio"},
+            {"title": "Me Elijo Otra Vez | Volver a mi tambien es amor"},
+            {"title": "El amor propio no es solo decir me amo. Es dejar de aceptar ..."},
+        ],
+        competitor_signals=[
+            {
+                "videoTitle": "Amar tambien es dejar ser",
+                "channelTitle": "Se Regalan Dudas Podcast",
+                "url": "https://youtube.com/watch?v=1",
+                "viewsPerDay": 12000,
+            },
+            {
+                "videoTitle": "Esta es la clave para una relacion sana",
+                "channelTitle": "Se Regalan Dudas Podcast",
+                "url": "https://youtube.com/watch?v=2",
+                "viewsPerDay": 7000,
+            },
+            {
+                "videoTitle": "Las partes de mi historia que me gustaria borrar",
+                "channelTitle": "Se Regalan Dudas Podcast",
+                "url": "https://youtube.com/watch?v=3",
+                "viewsPerDay": 4500,
+            },
+        ],
+        seed_limit=3,
+        adjacent_limit=3,
+    )
+
+    by_group = {group["id"]: group for group in lab["groups"]}
+    competitor_titles = [item["title"].lower() for item in by_group["competitor"]["items"]]
+    trend_titles = [item["title"].lower() for item in by_group["trend"]["items"]]
+
+    assert len(competitor_titles) == len(set(competitor_titles))
+    assert len(trend_titles) == len(set(trend_titles))
+    assert not any("tu audiencia si quiere escuchar" in title for title in competitor_titles + trend_titles)
+    assert any("perderte" in title or "relacion" in title for title in competitor_titles)
+    assert any("historia" in title for title in competitor_titles)
+    assert any("madurez" in title or "me elijo" in title or "migajas" in title for title in trend_titles)
+
+
 def test_news_candidate_with_single_source_requires_medium_risk():
     candidate = shape_candidate(
         agent=NEWS_AGENT,
