@@ -1397,15 +1397,33 @@ def _completed_project_has_valid_delivery(project: dict, min_duration_seconds: f
 
 def _remux_recovered_final(video_dir: Path, safe_title: str) -> tuple[Path | None, dict]:
     """
-    Repara un proyecto que tiene master_visual/master_audio validos pero FINAL corrupto.
+    Repara un proyecto que tiene master_visual/audio maestro validos pero FINAL corrupto.
+    Si existe master_audio_with_music.mp3, se prefiere sobre master_audio.mp3
+    para no rescatar meditaciones largas con voz seca.
     No llama APIs externas: solo FFmpeg local dentro del contenedor.
     """
     master_visual = video_dir / "master_visual.mp4"
-    master_audio = video_dir / "master_audio.mp3"
-    info = {"used": False, "reason": "", "video_duration": 0.0, "audio_duration": 0.0}
+    dry_audio = video_dir / "master_audio.mp3"
+    mixed_audio = video_dir / "master_audio_with_music.mp3"
+    master_audio = mixed_audio if mixed_audio.is_file() else dry_audio
+    info = {
+        "used": False,
+        "reason": "",
+        "video_duration": 0.0,
+        "audio_duration": 0.0,
+        "audio_source": master_audio.name,
+        "used_music_mix": master_audio.name == "master_audio_with_music.mp3",
+    }
 
     video_ok, video_dur, video_err = _is_valid_media_file(master_visual, min_duration_seconds=5)
     audio_ok, audio_dur, audio_err = _is_valid_media_file(master_audio, min_duration_seconds=5)
+    if not audio_ok and master_audio == mixed_audio:
+        dry_ok, dry_dur, dry_err = _is_valid_media_file(dry_audio, min_duration_seconds=5)
+        if dry_ok:
+            master_audio = dry_audio
+            audio_ok, audio_dur, audio_err = dry_ok, dry_dur, dry_err
+            info["audio_source"] = master_audio.name
+            info["used_music_mix"] = False
     info.update({
         "video_duration": round(video_dur, 3),
         "audio_duration": round(audio_dur, 3),
@@ -1414,7 +1432,8 @@ def _remux_recovered_final(video_dir: Path, safe_title: str) -> tuple[Path | Non
         info["reason"] = f"invalid masters: video={video_err or video_dur}, audio={audio_err or audio_dur}"
         return None, info
 
-    output = video_dir / f"FINAL_RECOVERED_{safe_title}.mp4"
+    prefix = "FINAL_RECOVERED_WITH_MUSIC" if info.get("used_music_mix") else "FINAL_RECOVERED"
+    output = video_dir / f"{prefix}_{safe_title}.mp4"
     audio_deficit = audio_dur - video_dur
     needs_pad = audio_deficit > 0.05
 
@@ -9591,7 +9610,11 @@ async def recover_from_disk(project_id: str, request: Request):
         update_payload = {
             "status": "completed",
             "progress.percent": 100,
-            "progress.stepName": "Entrega recuperada correctamente",
+            "progress.stepName": (
+                "Entrega recuperada con música"
+                if recovery_info.get("used_music_mix")
+                else "Entrega recuperada correctamente"
+            ),
             "videoPath": str(final_path),
             "videoFolder": safe_title,
             "hasSubtitles": has_subs,
@@ -10013,6 +10036,7 @@ def run_production(project_id):
             kb_dir = Path(f"/app/output/videos/{safe_title}/kenburns")
             luma_dir = Path(f"/app/output/videos/{safe_title}/luma_clips")
             master_audio = Path(f"/app/output/videos/{safe_title}/master_audio.mp3")
+            master_audio_with_music = Path(f"/app/output/videos/{safe_title}/master_audio_with_music.mp3")
             master_visual = Path(f"/app/output/videos/{safe_title}/master_visual.mp4")
             
             while not stop_monitoring.is_set():
@@ -10037,6 +10061,8 @@ def run_production(project_id):
                                 update_progress(82, f"Movimiento premium: {luma_count}", "assembling")
                     if master_audio.exists() and master_audio.stat().st_size > 0:
                         update_progress(62, "Mezcla de audio lista", "assembling")
+                    if master_audio_with_music.exists() and master_audio_with_music.stat().st_size > 0:
+                        update_progress(64, "Mezcla de audio con música lista", "assembling")
                     if master_visual.exists() and master_visual.stat().st_size > 0:
                         update_progress(86, "Montaje final en curso", "assembling")
                     valid_final, _has_subs, _invalid = _pick_valid_final_video(
@@ -10073,15 +10099,28 @@ def run_production(project_id):
             log_label="factory-full",
         )
 
+        video_dir = Path(f"/app/output/videos/{safe_title}")
+        subprocess_recovery_info = None
         if returncode != 0:
-            update_progress(35, f"Error durante el montaje final", "error")
             print(f"STDERR: {stderr_tail}")
-            return
+            print("   🔧 factory.py terminó con error; intentando recuperación automática desde masters", flush=True)
+            remuxed_after_error, subprocess_recovery_info = _remux_recovered_final(video_dir, safe_title)
+            if remuxed_after_error:
+                step_name = (
+                    "Película recuperada con música"
+                    if subprocess_recovery_info.get("used_music_mix")
+                    else "Película recuperada desde masters"
+                )
+                update_progress(90, step_name, "assembling")
+                print(f"   ✅ Recuperación automática post-error: {remuxed_after_error.name} ({subprocess_recovery_info})", flush=True)
+            else:
+                update_progress(35, "Error durante el montaje final", "error")
+                print(f"   ❌ Recuperación automática post-error falló: {subprocess_recovery_info}", flush=True)
+                return
         
         # ═══════════════════════════════════════════
         # PASO EXTRA: Subtítulos explícitos (fallback)
         # ═══════════════════════════════════════════
-        video_dir = Path(f"/app/output/videos/{safe_title}")
         final_candidate, candidate_has_subs, invalid_candidates = _pick_valid_final_video(video_dir)
         
         if not candidate_has_subs and not is_long_meditation_project:
