@@ -1,0 +1,118 @@
+name: Find recent projects
+
+on:
+  workflow_dispatch:
+    inputs:
+      title_contains:
+        description: "Optional title text to filter, case-insensitive"
+        required: false
+        default: ""
+      agent_contains:
+        description: "Optional agent text to filter, case-insensitive"
+        required: false
+        default: ""
+      limit:
+        description: "How many recent projects to inspect"
+        required: false
+        default: "20"
+
+concurrency:
+  group: find-recent-projects
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Print sanitized recent project list
+    runs-on: [self-hosted, linux, vps, docker]
+    timeout-minutes: 5
+
+    steps:
+      - name: Query Firestore from API container
+        run: |
+          set -euo pipefail
+          TITLE_FILTER="${{ github.event.inputs.title_contains }}"
+          AGENT_FILTER="${{ github.event.inputs.agent_contains }}"
+          LIMIT="${{ github.event.inputs.limit }}"
+          docker exec -i content-factory python - "$TITLE_FILTER" "$AGENT_FILTER" "$LIMIT" <<'PY'
+          import json
+          import sys
+
+          title_filter = (sys.argv[1] or "").strip().lower()
+          agent_filter = (sys.argv[2] or "").strip().lower()
+          try:
+              limit = max(1, min(100, int(sys.argv[3] or "20")))
+          except Exception:
+              limit = 20
+
+          import api
+          from firebase_admin import firestore
+
+          api._ensure_firebase_initialized()
+          db = firestore.client()
+
+          query = (
+              db.collection("projects")
+              .order_by("createdAt", direction=firestore.Query.DESCENDING)
+              .limit(limit)
+          )
+
+          projects = []
+          for doc in query.stream():
+              data = doc.to_dict() or {}
+              title = data.get("title") or ""
+              agent_id = data.get("agentId") or ""
+              agent_file = data.get("agentFile") or ""
+              haystack = " ".join([title, agent_id, agent_file]).lower()
+              if title_filter and title_filter not in title.lower():
+                  continue
+              if agent_filter and agent_filter not in haystack:
+                  continue
+
+              progress = data.get("progress") or {}
+              scenes = data.get("scenes") if isinstance(data.get("scenes"), list) else []
+              thumbnails = data.get("thumbnails") if isinstance(data.get("thumbnails"), list) else []
+              shorts = data.get("shorts") if isinstance(data.get("shorts"), list) else []
+
+              created = data.get("createdAt")
+              updated = data.get("updatedAt")
+              completed = data.get("completedAt")
+
+              def ts(value):
+                  try:
+                      return value.isoformat()
+                  except Exception:
+                      return str(value) if value else ""
+
+              projects.append({
+                  "projectId": doc.id,
+                  "title": title,
+                  "agentId": agent_id,
+                  "agentFile": agent_file,
+                  "status": data.get("status") or "",
+                  "progressPercent": progress.get("percent"),
+                  "progressStep": progress.get("stepName") or "",
+                  "scenesCount": len(scenes),
+                  "readyImages": sum(1 for s in scenes if (s or {}).get("imageUrl") or (s or {}).get("image")),
+                  "hasVideoUrl": bool(data.get("videoUrl")),
+                  "videoFolder": data.get("videoFolder") or "",
+                  "videoSizeMB": data.get("videoSizeMB"),
+                  "videoDurationSeconds": data.get("videoDurationSeconds"),
+                  "thumbnailsCount": len(thumbnails),
+                  "shortsCount": len(shorts),
+                  "hasProductionLock": bool(data.get("productionLockId")),
+                  "createdAt": ts(created),
+                  "updatedAt": ts(updated),
+                  "completedAt": ts(completed),
+              })
+
+          print(json.dumps({
+              "ok": True,
+              "filters": {
+                  "title_contains": title_filter,
+                  "agent_contains": agent_filter,
+                  "limit": limit,
+              },
+              "count": len(projects),
+              "projects": projects,
+          }, ensure_ascii=False, indent=2))
+          PY
