@@ -45,9 +45,14 @@ const FILTERS = [
 
 function ProjectRow({ project, onOpen, onDelete, fadeClass }) {
   const agent = getAgent(project.agentId);
-  const agentName = agent?.name || project.agentId?.replace("agent_", "")?.replace(/_/g, " ") || "Sin agente";
-  const color = getAgentColor(project.agentId);
-  const mono = getMonogram(project.agentId);
+  const agentName =
+    agent?.name ||
+    project.agentName ||
+    project.customAgent?.name ||
+    project.agentId?.replace("agent_", "")?.replace("custom_", "")?.replace(/_/g, " ") ||
+    "Sin agente";
+  const color = agent?.color || project.agentColor || project.customAgent?.color || getAgentColor(project.agentId);
+  const mono = project.agentMonogram || project.customAgent?.monogram || getMonogram(project.agentId);
 
   const bucket = project.deliveryRecoverableFromDisk
     ? { label: "ENTREGA PENDIENTE", cls: "cf-badge--warn", animate: false }

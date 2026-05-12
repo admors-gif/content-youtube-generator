@@ -74,6 +74,14 @@ from scripts.knowledge import (
     search_filter as _knowledge_search_filter,
     stable_book_id as _knowledge_book_id,
 )
+from scripts.custom_agents import (
+    TEMPLATE_DEFINITIONS as CUSTOM_AGENT_TEMPLATES,
+    build_agent_record as _custom_build_agent_record,
+    build_test_preview as _custom_build_test_preview,
+    compile_prompt as _custom_compile_prompt,
+    list_templates as _custom_list_templates,
+    public_agent_from_record as _custom_public_agent,
+)
 
 FIREBASE_STORAGE_BUCKET = os.environ.get(
     "FIREBASE_STORAGE_BUCKET",
@@ -587,6 +595,18 @@ def _flag_enabled(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on", "enabled"}
 
 
+def _custom_agents_enabled() -> bool:
+    return _flag_enabled("CONTENT_FACTORY_CUSTOM_AGENTS_ENABLED", default=True)
+
+
+def _require_custom_agents_admin(request: Request) -> dict:
+    if not _custom_agents_enabled():
+        raise HTTPException(status_code=404, detail="custom agents disabled")
+    if _flag_enabled("CONTENT_FACTORY_CUSTOM_AGENTS_ADMIN_ONLY", default=True):
+        return _require_admin(request)
+    return _require_principal(request)
+
+
 def _clean_personalization_text(value, *, max_chars: int, field_name: str) -> str:
     if value is None:
         return ""
@@ -685,7 +705,150 @@ def _brand_profile_for_project(agent_id: str, data: dict) -> tuple[str, dict]:
     return snapshot.get("id") or profile_id, snapshot
 
 
-def _validate_project_payload(data: dict) -> dict:
+def _custom_agent_project_payload(data: dict, principal: dict | None) -> dict | None:
+    custom_agent_id = str(data.get("customAgentId") or data.get("custom_agent_id") or "").strip()
+    if not custom_agent_id:
+        return None
+    if not _custom_agents_enabled():
+        raise HTTPException(status_code=404, detail="custom agents disabled")
+
+    if _flag_enabled("CONTENT_FACTORY_CUSTOM_AGENTS_ADMIN_ONLY", default=True):
+        # V1 is intentionally admin-only. This gate protects both UI mistakes and
+        # direct API calls.
+        token = (principal or {}).get("token") or {}
+        uid = (principal or {}).get("uid") or ""
+        email = (token.get("email") or "").strip().lower()
+        if not ((principal or {}).get("admin") or token.get("admin") or uid in _ADMIN_UIDS or email in _ADMIN_EMAILS):
+            raise HTTPException(status_code=403, detail="custom agents are admin-only")
+
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    db = firestore.client()
+    snap = db.collection("customAgents").document(custom_agent_id).get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="custom agent not found")
+    agent = snap.to_dict() or {}
+    if agent.get("status") != "active":
+        raise HTTPException(status_code=400, detail="custom agent is not active")
+
+    title = (data.get("title") or data.get("topic") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title required")
+    if len(title) > 180:
+        raise HTTPException(status_code=400, detail="title too long")
+
+    template = CUSTOM_AGENT_TEMPLATES.get(agent.get("templateKey") or "") or {}
+    agent_file = str(agent.get("baseAgentFile") or template.get("baseAgentFile") or "").strip()
+    if (
+        not agent_file.endswith(".md")
+        or "/" in agent_file
+        or "\\" in agent_file
+        or ".." in agent_file
+        or not (Path("prompts") / agent_file).is_file()
+    ):
+        raise HTTPException(status_code=400, detail="custom agent base prompt not found")
+
+    platform = str(agent.get("platform") or template.get("platform") or "youtube").strip().lower()
+    project_format = str(agent.get("format") or template.get("format") or "").strip()
+    if platform not in {"youtube", "tiktok"}:
+        raise HTTPException(status_code=400, detail="invalid custom agent platform")
+
+    raw_generation_options = data.get("generationOptions") or data.get("generation_options") or {}
+    generation_options = dict(raw_generation_options) if isinstance(raw_generation_options, dict) else {}
+    generation_options.update({
+        "agent_prompt_override": agent.get("compiledPrompt") or "",
+        "custom_agent": {
+            "customAgentId": custom_agent_id,
+            "name": agent.get("name") or "Agente custom",
+            "templateKey": agent.get("templateKey") or "",
+            "format": project_format,
+            "platform": platform,
+            "baseAgentFile": agent_file,
+            "compiledPromptVersion": agent.get("compiledPromptVersion") or 1,
+        },
+    })
+
+    personalization = _validate_personalization_payload(
+        data,
+        agent_id=agent_file[:-3] if agent_file.endswith(".md") else "",
+    )
+    if personalization:
+        generation_options["personalization"] = personalization
+
+    tiktok_payload = {}
+    if platform == "tiktok":
+        duration_profile = str(data.get("durationProfile") or data.get("duration_profile") or "").strip().lower()
+        duration_key = duration_profile.replace(" ", "") or "90s"
+        duration_profile = _TIKTOK_DURATION_ALIASES.get(duration_key, duration_key)
+        if duration_profile not in _TIKTOK_DURATION_SECONDS:
+            raise HTTPException(status_code=400, detail="invalid TikTok durationProfile")
+        source_genre = str(
+            data.get("sourceGenre")
+            or data.get("source_genre")
+            or data.get("genre")
+            or "psychology"
+        ).strip().lower().replace("-", "_")
+        if source_genre not in _TIKTOK_SOURCE_GENRES:
+            source_genre = "psychology"
+        tiktok_payload = {
+            "format": project_format,
+            "durationProfile": duration_profile,
+            "targetSeconds": _TIKTOK_DURATION_SECONDS[duration_profile],
+            "sourceGenre": source_genre,
+        }
+        generation_options.update({
+            "platform": "tiktok",
+            "format": project_format,
+            "duration_profile": duration_profile,
+            "source_genre": source_genre,
+            "target_seconds": _TIKTOK_DURATION_SECONDS[duration_profile],
+        })
+    elif project_format == "meditacion_larga":
+        raw_profile = str(data.get("durationProfile") or data.get("duration_profile") or "").strip().lower().replace(" ", "")
+        duration_profiles = agent.get("durationProfiles") or template.get("durationProfiles") or []
+        allowed = {str(item.get("id")) for item in duration_profiles if isinstance(item, dict) and item.get("id")}
+        default_duration_profile = next(
+            (str(item.get("id")) for item in duration_profiles if isinstance(item, dict) and item.get("id")),
+            "",
+        )
+        if not allowed:
+            allowed = {"30m", "60m", "180m"}
+            default_duration_profile = "60m"
+        duration_profile = raw_profile or default_duration_profile
+        aliases = {
+            "30": "30m",
+            "30min": "30m",
+            "60": "60m",
+            "1h": "60m",
+            "180": "180m",
+            "3h": "180m",
+        }
+        duration_profile = aliases.get(duration_profile, duration_profile)
+        if duration_profile not in allowed:
+            # V2 meditation profiles use richer ids; fallback to first allowed
+            duration_profile = default_duration_profile
+        generation_options["duration_profile"] = duration_profile
+
+    return {
+        "title": title,
+        "agent_id": custom_agent_id,
+        "agent_file": agent_file,
+        "platform": platform,
+        "format": project_format,
+        "tiktok": tiktok_payload,
+        "personalization": personalization,
+        "brand_profile_id": "",
+        "brand_profile_snapshot": {},
+        "generation_options": generation_options,
+        "custom_agent": agent,
+    }
+
+
+def _validate_project_payload(data: dict, principal: dict | None = None) -> dict:
+    custom_payload = _custom_agent_project_payload(data, principal)
+    if custom_payload:
+        return custom_payload
+
     title = (data.get("title") or data.get("topic") or "").strip()
     agent_id = (data.get("agentId") or "").strip()
     agent_file = (data.get("agentFile") or "").strip()
@@ -5684,7 +5847,7 @@ def library_agents(request: Request):
             if aid not in agents:
                 agents[aid] = {
                     "agentId": aid,
-                    "name": aid.replace("agent_", "").replace("_", " "),
+                    "name": data.get("agentName") or (data.get("customAgent") or {}).get("name") or aid.replace("agent_", "").replace("custom_", "").replace("_", " "),
                     "description": "",
                     "category": "",
                     "platform": data.get("platform") or "youtube",
@@ -9015,6 +9178,211 @@ def _humanize_seconds(s: float) -> str:
     return f"{h}h {(s % 3600) // 60}m"
 
 
+def _custom_agent_doc_payload(doc) -> dict:
+    data = doc.to_dict() or {}
+    data.setdefault("customAgentId", doc.id)
+    data["id"] = doc.id
+    data["publicAgent"] = _custom_public_agent(data)
+    return _serialize_firestore_value(data)
+
+
+@app.get("/custom-agents/templates")
+def custom_agent_templates(request: Request):
+    _require_custom_agents_admin(request)
+    return {"ok": True, "templates": _custom_list_templates()}
+
+
+@app.get("/custom-agents")
+def list_custom_agents(request: Request, status: str = "", includeArchived: bool = False):
+    _require_custom_agents_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        requested_status = (status or "").strip().lower()
+        agents = []
+        for doc in db.collection("customAgents").stream():
+            data = doc.to_dict() or {}
+            data.setdefault("customAgentId", doc.id)
+            current_status = str(data.get("status") or "draft").lower()
+            if requested_status and current_status != requested_status:
+                continue
+            if not includeArchived and current_status == "archived":
+                continue
+            agents.append(_custom_agent_doc_payload(doc))
+        agents.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+        return {"ok": True, "agents": agents}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+@app.post("/custom-agents/compile")
+async def compile_custom_agent(request: Request):
+    _require_custom_agents_admin(request)
+    try:
+        body = await request.json()
+        compiled = _custom_compile_prompt(body)
+        return {"ok": True, **compiled}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+@app.post("/custom-agents")
+async def create_custom_agent(request: Request):
+    principal = _require_custom_agents_admin(request)
+    try:
+        body = await request.json()
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        record = _custom_build_agent_record(
+            body,
+            owner_uid=principal.get("uid") or "admin",
+            firestore_module=firestore,
+        )
+        ref = db.collection("customAgents").document(record["customAgentId"])
+        if ref.get().exists:
+            record = _custom_build_agent_record(
+                {**body, "seed": secrets.token_hex(4)},
+                owner_uid=principal.get("uid") or "admin",
+                firestore_module=firestore,
+            )
+            ref = db.collection("customAgents").document(record["customAgentId"])
+        ref.set(record)
+        snap = ref.get()
+        return {"ok": True, "agent": _custom_agent_doc_payload(snap)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+@app.patch("/custom-agents/{custom_agent_id}")
+async def update_custom_agent(custom_agent_id: str, request: Request):
+    principal = _require_custom_agents_admin(request)
+    try:
+        body = await request.json()
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        ref = db.collection("customAgents").document(custom_agent_id)
+        snap = ref.get()
+        if not snap.exists:
+            raise HTTPException(status_code=404, detail="custom agent not found")
+        current = snap.to_dict() or {}
+        merged = {
+            **current,
+            **body,
+            "brief": {**(current.get("brief") or {}), **(body.get("brief") or {})},
+            "exampleTopics": body.get("exampleTopics", current.get("exampleTopics") or []),
+        }
+        record = _custom_build_agent_record(
+            merged,
+            owner_uid=current.get("ownerUid") or principal.get("uid") or "admin",
+            firestore_module=firestore,
+            existing_id=custom_agent_id,
+        )
+        prompt_changed = record.get("compiledPrompt") != current.get("compiledPrompt")
+        record["createdAt"] = current.get("createdAt", firestore.SERVER_TIMESTAMP)
+        record["status"] = "draft" if prompt_changed else current.get("status", "draft")
+        if prompt_changed:
+            record["lastTest"] = {}
+        ref.set(record, merge=False)
+        return {"ok": True, "agent": _custom_agent_doc_payload(ref.get()), "requiresRetest": prompt_changed}
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+@app.post("/custom-agents/{custom_agent_id}/test")
+async def test_custom_agent(custom_agent_id: str, request: Request):
+    _require_custom_agents_admin(request)
+    try:
+        body = await request.json()
+        topic = str(body.get("topic") or "").strip()
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        ref = db.collection("customAgents").document(custom_agent_id)
+        snap = ref.get()
+        if not snap.exists:
+            raise HTTPException(status_code=404, detail="custom agent not found")
+        record = snap.to_dict() or {}
+        record.setdefault("customAgentId", custom_agent_id)
+        test_result = _custom_build_test_preview(record, topic)
+        test_ref = db.collection("customAgentTests").document()
+        test_payload = {
+            **test_result,
+            "customAgentId": custom_agent_id,
+            "createdAt": firestore.SERVER_TIMESTAMP,
+        }
+        test_ref.set(test_payload)
+        ref.update({
+            "status": "testing",
+            "lastTest": test_payload,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        return {
+            "ok": True,
+            "testId": test_ref.id,
+            "test": _serialize_firestore_value(test_payload),
+            "agent": _custom_agent_doc_payload(ref.get()),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+@app.post("/custom-agents/{custom_agent_id}/activate")
+async def activate_custom_agent(custom_agent_id: str, request: Request):
+    _require_custom_agents_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        ref = db.collection("customAgents").document(custom_agent_id)
+        snap = ref.get()
+        if not snap.exists:
+            raise HTTPException(status_code=404, detail="custom agent not found")
+        data = snap.to_dict() or {}
+        last_test = data.get("lastTest") or {}
+        validation = data.get("validation") or {}
+        if last_test.get("status") != "passed":
+            raise HTTPException(status_code=400, detail="last test must pass before activation")
+        if validation.get("status") != "passed":
+            raise HTTPException(status_code=400, detail="prompt validation must pass before activation")
+        ref.update({"status": "active", "activatedAt": firestore.SERVER_TIMESTAMP, "updatedAt": firestore.SERVER_TIMESTAMP})
+        return {"ok": True, "agent": _custom_agent_doc_payload(ref.get())}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
+@app.post("/custom-agents/{custom_agent_id}/archive")
+async def archive_custom_agent(custom_agent_id: str, request: Request):
+    _require_custom_agents_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        ref = db.collection("customAgents").document(custom_agent_id)
+        if not ref.get().exists:
+            raise HTTPException(status_code=404, detail="custom agent not found")
+        ref.update({"status": "archived", "updatedAt": firestore.SERVER_TIMESTAMP})
+        return {"ok": True, "agent": _custom_agent_doc_payload(ref.get())}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)[:200]})
+
+
 def _create_project_with_credit(
     *,
     principal: dict,
@@ -9179,7 +9547,7 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
     """
     principal = _require_principal(request)
     body = await request.json()
-    payload = _validate_project_payload(body)
+    payload = _validate_project_payload(body, principal=principal)
     dry_run = bool(body.get("dryRun")) or request.query_params.get("dryRun", "").lower() in {
         "1",
         "true",
@@ -9187,11 +9555,32 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
     }
 
     try:
+        custom_agent = payload.get("custom_agent") or {}
+        project_extra = None
+        credit_metadata = None
+        if custom_agent:
+            project_extra = {
+                "agentSource": "custom",
+                "customAgentId": payload["agent_id"],
+                "agentName": custom_agent.get("name") or "Agente custom",
+                "agentPromptSnapshot": custom_agent.get("compiledPrompt") or "",
+                "agentTemplateKey": custom_agent.get("templateKey") or "",
+                "agentMonogram": custom_agent.get("monogram") or "Ag",
+                "agentColor": custom_agent.get("color") or "#E0533D",
+                "customAgent": _custom_public_agent(custom_agent),
+            }
+            credit_metadata = {
+                "agentSource": "custom",
+                "customAgentId": payload["agent_id"],
+                "agentTemplateKey": custom_agent.get("templateKey") or "",
+            }
         return _create_project_with_credit(
             principal=principal,
             payload=payload,
             background_tasks=background_tasks,
             dry_run=dry_run,
+            project_extra=project_extra,
+            credit_metadata=credit_metadata,
         )
     except HTTPException:
         raise

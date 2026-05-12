@@ -275,6 +275,7 @@ def generate_script(
     agent_file: str = "agent_erotico_historico.md",
     project_id: str = None,
     radar_context: dict | None = None,
+    agent_prompt_override: str | None = None,
 ) -> dict:
     """
     Genera un guión narrativo completo.
@@ -306,7 +307,7 @@ NO copies el texto directamente — reformula con tu estilo cinematográfico.
 ═══ FIN DE INVESTIGACIÓN ═══\n"""
     
     # Cargar el prompt del AI Agent seleccionado
-    agent_prompt = load_prompt(agent_file)
+    agent_prompt = agent_prompt_override or load_prompt(agent_file)
     
     # Llamada a IA: motor primario configurado con fallback OpenAI.
     if claude_client:
@@ -1371,9 +1372,9 @@ def _extract_json_object(content: str) -> dict:
         raise
 
 
-def _tiktok_base_system_prompt(agent_file: str) -> str:
+def _tiktok_base_system_prompt(agent_file: str, agent_prompt_override: str | None = None) -> str:
     base = load_prompt("agent_tiktok_studio.md")
-    specific = load_prompt(agent_file)
+    specific = agent_prompt_override or load_prompt(agent_file)
     return f"{base}\n\n---\n\n{specific}"
 
 
@@ -1527,11 +1528,12 @@ def _generate_tiktok_script_common(
     source_genre: str = "psychology",
     personalization: dict | None = None,
     brand_profile: dict | None = None,
+    agent_prompt_override: str | None = None,
 ) -> dict:
     tiktok_format = _tiktok_format_from_agent_file(agent_file)
     profile = _tiktok_duration_profile(duration_profile)
     genre_label = TIKTOK_SOURCE_GENRE_LABELS.get(source_genre, "psicologia")
-    system_prompt = _tiktok_base_system_prompt(agent_file)
+    system_prompt = _tiktok_base_system_prompt(agent_file, agent_prompt_override=agent_prompt_override)
     personalization = personalization or {}
     prompt_payload = {
         "topic": topic,
@@ -2267,7 +2269,12 @@ def _build_long_meditation_visual_scenes(
     return visual_scenes
 
 
-def generate_podcast_script(topic: str, agent_file: str = "agent_podcast_general.md", project_id: str = None) -> dict:
+def generate_podcast_script(
+    topic: str,
+    agent_file: str = "agent_podcast_general.md",
+    project_id: str = None,
+    agent_prompt_override: str | None = None,
+) -> dict:
     """
     Genera un guión de podcast conversacional (2 hosts) usando el motor de guion configurado.
     Análogo a generate_script() pero apuntando al prompt podcast y con
@@ -2290,7 +2297,7 @@ NO copies directo — los hosts hablan de los datos, no los recitan.
 {research_context}
 ═══ FIN DE INVESTIGACIÓN ═══\n"""
 
-    agent_prompt = load_prompt(agent_file)
+    agent_prompt = agent_prompt_override or load_prompt(agent_file)
 
     user_message = f"""Genera el guión completo de un episodio de podcast sobre el siguiente tema.
 
@@ -2362,6 +2369,7 @@ def generate_autohypnosis_script(
     project_id: str = None,
     duration_profile: str | None = None,
     personalization: dict | None = None,
+    agent_prompt_override: str | None = None,
 ) -> dict:
     """
     Genera una sesión de autohipnosis guiada. No usa investigación web por
@@ -2373,7 +2381,7 @@ def generate_autohypnosis_script(
     print(f"   Modelo: {CLAUDE_MODEL_SCRIPT if claude_client else GPT_MODEL}")
     print(f"   Agente: {agent_name} ({agent_file})")
 
-    agent_prompt = load_prompt(agent_file)
+    agent_prompt = agent_prompt_override or load_prompt(agent_file)
     profile = _autohypnosis_duration_profile(topic, duration_profile)
     personalization_block, personalization_payload = _personalization_prompt_block(
         personalization,
@@ -2459,6 +2467,7 @@ def generate_long_meditation_script(
     project_id: str = None,
     duration_profile: str | None = None,
     personalization: dict | None = None,
+    agent_prompt_override: str | None = None,
 ) -> dict:
     """
     Genera la parte hablada de una meditacion larga. La duracion final se logra
@@ -2471,7 +2480,7 @@ def generate_long_meditation_script(
     print(f"   Agente: {agent_name} ({agent_file})")
     print(f"   Duracion final: {profile['label']} | Voz objetivo: {profile['speech_minutes']} min")
 
-    agent_prompt = load_prompt(agent_file)
+    agent_prompt = agent_prompt_override or load_prompt(agent_file)
     personalization_block, personalization_payload = _personalization_prompt_block(
         personalization,
         format_key=LONG_MEDITATION_FORMAT,
@@ -2599,6 +2608,8 @@ def run_full_pipeline(
     print(f"🎭 Agente: {agent_file}")
     print(f"🗂️  Proyecto: {project_id}")
     generation_options = generation_options or {}
+    agent_prompt_override = (generation_options.get("agent_prompt_override") or "").strip()
+    custom_agent_options = generation_options.get("custom_agent") if isinstance(generation_options.get("custom_agent"), dict) else {}
     personalization_options = generation_options.get("personalization") or {}
     brand_profile_id = (generation_options.get("brand_profile_id") or generation_options.get("brandProfileId") or "").strip()
     brand_profile = generation_options.get("brand_profile_snapshot") or generation_options.get("brandProfileSnapshot")
@@ -2615,11 +2626,12 @@ def run_full_pipeline(
 
     # Detectar formatos especiales: usan generación y visuales especializados
     # para evitar exceso de escenas y conservar el estilo correcto.
-    is_podcast = agent_file.startswith("agent_podcast_")
-    is_autohypnosis = agent_file == "agent_autohipnosis.md"
-    is_long_meditation = agent_file in LONG_MEDITATION_AGENT_FILES
-    is_tiktok = _is_tiktok_agent_file(agent_file)
-    tiktok_format = _tiktok_format_from_agent_file(agent_file) if is_tiktok else ""
+    custom_format = (custom_agent_options.get("format") or generation_options.get("format") or "").strip()
+    is_podcast = agent_file.startswith("agent_podcast_") or custom_format == "podcast"
+    is_autohypnosis = agent_file == "agent_autohipnosis.md" or custom_format == "autohipnosis"
+    is_long_meditation = agent_file in LONG_MEDITATION_AGENT_FILES or custom_format == LONG_MEDITATION_FORMAT
+    is_tiktok = _is_tiktok_agent_file(agent_file) or custom_format.startswith("tiktok_")
+    tiktok_format = custom_format if is_tiktok and custom_format.startswith("tiktok_") else _tiktok_format_from_agent_file(agent_file) if is_tiktok else ""
     tiktok_profile = _tiktok_duration_profile(generation_options.get("duration_profile")) if is_tiktok else None
     tiktok_source_genre = generation_options.get("source_genre") or "psychology"
     if is_podcast:
@@ -2647,6 +2659,7 @@ def run_full_pipeline(
                     source_genre=tiktok_source_genre,
                     personalization=personalization_options,
                     brand_profile=brand_profile,
+                    agent_prompt_override=agent_prompt_override,
                 )
             elif tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
                 result = generate_tiktok_wellness_script(
@@ -2657,6 +2670,7 @@ def run_full_pipeline(
                     source_genre=tiktok_source_genre,
                     personalization=personalization_options,
                     brand_profile=brand_profile,
+                    agent_prompt_override=agent_prompt_override,
                 )
             else:
                 result = generate_tiktok_script(
@@ -2667,9 +2681,15 @@ def run_full_pipeline(
                     source_genre=tiktok_source_genre,
                     personalization=personalization_options,
                     brand_profile=brand_profile,
+                    agent_prompt_override=agent_prompt_override,
                 )
         elif is_podcast:
-            result = generate_podcast_script(topic, agent_file, project_id)
+            result = generate_podcast_script(
+                topic,
+                agent_file,
+                project_id,
+                agent_prompt_override=agent_prompt_override,
+            )
         elif is_autohypnosis:
             result = generate_autohypnosis_script(
                 topic,
@@ -2677,6 +2697,7 @@ def run_full_pipeline(
                 project_id,
                 duration_profile=generation_options.get("duration_profile"),
                 personalization=personalization_options,
+                agent_prompt_override=agent_prompt_override,
             )
         elif is_long_meditation:
             result = generate_long_meditation_script(
@@ -2685,6 +2706,7 @@ def run_full_pipeline(
                 project_id,
                 duration_profile=generation_options.get("duration_profile"),
                 personalization=personalization_options,
+                agent_prompt_override=agent_prompt_override,
             )
         else:
             result = generate_script(
@@ -2692,6 +2714,7 @@ def run_full_pipeline(
                 agent_file,
                 project_id,
                 radar_context=generation_options.get("radar_context"),
+                agent_prompt_override=agent_prompt_override,
             )
         script = result["script"]
 
@@ -2866,8 +2889,16 @@ def run_full_pipeline(
                 "generated_at": datetime.now().isoformat(),
                 "total_scenes": len(video_scenes),
                 "script_characters": len(script),
+                "custom_agent": bool(custom_agent_options),
             },
         }
+        if custom_agent_options:
+            full_result["customAgent"] = {
+                "customAgentId": custom_agent_options.get("customAgentId"),
+                "name": custom_agent_options.get("name"),
+                "templateKey": custom_agent_options.get("templateKey"),
+                "compiledPromptVersion": custom_agent_options.get("compiledPromptVersion"),
+            }
         if public_figure_visuals.get("detected"):
             full_result["publicFigureVisuals"] = public_figure_visuals
         if is_autohypnosis or is_long_meditation:
@@ -3003,6 +3034,9 @@ def run_full_pipeline(
                 }
                 if public_figure_visuals.get("detected"):
                     firestore_payload["publicFigureVisuals"] = public_figure_visuals
+                if custom_agent_options:
+                    firestore_payload["agentSource"] = "custom"
+                    firestore_payload["customAgent"] = full_result["customAgent"]
                 if is_long_meditation:
                     firestore_payload["script.speechEstimatedMinutes"] = result["metadata"].get("estimated_speech_minutes")
                     firestore_payload["script.targetMinutes"] = result["metadata"].get("target_duration_minutes")

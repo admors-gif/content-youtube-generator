@@ -28,8 +28,8 @@ export default function ProjectHeader({
   downloadAllLoading = false,
   platform = "youtube",
 }) {
-  const color = agent?.color || "var(--ember)";
-  const mono = getMonogram(project.agentId);
+  const color = agent?.color || project.agentColor || project.customAgent?.color || "var(--ember)";
+  const mono = project.agentMonogram || project.customAgent?.monogram || getMonogram(project.agentId);
   const created = formatRelativeTime(project.createdAt);
   const isCompleted = project.status === "completed";
   const canDownload = isCompleted || project.deliveryRecoverableFromDisk;
@@ -113,7 +113,7 @@ export default function ProjectHeader({
               }}
             >
               <span style={{ color, fontWeight: 600 }}>
-                {agent?.name?.toUpperCase() || project.agentId}
+                {(agent?.name || project.agentName || project.customAgent?.name || project.agentId)?.toUpperCase()}
               </span>
               {created && (
                 <>

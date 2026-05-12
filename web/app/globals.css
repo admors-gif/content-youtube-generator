@@ -287,6 +287,15 @@ body::before {
   box-shadow: var(--shadow-ember);
 }
 
+.cf-label {
+  display: block;
+  font: var(--t-mono-sm);
+  color: var(--paper-mute);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
 .cf-badge {
   display: inline-flex;
   align-items: center;
@@ -303,10 +312,13 @@ body::before {
 .cf-badge--free    { background: rgba(111,190,142,0.12); color: var(--ok);    border-color: rgba(111,190,142,0.25); }
 .cf-badge--starter { background: rgba(122,156,198,0.12); color: var(--info);  border-color: rgba(122,156,198,0.25); }
 .cf-badge--creator { background: rgba(224,83,61,0.12);   color: var(--ember); border-color: rgba(224,83,61,0.25); }
+.cf-badge--custom  { background: rgba(212,168,87,0.12);  color: var(--warn);  border-color: rgba(212,168,87,0.25); }
 .cf-badge--warn    { background: rgba(212,168,87,0.12);  color: var(--warn);  border-color: rgba(212,168,87,0.25); }
 .cf-badge--bad     { background: rgba(216,98,90,0.12);   color: var(--bad);   border-color: rgba(216,98,90,0.25); }
 .cf-badge--ok      { background: rgba(111,190,142,0.12); color: var(--ok);    border-color: rgba(111,190,142,0.25); }
 .cf-badge--neutral { background: var(--ink-2); color: var(--paper-dim); border-color: var(--rule-1); }
+.cf-badge--draft   { background: var(--ink-2); color: var(--paper-dim); border-color: var(--rule-1); }
+.cf-badge--muted   { background: rgba(255,255,255,0.04); color: var(--paper-mute); border-color: var(--rule-1); }
 .cf-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
 /* ─────────────────────────────────────────────────────────────────────────

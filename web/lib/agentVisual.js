@@ -62,6 +62,7 @@ export const MONOGRAM_BY_AGENT_ID = {
  */
 export function getMonogram(agentId) {
   if (MONOGRAM_BY_AGENT_ID[agentId]) return MONOGRAM_BY_AGENT_ID[agentId];
+  if (String(agentId || "").startsWith("custom_")) return "Ag";
   const agent = SYSTEM_AGENTS.find((a) => a.agentId === agentId);
   return agent?.name?.charAt(0)?.toUpperCase() || "·";
 }

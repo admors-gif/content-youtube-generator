@@ -7,6 +7,7 @@ import Icon from "@/components/Icon";
 import { getAgentColor, getMonogram } from "@/lib/agentVisual";
 import { authHeaders, getApiBase } from "@/lib/apiClient";
 import { getCreditCounts } from "@/lib/credits";
+import { isAdminUser } from "@/lib/admin";
 
 /**
  * Wizard Nuevo Documental — Editorial Cinematic v2.
@@ -32,10 +33,13 @@ const TIER_FILTERS = [
   { id: "all",     label: "Todos" },
   { id: "starter", label: "Starter" },
   { id: "creator", label: "Creator" },
+  { id: "custom",  label: "Mis agentes" },
 ];
 
 const TIKTOK_GENERATION_ENABLED =
   process.env.NEXT_PUBLIC_CONTENT_FACTORY_TIKTOK_GENERATION_ENABLED !== "false";
+const CUSTOM_AGENTS_ENABLED =
+  process.env.NEXT_PUBLIC_CONTENT_FACTORY_CUSTOM_AGENTS_ENABLED !== "false";
 
 const PLATFORM_OPTIONS = [
   {
@@ -92,7 +96,7 @@ function buildPersonalizationPayload(personalization) {
 
 function AgentCard({ agent, selected, onSelect, recommendation }) {
   const color = agent.color || "#E0533D";
-  const mono = getMonogram(agent.agentId);
+  const mono = agent.monogram || getMonogram(agent.agentId);
   const isRec = !!recommendation;
 
   return (
@@ -312,6 +316,7 @@ export default function NewProjectPage() {
   const { user, profile } = useAuth();
   const router = useRouter();
   const didApplyPrefill = useRef(false);
+  const admin = isAdminUser(user, profile);
 
   /* PRESERVADO: state legacy (previewAgent se eliminó porque el kit
    * incorpora los exampleTopics directamente como chips en step 2;
@@ -335,6 +340,37 @@ export default function NewProjectPage() {
   const [durationProfile, setDurationProfile] = useState("60m");
   const [sourceGenre, setSourceGenre] = useState("psychology");
   const [personalization, setPersonalization] = useState(EMPTY_PERSONALIZATION);
+  const [customAgents, setCustomAgents] = useState([]);
+  const [customAgentsError, setCustomAgentsError] = useState("");
+
+  const allAgents = useMemo(
+    () => [...SYSTEM_AGENTS, ...customAgents],
+    [customAgents],
+  );
+
+  useEffect(() => {
+    if (!user || !admin || !CUSTOM_AGENTS_ENABLED) return;
+    let cancelled = false;
+    async function loadCustomAgents() {
+      try {
+        const res = await fetch(`${getApiBase()}/custom-agents?status=active`, {
+          headers: await authHeaders(user),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || data.error || "No se pudieron cargar tus agentes.");
+        const agents = (data.agents || [])
+          .map((item) => item.publicAgent || item)
+          .filter((item) => item.agentId);
+        if (!cancelled) setCustomAgents(agents);
+      } catch (err) {
+        if (!cancelled) setCustomAgentsError(err.message);
+      }
+    }
+    loadCustomAgents();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, admin]);
 
   useEffect(() => {
     if (didApplyPrefill.current) return;
@@ -344,7 +380,8 @@ export default function NewProjectPage() {
     const source = searchParams.get("from") || "";
     if (!prefillAgentId && !prefillTopic) return;
 
-    const agent = SYSTEM_AGENTS.find((item) => item.agentId === prefillAgentId);
+    const agent = allAgents.find((item) => item.agentId === prefillAgentId);
+    if (prefillAgentId && !agent) return;
     const timer = window.setTimeout(() => {
       if (agent) {
         setPlatform(agent.platform || "youtube");
@@ -363,7 +400,7 @@ export default function NewProjectPage() {
       didApplyPrefill.current = true;
     }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [allAgents]);
 
   const selectAgent = (agent) => {
     setSelectedAgent(agent);
@@ -473,6 +510,9 @@ export default function NewProjectPage() {
           title: topic.trim(),
           agentId: selectedAgent.agentId,
           agentFile: selectedAgent.promptFile,
+          ...(selectedAgent.agentSource === "custom" || selectedAgent.customAgentId
+            ? { customAgentId: selectedAgent.customAgentId || selectedAgent.agentId }
+            : {}),
           platform,
           ...(selectedAgent.durationProfiles?.length
             ? { durationProfile }
@@ -506,12 +546,13 @@ export default function NewProjectPage() {
   /* Filtrado de agentes por tier */
   const filteredAgents = useMemo(
     () =>
-      SYSTEM_AGENTS.filter(
+      allAgents.filter(
         (a) =>
           (a.platform || "youtube") === platform &&
-          (tierFilter === "all" || a.tier === tierFilter),
+          (tierFilter === "all" ||
+            (tierFilter === "custom" ? a.agentSource === "custom" : a.tier === tierFilter)),
       ),
-    [platform, tierFilter],
+    [allAgents, platform, tierFilter],
   );
 
   /* Word/char count para textarea */
@@ -833,6 +874,20 @@ export default function NewProjectPage() {
           )}
 
           {/* Filter strip */}
+          {customAgentsError && admin && CUSTOM_AGENTS_ENABLED && (
+            <div
+              style={{
+                marginBottom: 12,
+                color: "var(--bad)",
+                font: "var(--t-caption)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <Icon name="alert" size={14} /> {customAgentsError}
+            </div>
+          )}
           <div
             style={{
               display: "flex",
@@ -926,8 +981,8 @@ export default function NewProjectPage() {
                     width: 32,
                     height: 32,
                     borderRadius: "var(--r-2)",
-                    background: `${getAgentColor(selectedAgent.agentId)}22`,
-                    color: getAgentColor(selectedAgent.agentId),
+                    background: `${selectedAgent.color || getAgentColor(selectedAgent.agentId)}22`,
+                    color: selectedAgent.color || getAgentColor(selectedAgent.agentId),
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -938,7 +993,7 @@ export default function NewProjectPage() {
                     lineHeight: 1,
                   }}
                 >
-                  {getMonogram(selectedAgent.agentId)}
+                  {selectedAgent.monogram || getMonogram(selectedAgent.agentId)}
                 </div>
                 <div>
                   <div
@@ -1003,8 +1058,8 @@ export default function NewProjectPage() {
                   width: 48,
                   height: 48,
                   borderRadius: "var(--r-2)",
-                  background: `${getAgentColor(selectedAgent.agentId)}22`,
-                  color: getAgentColor(selectedAgent.agentId),
+                  background: `${selectedAgent.color || getAgentColor(selectedAgent.agentId)}22`,
+                  color: selectedAgent.color || getAgentColor(selectedAgent.agentId),
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -1015,7 +1070,7 @@ export default function NewProjectPage() {
                   lineHeight: 1,
                 }}
               >
-                {getMonogram(selectedAgent.agentId)}
+                {selectedAgent.monogram || getMonogram(selectedAgent.agentId)}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div
