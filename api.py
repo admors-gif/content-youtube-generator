@@ -82,6 +82,25 @@ from scripts.custom_agents import (
     list_templates as _custom_list_templates,
     public_agent_from_record as _custom_public_agent,
 )
+from scripts.source_video import (
+    DEFAULT_NICHE as SOURCE_VIDEO_DEFAULT_NICHE,
+    DEFAULT_TARGET_AGENT_ID as SOURCE_VIDEO_DEFAULT_TARGET_AGENT_ID,
+    analysis_prompt as _source_video_analysis_prompt,
+    build_project_topic as _source_video_project_topic,
+    chunk_transcript as _source_video_chunk_transcript,
+    clean_transcript as _source_video_clean_transcript,
+    compact_text as _source_video_compact_text,
+    derivation_prompt as _source_video_derivation_prompt,
+    normalize_analysis as _source_video_normalize_analysis,
+    normalize_derivation as _source_video_normalize_derivation,
+    parse_json_object as _source_video_parse_json,
+    parse_youtube_url as _source_video_parse_youtube_url,
+    public_source_video as _source_video_public_doc,
+    similarity_guard as _source_video_similarity_guard,
+    stable_source_video_id as _source_video_stable_id,
+    transcript_hash as _source_video_transcript_hash,
+    youtube_video_url as _source_video_youtube_url,
+)
 
 FIREBASE_STORAGE_BUCKET = os.environ.get(
     "FIREBASE_STORAGE_BUCKET",
@@ -603,6 +622,18 @@ def _require_custom_agents_admin(request: Request) -> dict:
     if not _custom_agents_enabled():
         raise HTTPException(status_code=404, detail="custom agents disabled")
     if _flag_enabled("CONTENT_FACTORY_CUSTOM_AGENTS_ADMIN_ONLY", default=True):
+        return _require_admin(request)
+    return _require_principal(request)
+
+
+def _source_video_enabled() -> bool:
+    return _flag_enabled("CONTENT_FACTORY_SOURCE_VIDEO_ENABLED", default=True)
+
+
+def _require_source_video_admin(request: Request) -> dict:
+    if not _source_video_enabled():
+        raise HTTPException(status_code=404, detail="source video inspiration disabled")
+    if _flag_enabled("CONTENT_FACTORY_SOURCE_VIDEO_ADMIN_ONLY", default=True):
         return _require_admin(request)
     return _require_principal(request)
 
@@ -3267,6 +3298,111 @@ def _youtube_channel_id_from_url(value: str) -> str:
     return ""
 
 
+def _source_video_fetch_youtube_metadata(video_id: str) -> dict:
+    if not video_id:
+        raise HTTPException(status_code=400, detail="videoId required")
+    data = _youtube_request("videos", {
+        "part": "snippet,statistics,contentDetails",
+        "id": video_id,
+        "maxResults": 1,
+    })
+    items = data.get("items") or []
+    if not items:
+        raise HTTPException(status_code=404, detail="youtube video not found")
+    item = items[0] or {}
+    snippet = item.get("snippet") or {}
+    stats = item.get("statistics") or {}
+    content = item.get("contentDetails") or {}
+    thumbnails = snippet.get("thumbnails") or {}
+    thumb = (
+        (thumbnails.get("maxres") or {}).get("url")
+        or (thumbnails.get("standard") or {}).get("url")
+        or (thumbnails.get("high") or {}).get("url")
+        or (thumbnails.get("medium") or {}).get("url")
+        or (thumbnails.get("default") or {}).get("url")
+        or ""
+    )
+    return {
+        "videoId": video_id,
+        "sourceUrl": _source_video_youtube_url(video_id),
+        "platform": "youtube",
+        "channelId": snippet.get("channelId") or "",
+        "channelName": snippet.get("channelTitle") or "",
+        "title": _source_video_compact_text(snippet.get("title") or "", 220),
+        "description": _source_video_compact_text(snippet.get("description") or "", 1000),
+        "publishedAt": snippet.get("publishedAt") or "",
+        "views": _safe_int(stats.get("viewCount"), 0),
+        "likes": _safe_int(stats.get("likeCount"), 0),
+        "comments": _safe_int(stats.get("commentCount"), 0),
+        "duration": content.get("duration") or "",
+        "thumbnailUrl": thumb,
+    }
+
+
+def _source_video_llm_json(messages: list[dict], *, max_tokens: int = 1800) -> tuple[dict | None, str]:
+    if os.environ.get("ANTHROPIC_API_KEY", "").strip():
+        try:
+            from anthropic import Anthropic
+            model = (
+                os.environ.get("CONTENT_FACTORY_SOURCE_VIDEO_MODEL")
+                or os.environ.get("CONTENT_FACTORY_RADAR_MODEL")
+                or "claude-haiku-4-5-20251001"
+            ).strip()
+            system = messages[0].get("content") if messages and messages[0].get("role") == "system" else ""
+            user_content = "\n\n".join(m.get("content") or "" for m in messages if m.get("role") != "system")
+            client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+            resp = client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user_content}],
+            )
+            text = resp.content[0].text if resp.content else ""
+            return _source_video_parse_json(text), model
+        except Exception as exc:
+            try:
+                log.warning("source_video_anthropic_failed", error=str(exc)[:220])
+            except Exception:
+                pass
+
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return None, "heuristic_fallback"
+    try:
+        from openai import OpenAI
+        model = (
+            os.environ.get("CONTENT_FACTORY_SOURCE_VIDEO_LLM_MODEL")
+            or os.environ.get("CONTENT_FACTORY_TITLE_LAB_LLM_MODEL")
+            or "gpt-4o-mini"
+        ).strip()
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.45,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        )
+        text = response.choices[0].message.content or ""
+        return _source_video_parse_json(text), model
+    except Exception as exc:
+        try:
+            log.warning("source_video_llm_failed", error=str(exc)[:220])
+        except Exception:
+            pass
+        return None, "heuristic_fallback"
+
+
+def _source_video_public_analysis(doc_id: str, data: dict | None) -> dict:
+    data = data or {}
+    return _serialize_firestore_value({"analysisId": data.get("analysisId") or doc_id, **data})
+
+
+def _source_video_public_derivation(doc_id: str, data: dict | None) -> dict:
+    data = data or {}
+    return _serialize_firestore_value({"derivationId": data.get("derivationId") or doc_id, **data})
+
+
 def _radar_competitor_doc_id(uid: str, agent_id: str, channel_id: str) -> str:
     raw = f"{uid}:{agent_id}:{channel_id}".encode("utf-8")
     return hashlib.sha1(raw).hexdigest()[:32]
@@ -5710,6 +5846,420 @@ async def radar_title_lab_save(request: Request):
         raise
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": str(exc)[:200]})
+
+
+def _source_video_get_doc(db, source_video_id: str, principal: dict):
+    ref = db.collection("sourceVideos").document(source_video_id)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="source video not found")
+    data = snap.to_dict() or {}
+    owner = data.get("ownerUid")
+    if not principal.get("admin") and owner and owner != principal.get("uid"):
+        raise HTTPException(status_code=403, detail="source video access denied")
+    return ref, snap, data
+
+
+def _source_video_latest_analysis(db, source_video_id: str, analysis_id: str = "") -> tuple[str, dict]:
+    if analysis_id:
+        snap = db.collection("sourceVideoAnalyses").document(analysis_id).get()
+        if snap.exists:
+            return snap.id, snap.to_dict() or {}
+    docs = list(
+        db.collection("sourceVideoAnalyses")
+        .where("sourceVideoId", "==", source_video_id)
+        .limit(20)
+        .stream()
+    )
+    docs.sort(key=lambda doc: str((doc.to_dict() or {}).get("createdAt") or ""), reverse=True)
+    if not docs:
+        raise HTTPException(status_code=400, detail="source video has no analysis")
+    return docs[0].id, docs[0].to_dict() or {}
+
+
+def _source_video_latest_derivation(db, source_video_id: str, derivation_id: str = "") -> tuple[str, dict]:
+    if derivation_id:
+        snap = db.collection("sourceVideoDerivations").document(derivation_id).get()
+        if snap.exists:
+            return snap.id, snap.to_dict() or {}
+    docs = list(
+        db.collection("sourceVideoDerivations")
+        .where("sourceVideoId", "==", source_video_id)
+        .limit(20)
+        .stream()
+    )
+    docs.sort(key=lambda doc: str((doc.to_dict() or {}).get("createdAt") or ""), reverse=True)
+    if not docs:
+        raise HTTPException(status_code=400, detail="source video has no podcast derivation")
+    return docs[0].id, docs[0].to_dict() or {}
+
+
+def _source_video_candidate(agent: dict, source: dict, analysis: dict, derivation: dict, selected_title: str, uid: str) -> dict:
+    title = _source_video_compact_text(selected_title or derivation.get("recommendedTitle") or source.get("title"), 180)
+    raw_hash = f"{uid}|{source.get('sourceVideoId')}|{agent.get('agentId')}|{title}".encode("utf-8", errors="ignore")
+    candidate_hash = hashlib.sha1(raw_hash).hexdigest()[:32]
+    return {
+        "candidateHash": candidate_hash,
+        "agentId": agent.get("agentId") or SOURCE_VIDEO_DEFAULT_TARGET_AGENT_ID,
+        "agentName": agent.get("name") or "Podcast",
+        "agentFile": agent.get("promptFile") or "agent_podcast_general.md",
+        "platform": agent.get("platform") or "youtube",
+        "format": agent.get("format") or "podcast",
+        "title": title,
+        "angle": _source_video_compact_text(analysis.get("centralThesis") or title, 240),
+        "summary": _source_video_compact_text(derivation.get("episodeBrief") or analysis.get("podcastBrief"), 800),
+        "sources": [{
+            "title": source.get("title") or "",
+            "url": source.get("sourceUrl") or "",
+            "domain": "youtube.com",
+            "sourceType": "source_video",
+            "channelName": source.get("channelName") or "",
+        }],
+        "scores": {
+            "audience": 70,
+            "fit": 78,
+            "retention": 75,
+            "originality": 72,
+        },
+        "risk": {
+            "level": (derivation.get("similarity") or {}).get("risk") or analysis.get("copyrightRisk") or "medium",
+            "notes": _source_video_compact_text(derivation.get("similarityWarning") or analysis.get("transformationGuidance") or "", 300),
+        },
+        "sourceType": "source_video",
+        "sourceVideoId": source.get("sourceVideoId") or "",
+        "sourceUrl": source.get("sourceUrl") or "",
+    }
+
+
+@app.post("/source-videos/import")
+async def source_videos_import(request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    url = str((body or {}).get("url") or (body or {}).get("sourceUrl") or "").strip()
+    video_id = _source_video_parse_youtube_url(url)
+    if not video_id:
+        raise HTTPException(status_code=400, detail="invalid YouTube URL")
+    niche = _source_video_compact_text((body or {}).get("niche") or SOURCE_VIDEO_DEFAULT_NICHE, 80)
+    try:
+        metadata = _source_video_fetch_youtube_metadata(video_id)
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        source_id = _source_video_stable_id(principal.get("uid") or "admin", video_id)
+        ref = db.collection("sourceVideos").document(source_id)
+        existing = ref.get()
+        current = existing.to_dict() if existing.exists else {}
+        payload = {
+            **metadata,
+            "sourceVideoId": source_id,
+            "ownerUid": principal.get("uid") or "admin",
+            "niche": niche,
+            "transcriptStatus": current.get("transcriptStatus") or "missing",
+            "status": current.get("status") or "imported",
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+        if not existing.exists:
+            payload["createdAt"] = firestore.SERVER_TIMESTAMP
+        ref.set(payload, merge=True)
+        return {"ok": True, "item": _serialize_firestore_value(_source_video_public_doc(source_id, ref.get().to_dict() or {}))}
+    except HTTPException:
+        raise
+    except KnowledgeError as exc:
+        return JSONResponse(status_code=503, content={"error": str(exc)[:220]})
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.get("/source-videos")
+def source_videos_list(request: Request, status: str = "", q: str = "", channel: str = "", limit: int = 60):
+    principal = _require_source_video_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        safe_limit = max(1, min(150, _safe_int(limit, 60)))
+        docs = list(db.collection("sourceVideos").limit(300).stream())
+        items = []
+        query_text = (q or "").strip().lower()
+        channel_text = (channel or "").strip().lower()
+        status_text = (status or "").strip().lower()
+        for doc in docs:
+            data = doc.to_dict() or {}
+            if not principal.get("admin") and data.get("ownerUid") != principal.get("uid"):
+                continue
+            public = _source_video_public_doc(doc.id, data)
+            if status_text and public.get("status") != status_text:
+                continue
+            if channel_text and channel_text not in str(public.get("channelName") or "").lower():
+                continue
+            if query_text:
+                haystack = " ".join([
+                    str(public.get("title") or ""),
+                    str(public.get("channelName") or ""),
+                    str(public.get("description") or ""),
+                ]).lower()
+                if query_text not in haystack:
+                    continue
+            items.append(_serialize_firestore_value(public))
+        items.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+        return {"ok": True, "items": items[:safe_limit], "count": min(len(items), safe_limit)}
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220], "items": []})
+
+
+@app.get("/source-videos/{source_video_id}")
+def source_videos_get(source_video_id: str, request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        _ref, snap, data = _source_video_get_doc(db, source_video_id, principal)
+        analysis = {}
+        derivation = {}
+        if data.get("analysisId"):
+            a_snap = db.collection("sourceVideoAnalyses").document(data["analysisId"]).get()
+            if a_snap.exists:
+                analysis = _source_video_public_analysis(a_snap.id, a_snap.to_dict() or {})
+        if data.get("derivationId"):
+            d_snap = db.collection("sourceVideoDerivations").document(data["derivationId"]).get()
+            if d_snap.exists:
+                derivation = _source_video_public_derivation(d_snap.id, d_snap.to_dict() or {})
+        transcript_snap = db.collection("sourceVideoTranscripts").document(source_video_id).get()
+        transcript_meta = {}
+        if transcript_snap.exists:
+            t = transcript_snap.to_dict() or {}
+            transcript_meta = {
+                "transcriptHash": t.get("transcriptHash") or "",
+                "transcriptSource": t.get("transcriptSource") or "manual",
+                "characters": _safe_int(t.get("characters"), 0),
+                "updatedAt": _serialize_firestore_value(t.get("updatedAt")),
+            }
+        return {
+            "ok": True,
+            "item": _serialize_firestore_value(_source_video_public_doc(snap.id, data)),
+            "analysis": analysis,
+            "derivation": derivation,
+            "transcript": transcript_meta,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/source-videos/{source_video_id}/transcript")
+async def source_videos_transcript(source_video_id: str, request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    transcript = _source_video_clean_transcript((body or {}).get("transcript") or "")
+    if len(transcript) < 200:
+        raise HTTPException(status_code=400, detail="transcript too short")
+    transcript_source = _source_video_compact_text((body or {}).get("transcriptSource") or "manual", 40)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        source_ref, _snap, _data = _source_video_get_doc(db, source_video_id, principal)
+        t_hash = _source_video_transcript_hash(transcript)
+        db.collection("sourceVideoTranscripts").document(source_video_id).set({
+            "sourceVideoId": source_video_id,
+            "ownerUid": principal.get("uid") or "admin",
+            "transcript": transcript,
+            "transcriptHash": t_hash,
+            "transcriptSource": transcript_source,
+            "characters": len(transcript),
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+        source_ref.set({
+            "transcriptStatus": transcript_source,
+            "transcriptHash": t_hash,
+            "status": "transcript_ready",
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+        return {"ok": True, "sourceVideoId": source_video_id, "transcriptHash": t_hash, "characters": len(transcript)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/source-videos/{source_video_id}/analyze")
+async def source_videos_analyze(source_video_id: str, request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    force = bool((body or {}).get("force"))
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        source_ref, _snap, source_data = _source_video_get_doc(db, source_video_id, principal)
+        transcript_snap = db.collection("sourceVideoTranscripts").document(source_video_id).get()
+        if not transcript_snap.exists:
+            raise HTTPException(status_code=400, detail="source video transcript required")
+        transcript_doc = transcript_snap.to_dict() or {}
+        transcript = transcript_doc.get("transcript") or ""
+        t_hash = transcript_doc.get("transcriptHash") or _source_video_transcript_hash(transcript)
+        analysis_id = f"{source_video_id}_{t_hash[:12]}"
+        analysis_ref = db.collection("sourceVideoAnalyses").document(analysis_id)
+        if analysis_ref.get().exists and not force:
+            analysis = analysis_ref.get().to_dict() or {}
+            return {"ok": True, "cached": True, "analysis": _source_video_public_analysis(analysis_id, analysis)}
+        chunks = _source_video_chunk_transcript(transcript)
+        raw, model = _source_video_llm_json(
+            _source_video_analysis_prompt(source_data, chunks, source_data.get("niche") or SOURCE_VIDEO_DEFAULT_NICHE),
+            max_tokens=2400,
+        )
+        analysis = _source_video_normalize_analysis(raw, source_data, transcript)
+        analysis.update({
+            "analysisId": analysis_id,
+            "sourceVideoId": source_video_id,
+            "transcriptHash": t_hash,
+            "transcriptSource": transcript_doc.get("transcriptSource") or "manual",
+            "model": model,
+            "createdAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        analysis_ref.set(analysis)
+        source_ref.set({"analysisId": analysis_id, "status": "analyzed", "updatedAt": firestore.SERVER_TIMESTAMP}, merge=True)
+        return {"ok": True, "cached": False, "analysis": _source_video_public_analysis(analysis_id, analysis)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/source-videos/{source_video_id}/derive-podcast")
+async def source_videos_derive_podcast(source_video_id: str, request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        source_ref, _snap, source_data = _source_video_get_doc(db, source_video_id, principal)
+        analysis_id, analysis = _source_video_latest_analysis(db, source_video_id, (body or {}).get("analysisId") or source_data.get("analysisId") or "")
+        transcript_snap = db.collection("sourceVideoTranscripts").document(source_video_id).get()
+        transcript = (transcript_snap.to_dict() or {}).get("transcript") if transcript_snap.exists else ""
+        target_agent_name = _source_video_compact_text((body or {}).get("targetAgentName") or "Podcast", 120)
+        selected_title = _source_video_compact_text((body or {}).get("selectedTitle") or "", 140)
+        raw, model = _source_video_llm_json(
+            _source_video_derivation_prompt(analysis, source_data, target_agent_name=target_agent_name, selected_title=selected_title),
+            max_tokens=2200,
+        )
+        derivation = _source_video_normalize_derivation(raw, analysis, source_data)
+        generated_text = json.dumps(derivation, ensure_ascii=False)
+        similarity = _source_video_similarity_guard(transcript, generated_text)
+        if similarity.get("risk") == "high":
+            derivation["similarityWarning"] = "El resultado se parece demasiado al transcript fuente; regenera antes de preparar proyecto."
+        derivation.update({
+            "sourceVideoId": source_video_id,
+            "analysisId": analysis_id,
+            "model": model,
+            "similarity": similarity,
+            "createdAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        derivation_ref = db.collection("sourceVideoDerivations").document()
+        derivation["derivationId"] = derivation_ref.id
+        derivation_ref.set(derivation)
+        source_ref.set({"derivationId": derivation_ref.id, "status": "idea_saved", "updatedAt": firestore.SERVER_TIMESTAMP}, merge=True)
+        return {"ok": True, "derivation": _source_video_public_derivation(derivation_ref.id, derivation)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/source-videos/{source_video_id}/save-idea")
+async def source_videos_save_idea(source_video_id: str, request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    agent_id = str((body or {}).get("agentId") or SOURCE_VIDEO_DEFAULT_TARGET_AGENT_ID).strip()
+    agent = _radar_agent_by_id(agent_id) or {
+        "agentId": agent_id,
+        "name": (body or {}).get("agentName") or "Podcast",
+        "promptFile": (body or {}).get("agentFile") or "agent_podcast_general.md",
+        "format": "podcast",
+        "platform": "youtube",
+    }
+    selected_title = _source_video_compact_text((body or {}).get("selectedTitle") or "", 140)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        _source_ref, _snap, source_data = _source_video_get_doc(db, source_video_id, principal)
+        _analysis_id, analysis = _source_video_latest_analysis(db, source_video_id, (body or {}).get("analysisId") or source_data.get("analysisId") or "")
+        _derivation_id, derivation = _source_video_latest_derivation(db, source_video_id, (body or {}).get("derivationId") or source_data.get("derivationId") or "")
+        source_public = _source_video_public_doc(source_video_id, source_data)
+        candidate = _source_video_candidate(agent, source_public, analysis, derivation, selected_title, principal["uid"])
+        item = _radar_upsert_library_candidate(db, firestore, principal["uid"], candidate, status="saved")
+        return {"ok": True, "item": _library_public_item(item["itemId"], item), "candidateHash": candidate["candidateHash"]}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/source-videos/{source_video_id}/prepare-project")
+async def source_videos_prepare_project(source_video_id: str, request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    agent_id = str((body or {}).get("agentId") or SOURCE_VIDEO_DEFAULT_TARGET_AGENT_ID).strip()
+    selected_title = _source_video_compact_text((body or {}).get("selectedTitle") or "", 140)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        source_ref, _snap, source_data = _source_video_get_doc(db, source_video_id, principal)
+        _analysis_id, analysis = _source_video_latest_analysis(db, source_video_id, (body or {}).get("analysisId") or source_data.get("analysisId") or "")
+        derivation_id, derivation = _source_video_latest_derivation(db, source_video_id, (body or {}).get("derivationId") or source_data.get("derivationId") or "")
+        if (derivation.get("similarity") or {}).get("risk") == "high":
+            raise HTTPException(status_code=409, detail="derivation too similar to source transcript")
+        topic = _source_video_project_topic(derivation, analysis, source_data, selected_title=selected_title)
+        params = urllib.parse.urlencode({
+            "agentId": agent_id,
+            "topic": topic,
+            "from": "inspiration",
+            "sourceVideoId": source_video_id,
+        })
+        prepared_url = f"/dashboard/new?{params}"
+        source_ref.set({"status": "project_prepared", "preparedAt": firestore.SERVER_TIMESTAMP, "updatedAt": firestore.SERVER_TIMESTAMP}, merge=True)
+        return {
+            "ok": True,
+            "sourceVideoId": source_video_id,
+            "derivationId": derivation_id,
+            "prefill": {
+                "agentId": agent_id,
+                "topic": topic,
+                "from": "inspiration",
+                "sourceVideoId": source_video_id,
+            },
+            "preparedUrl": prepared_url,
+            "creditCharged": False,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
 
 
 @app.post("/radar/candidates/{candidate_hash}/save")

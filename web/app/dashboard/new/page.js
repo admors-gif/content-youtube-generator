@@ -1393,7 +1393,7 @@ export default function NewProjectPage() {
                   lineHeight: 1.45,
                 }}
               >
-                Tema preparado desde {prefillSource === "radar" ? "Radar" : "Biblioteca"}. Aún no se ha cobrado ningún crédito; el consumo empieza solo al pulsar el botón final.
+                Tema preparado desde {prefillSource === "radar" ? "Radar" : prefillSource === "inspiration" ? "Inspiración" : "Biblioteca"}. Aún no se ha cobrado ningún crédito; el consumo empieza solo al pulsar el botón final.
               </div>
             )}
 
