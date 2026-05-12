@@ -465,6 +465,29 @@ export const SYSTEM_AGENTS = [
     color: "#9B6CFF",
   },
   {
+    agentId: "agent_meditacion_larga_v2",
+    name: "Meditación Inmersiva",
+    emoji: "🌌",
+    description: "Sesiones largas con respiración acompañada, voz dinámica, visualización profunda e integración emocional segura.",
+    category: "wellness",
+    promptFile: "agent_meditacion_larga_v2.md",
+    tier: "creator",
+    format: "meditacion_larga",
+    defaultVoices: { narrator: "Lorenzo" },
+    durationProfiles: [
+      { id: "30m-guided", label: "30 min guiada", description: "Más presencia y respiración acompañada sin sentirse lenta.", targetMinutes: 30 },
+      { id: "60m-guided", label: "1 h guiada", description: "Equilibrio recomendado: profunda, humana y fluida.", targetMinutes: 60 },
+      { id: "60m-immersive", label: "1 h inmersiva", description: "Más voz, más respiración y más integración emocional.", targetMinutes: 60 },
+      { id: "180m-deep", label: "3 h profunda", description: "Sesión extendida con capítulos suaves y cierres para descanso.", targetMinutes: 180 },
+    ],
+    exampleTopics: [
+      "Meditación inmersiva para disciplina y autoestima",
+      "Respirar profundo para soltar ansiedad antes de dormir",
+      "Reconectar con mi seguridad interior"
+    ],
+    color: "#A78BFA",
+  },
+  {
     agentId: "agent_tiktok_documentary",
     name: "TikTok Documental",
     emoji: "⚡",

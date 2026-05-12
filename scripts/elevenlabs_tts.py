@@ -171,6 +171,30 @@ def get_voice_settings(voice_name: str) -> dict:
     return VOICE_SETTINGS.get(voice_name, VOICE_SETTINGS["Salvatore"])
 
 
+def _clean_scene_tts_settings(scene: dict | None) -> dict:
+    """Optional per-scene TTS overrides used by immersive long meditations."""
+    raw = {}
+    if isinstance(scene, dict):
+        candidate = scene.get("tts_settings") or scene.get("voice_settings") or {}
+        if isinstance(candidate, dict):
+            raw = candidate
+    cleaned = {}
+    for key in ("stability", "similarity_boost", "speed", "style"):
+        if key not in raw:
+            continue
+        try:
+            value = float(raw[key])
+        except Exception:
+            continue
+        if key in {"stability", "similarity_boost"}:
+            cleaned[key] = min(1.0, max(0.0, value))
+        elif key == "style":
+            cleaned[key] = min(0.2, max(0.0, value))
+        elif key == "speed":
+            cleaned[key] = min(1.3, max(0.7, value))
+    return cleaned
+
+
 V3_AUDIO_TAGS = {
     "laughs",
     "laughs softly",
@@ -374,7 +398,13 @@ def generate_scene_narrations(
         
         stats["chars_total"] += len(narration)
         
-        ok = generate_narration(narration, audio_path, voice=voice)
+        scene_tts_settings = _clean_scene_tts_settings(scene)
+        ok = generate_narration(
+            narration,
+            audio_path,
+            voice=voice,
+            **scene_tts_settings,
+        )
         
         if ok:
             size_kb = audio_path.stat().st_size / 1024

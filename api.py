@@ -569,6 +569,7 @@ _TIKTOK_SOURCE_GENRES = {
 _WELLNESS_AGENT_IDS = {
     "agent_autohipnosis",
     "agent_meditacion_larga",
+    "agent_meditacion_larga_v2",
     "agent_tiktok_autohipnosis",
     "agent_tiktok_meditation",
 }
@@ -763,7 +764,8 @@ def _validate_project_payload(data: dict) -> dict:
             "source_genre": source_genre,
             "target_seconds": _TIKTOK_DURATION_SECONDS[duration_profile],
         })
-    elif agent_id == "agent_meditacion_larga":
+    elif agent_id in {"agent_meditacion_larga", "agent_meditacion_larga_v2"}:
+        v2_profiles = {"30m-guided", "60m-guided", "60m-immersive", "180m-deep"}
         aliases = {
             "30": "30m",
             "30m": "30m",
@@ -775,8 +777,34 @@ def _validate_project_payload(data: dict) -> dict:
             "180m": "180m",
             "3h": "180m",
         }
-        duration_profile = aliases.get(duration_profile.replace(" ", ""), duration_profile or "60m")
-        if duration_profile not in allowed_duration_profiles:
+        v2_aliases = {
+            **aliases,
+            "30": "30m-guided",
+            "30m": "30m-guided",
+            "30min": "30m-guided",
+            "60": "60m-guided",
+            "60m": "60m-guided",
+            "1h": "60m-guided",
+            "60mguiada": "60m-guided",
+            "1hguiada": "60m-guided",
+            "60mguided": "60m-guided",
+            "60minmersiva": "60m-immersive",
+            "1hinmersiva": "60m-immersive",
+            "60mimmersive": "60m-immersive",
+            "180": "180m-deep",
+            "180m": "180m-deep",
+            "3h": "180m-deep",
+            "180mprofunda": "180m-deep",
+            "3hprofunda": "180m-deep",
+        }
+        raw_duration_profile = duration_profile.replace(" ", "")
+        if agent_id == "agent_meditacion_larga_v2":
+            duration_profile = v2_aliases.get(raw_duration_profile, duration_profile or "60m-guided")
+            allowed_profiles = v2_profiles
+        else:
+            duration_profile = aliases.get(raw_duration_profile, duration_profile or "60m")
+            allowed_profiles = allowed_duration_profiles
+        if duration_profile not in allowed_profiles:
             raise HTTPException(status_code=400, detail="invalid durationProfile")
         generation_options["duration_profile"] = duration_profile
 
@@ -1683,7 +1711,7 @@ def _thumbnail_hook_lines(hook: str) -> list[str]:
 
 
 def _thumbnail_format_badge(agent_id: str | None = None) -> str | None:
-    if agent_id in {"agent_autohipnosis", "agent_meditacion_larga"}:
+    if agent_id in {"agent_autohipnosis", "agent_meditacion_larga", "agent_meditacion_larga_v2"}:
         return "MEDITACIÓN GUIADA"
     if agent_id == "agent_podcast_general":
         return "PODCAST"
@@ -1696,7 +1724,7 @@ def _title_has_any(lower_title: str, terms: list[str]) -> bool:
 
 def _wellness_thumbnail_hook_plans(clean_title: str, agent_id: str | None = None) -> list[dict]:
     lower = clean_title.lower()
-    is_long = agent_id == "agent_meditacion_larga"
+    is_long = agent_id in {"agent_meditacion_larga", "agent_meditacion_larga_v2"}
     is_sleep = _title_has_any(lower, ["dormir", "duerme", "sueño", "sueno", "noche", "descanso", "descansar"])
     is_confidence = _title_has_any(lower, ["confianza", "autoconfianza", "seguridad", "autoestima"])
     is_anxiety = _title_has_any(lower, ["ansiedad", "estres", "estrés", "preocupacion", "preocupación", "calma"])
@@ -1834,7 +1862,7 @@ def _thumbnail_hook_plans(title: str, agent_id: str | None = None) -> list[dict]
     is_science = any(word in lower for word in ["ciencia", "cerebro", "psicologia", "psicología", "neuro"])
     keywords = _pick_thumbnail_keywords(clean_title, max_words=3)
 
-    if agent_id in {"agent_autohipnosis", "agent_meditacion_larga"}:
+    if agent_id in {"agent_autohipnosis", "agent_meditacion_larga", "agent_meditacion_larga_v2"}:
         return _wellness_thumbnail_hook_plans(clean_title, agent_id=agent_id)
 
     if agent_id == "agent_podcast_general" and _is_esto_no_es_amor_topic(clean_title):
@@ -1907,13 +1935,13 @@ def _build_premium_thumbnail_prompt(
         "podcast thumbnail"
         if agent_id == "agent_podcast_general"
         else "guided meditation thumbnail"
-        if agent_id in {"agent_autohipnosis", "agent_meditacion_larga"}
+        if agent_id in {"agent_autohipnosis", "agent_meditacion_larga", "agent_meditacion_larga_v2"}
         else "documentary thumbnail"
     )
     safety_hint = (
         "This is wellness and personal growth content, not medical treatment. "
         "Avoid clinical, hospital, doctor, pill, or therapy imagery. "
-        if agent_id in {"agent_autohipnosis", "agent_meditacion_larga"}
+        if agent_id in {"agent_autohipnosis", "agent_meditacion_larga", "agent_meditacion_larga_v2"}
         else ""
     )
     avoid_people = bool(plan.get("avoid_people"))
@@ -2731,6 +2759,7 @@ _AGENT_CATALOG = """
 [agent_podcast_general] Esto no es amor — conversación entre dos hosts (Mateo y Lucía) sobre cualquier tema, formato podcast multitema con dos voces alternando
 [agent_autohipnosis] Autohipnosis Guiada — wellness, relajación, visualización, afirmaciones positivas, desarrollo personal seguro
 [agent_meditacion_larga] Meditación Larga — sesiones de 30 min, 1 h y 3 h para sueño, calma, afirmaciones espaciadas y visuales lentos
+[agent_meditacion_larga_v2] Meditación Inmersiva — sesiones largas con respiración acompañada, visualización profunda e integración emocional segura
 """.strip()
 
 _RADAR_EXTRA_AGENTS = [
@@ -2778,6 +2807,7 @@ _RADAR_PRIORITY_AGENT_IDS = [
     "agent_tiktok_podcast",
     "agent_tiktok_documentary",
     "agent_meditacion_larga",
+    "agent_meditacion_larga_v2",
     "agent_autohipnosis",
     "agent_tecnologia",
     "agent_finanzas",
@@ -2828,6 +2858,7 @@ def _radar_agent_catalog() -> list[dict]:
         "agent_podcast_general": "podcast",
         "agent_autohipnosis": "wellness",
         "agent_meditacion_larga": "wellness",
+        "agent_meditacion_larga_v2": "wellness",
     }
     agents = []
     for line in _AGENT_CATALOG.splitlines():
@@ -2841,7 +2872,7 @@ def _radar_agent_catalog() -> list[dict]:
             project_format = "podcast"
         elif aid == "agent_autohipnosis":
             project_format = "autohipnosis"
-        elif aid == "agent_meditacion_larga":
+        elif aid in {"agent_meditacion_larga", "agent_meditacion_larga_v2"}:
             project_format = "meditacion_larga"
         agents.append({
             "agentId": aid,
@@ -4042,6 +4073,8 @@ def _radar_project_payload_from_candidate(candidate: dict) -> dict:
         payload["sourceGenre"] = category if category in _TIKTOK_SOURCE_GENRES else "psychology"
     if agent_id == "agent_meditacion_larga":
         payload.setdefault("durationProfile", "60m")
+    if agent_id == "agent_meditacion_larga_v2":
+        payload.setdefault("durationProfile", "60m-guided")
     return payload
 
 
@@ -9853,7 +9886,7 @@ def run_production(project_id):
         )
         is_long_meditation_project = (
             project_format == "meditacion_larga"
-            or agent_id == "agent_meditacion_larga"
+            or agent_id in {"agent_meditacion_larga", "agent_meditacion_larga_v2"}
         )
 
         # Mapear scenes de Firestore al formato factory.py

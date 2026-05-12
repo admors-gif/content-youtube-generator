@@ -911,6 +911,11 @@ AUTOHYPNOSIS_DURATION_PROFILES = {
 }
 
 LONG_MEDITATION_FORMAT = "meditacion_larga"
+LONG_MEDITATION_V2_AGENT_FILE = "agent_meditacion_larga_v2.md"
+LONG_MEDITATION_AGENT_FILES = {
+    "agent_meditacion_larga.md",
+    LONG_MEDITATION_V2_AGENT_FILE,
+}
 LONG_MEDITATION_ESTIMATED_WPM = 125
 LONG_MEDITATION_DURATION_PROFILES = {
     "30m": {
@@ -936,6 +941,56 @@ LONG_MEDITATION_DURATION_PROFILES = {
         "characters": "25,000 a 31,000",
         "visual_scenes": 30,
         "affirmation_spacing_minutes": 5,
+    },
+}
+LONG_MEDITATION_V2_DURATION_PROFILES = {
+    "30m-guided": {
+        "label": "30 min guiada",
+        "target_minutes": 30,
+        "speech_minutes": 18,
+        "characters": "12,500 a 15,500",
+        "visual_scenes": 14,
+        "affirmation_spacing_minutes": 1.2,
+        "delivery_profile": "immersive_v2",
+        "intensity": "guiada",
+        "breathwork_density": "media",
+        "reflection_density": "media",
+    },
+    "60m-guided": {
+        "label": "1 h guiada",
+        "target_minutes": 60,
+        "speech_minutes": 34,
+        "characters": "23,000 a 28,000",
+        "visual_scenes": 24,
+        "affirmation_spacing_minutes": 1.6,
+        "delivery_profile": "immersive_v2",
+        "intensity": "guiada",
+        "breathwork_density": "media-alta",
+        "reflection_density": "media",
+    },
+    "60m-immersive": {
+        "label": "1 h inmersiva",
+        "target_minutes": 60,
+        "speech_minutes": 42,
+        "characters": "28,000 a 34,000",
+        "visual_scenes": 26,
+        "affirmation_spacing_minutes": 1.4,
+        "delivery_profile": "immersive_v2",
+        "intensity": "inmersiva",
+        "breathwork_density": "alta",
+        "reflection_density": "alta",
+    },
+    "180m-deep": {
+        "label": "3 h profunda",
+        "target_minutes": 180,
+        "speech_minutes": 52,
+        "characters": "35,000 a 42,000",
+        "visual_scenes": 36,
+        "affirmation_spacing_minutes": 3.5,
+        "delivery_profile": "immersive_v2",
+        "intensity": "profunda",
+        "breathwork_density": "media",
+        "reflection_density": "alta",
     },
 }
 
@@ -1720,10 +1775,16 @@ def _autohypnosis_duration_profile(topic: str, requested_profile: str | None = N
     return AUTOHYPNOSIS_DURATION_PROFILES["standard"]
 
 
-def _long_meditation_duration_profile(requested_profile: str | None = None, topic: str = "") -> dict:
-    """Normalize 30m/1h/3h presets for long meditation production."""
+def _long_meditation_duration_profile(
+    requested_profile: str | None = None,
+    topic: str = "",
+    agent_file: str | None = None,
+) -> dict:
+    """Normalize classic and immersive long meditation presets."""
+    is_immersive_v2 = agent_file == LONG_MEDITATION_V2_AGENT_FILE
+    profiles = LONG_MEDITATION_V2_DURATION_PROFILES if is_immersive_v2 else LONG_MEDITATION_DURATION_PROFILES
     raw = (requested_profile or "").strip().lower().replace(" ", "")
-    aliases = {
+    classic_aliases = {
         "30": "30m",
         "30m": "30m",
         "30min": "30m",
@@ -1741,18 +1802,49 @@ def _long_meditation_duration_profile(requested_profile: str | None = None, topi
         "3horas": "180m",
         "treshoras": "180m",
     }
+    immersive_aliases = {
+        **classic_aliases,
+        "30": "30m-guided",
+        "30m": "30m-guided",
+        "30min": "30m-guided",
+        "60": "60m-guided",
+        "60m": "60m-guided",
+        "60min": "60m-guided",
+        "1h": "60m-guided",
+        "1hora": "60m-guided",
+        "60mguiada": "60m-guided",
+        "60mguided": "60m-guided",
+        "1hguiada": "60m-guided",
+        "1hguided": "60m-guided",
+        "60minmersiva": "60m-immersive",
+        "60mimmersive": "60m-immersive",
+        "1hinmersiva": "60m-immersive",
+        "1himmersive": "60m-immersive",
+        "180": "180m-deep",
+        "180m": "180m-deep",
+        "180min": "180m-deep",
+        "3h": "180m-deep",
+        "3horas": "180m-deep",
+        "treshoras": "180m-deep",
+        "180mprofunda": "180m-deep",
+        "3hprofunda": "180m-deep",
+        "3hdeep": "180m-deep",
+    }
+    aliases = immersive_aliases if is_immersive_v2 else classic_aliases
     key = aliases.get(raw)
-    if key:
-        return {**LONG_MEDITATION_DURATION_PROFILES[key], "key": key}
+    if raw in profiles:
+        key = raw
+    if key and key in profiles:
+        return {**profiles[key], "key": key, "variant": "immersive_v2" if is_immersive_v2 else "classic"}
 
     lower = (topic or "").lower()
     if any(token in lower for token in ["3 horas", "tres horas", "180 min", "180 minutos"]):
-        key = "180m"
+        key = "180m-deep" if is_immersive_v2 else "180m"
     elif any(token in lower for token in ["30 min", "30 minutos", "media hora"]):
-        key = "30m"
+        key = "30m-guided" if is_immersive_v2 else "30m"
     else:
-        key = "60m"
-    return {**LONG_MEDITATION_DURATION_PROFILES[key], "key": key}
+        key = "60m-guided" if is_immersive_v2 else "60m"
+    return {**profiles[key], "key": key, "variant": "immersive_v2" if is_immersive_v2 else "classic"}
 
 
 PERSONALIZATION_LIMITS = {
@@ -2063,6 +2155,58 @@ def _build_autohypnosis_visual_scenes(
     return visual_scenes
 
 
+def _long_meditation_delivery_phase(index: int, total: int) -> str:
+    ratio = (index + 1) / max(1, total)
+    if ratio <= 0.18:
+        return "breathwork"
+    if ratio <= 0.38:
+        return "induction"
+    if ratio <= 0.72:
+        return "reflection"
+    if ratio <= 0.90:
+        return "affirmation"
+    return "closing"
+
+
+def _long_meditation_scene_tts_settings(profile: dict, index: int, total: int) -> dict | None:
+    if (profile or {}).get("delivery_profile") != "immersive_v2":
+        return None
+    phase = _long_meditation_delivery_phase(index, total)
+    presets = {
+        "breathwork": {
+            "speed": 0.86,
+            "stability": 0.64,
+            "similarity_boost": 0.80,
+            "style": 0.04,
+        },
+        "induction": {
+            "speed": 0.89,
+            "stability": 0.62,
+            "similarity_boost": 0.80,
+            "style": 0.05,
+        },
+        "reflection": {
+            "speed": 0.95,
+            "stability": 0.56,
+            "similarity_boost": 0.80,
+            "style": 0.07,
+        },
+        "affirmation": {
+            "speed": 0.91,
+            "stability": 0.60,
+            "similarity_boost": 0.80,
+            "style": 0.06,
+        },
+        "closing": {
+            "speed": 0.86,
+            "stability": 0.66,
+            "similarity_boost": 0.80,
+            "style": 0.04,
+        },
+    }
+    return {"phase": phase, **presets[phase]}
+
+
 def _build_long_meditation_visual_scenes(
     topic: str,
     script_text: str,
@@ -2099,6 +2243,7 @@ def _build_long_meditation_visual_scenes(
     visual_scenes = []
     for i, segment in enumerate(segments):
         category, template, base_tags = LONG_MEDITATION_VISUAL_TEMPLATES[i % len(LONG_MEDITATION_VISUAL_TEMPLATES)]
+        tts_settings = _long_meditation_scene_tts_settings(profile, i, len(segments))
         prompt = _append_unique_prompt_clauses(
             template.format(topic=topic_clean),
             safety_clauses + [
@@ -2115,6 +2260,9 @@ def _build_long_meditation_visual_scenes(
             "target_duration_seconds": durations[i],
             "pace": "long_meditation",
         })
+        if tts_settings:
+            visual_scenes[-1]["delivery_phase"] = tts_settings.pop("phase")
+            visual_scenes[-1]["tts_settings"] = tts_settings
 
     return visual_scenes
 
@@ -2317,7 +2465,7 @@ def generate_long_meditation_script(
     despues con pausas, ambiente y visuales largos; no con 3 horas de TTS.
     """
     agent_name = agent_file.replace("agent_", "").replace(".md", "").replace("_", " ").title()
-    profile = _long_meditation_duration_profile(duration_profile, topic)
+    profile = _long_meditation_duration_profile(duration_profile, topic, agent_file=agent_file)
     print(f"\n🌌 MOTOR 1 (MEDITACION LARGA): Generando guia para '{topic}'...")
     print(f"   Modelo: {CLAUDE_MODEL_SCRIPT if claude_client else GPT_MODEL}")
     print(f"   Agente: {agent_name} ({agent_file})")
@@ -2330,6 +2478,17 @@ def generate_long_meditation_script(
         profile=profile,
     )
     personalization_section = f"\n\n{personalization_block}" if personalization_block else ""
+    immersive_requirements = ""
+    if profile.get("delivery_profile") == "immersive_v2":
+        immersive_requirements = f"""
+- Modo de intensidad: {profile.get('intensity', 'guiada')}
+- Densidad de respiracion guiada: {profile.get('breathwork_density', 'media')}
+- Densidad de reflexion interior: {profile.get('reflection_density', 'media')}
+- Incluye respiraciones acompanadas con conteos completos y pausas verbales reales
+- Alterna respiracion, presencia corporal, visualizacion, afirmaciones y reflexion
+- No hagas toda la sesion lenta: respiracion suave, reflexion natural, afirmaciones medio-lentas
+- Evita reinicios bruscos despues de pausas largas; retoma con frases puente como "sin prisa", "y poco a poco", "cuando estes listo"."""
+
     user_message = f"""Genera la parte hablada de una meditacion guiada larga sobre el siguiente objetivo.
 
 OBJETIVO: {topic}
@@ -2341,6 +2500,7 @@ Perfil de produccion:
 - Extension hablada objetivo: {profile['characters']} caracteres
 - Cadencia hablada: disenar intervenciones breves y regulares cada {profile['affirmation_spacing_minutes']} minutos aproximadamente
 - Visuales finales: {profile['visual_scenes']} escenas casi estaticas
+{immersive_requirements}
 
 Requisitos estrictos:
 - Espanol neutro de Latinoamerica
@@ -2397,6 +2557,11 @@ Devuelve solo el guion hablado final."""
             "speech_target_minutes": profile["speech_minutes"],
             "visual_scene_target": profile["visual_scenes"],
             "format": LONG_MEDITATION_FORMAT,
+            "variant": profile.get("variant", "classic"),
+            "delivery_profile": profile.get("delivery_profile", "classic"),
+            "intensity": profile.get("intensity", "suave"),
+            "breathwork_density": profile.get("breathwork_density"),
+            "reflection_density": profile.get("reflection_density"),
             "personalization": _personalization_metadata(personalization_payload),
             "generated_at": datetime.now().isoformat(),
             "web_research": False,
@@ -2452,7 +2617,7 @@ def run_full_pipeline(
     # para evitar exceso de escenas y conservar el estilo correcto.
     is_podcast = agent_file.startswith("agent_podcast_")
     is_autohypnosis = agent_file == "agent_autohipnosis.md"
-    is_long_meditation = agent_file == "agent_meditacion_larga.md"
+    is_long_meditation = agent_file in LONG_MEDITATION_AGENT_FILES
     is_tiktok = _is_tiktok_agent_file(agent_file)
     tiktok_format = _tiktok_format_from_agent_file(agent_file) if is_tiktok else ""
     tiktok_profile = _tiktok_duration_profile(generation_options.get("duration_profile")) if is_tiktok else None
@@ -2616,6 +2781,7 @@ def run_full_pipeline(
             long_profile = _long_meditation_duration_profile(
                 result["metadata"].get("duration_profile"),
                 topic,
+                agent_file=agent_file,
             )
             video_scenes = _build_long_meditation_visual_scenes(
                 topic,
@@ -2787,7 +2953,13 @@ def run_full_pipeline(
                 "affirmation_spacing_minutes": _long_meditation_duration_profile(
                     result["metadata"].get("duration_profile"),
                     topic,
+                    agent_file=agent_file,
                 ).get("affirmation_spacing_minutes"),
+                "variant": result["metadata"].get("variant", "classic"),
+                "delivery_profile": result["metadata"].get("delivery_profile", "classic"),
+                "intensity": result["metadata"].get("intensity", "suave"),
+                "breathwork_density": result["metadata"].get("breathwork_density"),
+                "reflection_density": result["metadata"].get("reflection_density"),
                 "background_music": {
                     "enabled": True,
                     "asset": wellness_music_selection.get("asset") if wellness_music_selection else None,

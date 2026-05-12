@@ -143,6 +143,28 @@ def test_long_meditation_visual_scenes_preserve_script_and_target_duration():
     assert all("environment-only composition" in prompt for prompt in prompts)
 
 
+def test_immersive_long_meditation_profile_adds_dynamic_tts_settings():
+    script = _sample_autohypnosis_script(24)
+    profile = _long_meditation_duration_profile(
+        "60m-immersive",
+        agent_file="agent_meditacion_larga_v2.md",
+    )
+
+    scenes = _build_long_meditation_visual_scenes(
+        "respirar para recuperar autoestima",
+        script,
+        profile,
+        project_id="immersive-project",
+    )
+
+    assert profile["variant"] == "immersive_v2"
+    assert profile["speech_minutes"] > _long_meditation_duration_profile("60m")["speech_minutes"]
+    assert scenes[0]["delivery_phase"] == "breathwork"
+    assert scenes[0]["tts_settings"]["speed"] < 0.90
+    assert any(scene.get("delivery_phase") == "reflection" for scene in scenes)
+    assert all("tts_settings" in scene for scene in scenes)
+
+
 def test_personalization_prompt_block_is_safe_and_frequency_aware():
     profile = _long_meditation_duration_profile("3h")
     block, payload = _personalization_prompt_block(

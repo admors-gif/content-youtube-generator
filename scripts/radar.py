@@ -846,7 +846,7 @@ def knowledge_candidate_angle(agent: dict, title: str, content: str) -> str:
     aid = agent_id(agent)
     if aid in PODCAST_AGENT_IDS:
         return compact_text(f"{title}: una conversacion emocional con ejemplos reales, limites claros y cierre sanador", 240)
-    if aid in {"agent_autohipnosis", "agent_meditacion_larga", "agent_tiktok_autohypnosis", "agent_tiktok_meditation"}:
+    if aid in {"agent_autohipnosis", "agent_meditacion_larga", "agent_meditacion_larga_v2", "agent_tiktok_autohypnosis", "agent_tiktok_meditation"}:
         return compact_text(f"{title}: una experiencia segura de bienestar sin promesas medicas", 240)
     return compact_text(f"{title}: desarrollado con profundidad desde la biblioteca interna y convertido en historia", 240)
 
@@ -943,7 +943,7 @@ def classify_risk(agent: dict, title: str, summary: str, sources: list[dict]) ->
         if hits:
             return "high", "Tema sensible con menos de dos fuentes verificables."
         return "medium", "Noticia actual con fuente unica; revisar antes de producir."
-    if aid in {"agent_autohipnosis", "agent_meditacion_larga", "agent_tiktok_autohypnosis", "agent_tiktok_meditation"}:
+    if aid in {"agent_autohipnosis", "agent_meditacion_larga", "agent_meditacion_larga_v2", "agent_tiktok_autohypnosis", "agent_tiktok_meditation"}:
         if any(token in lower for token in ["cura", "curar", "depresion", "depresion", "diagnostico", "trauma"]):
             return "high", "Wellness con posible promesa medica o clinica."
     if hits:
