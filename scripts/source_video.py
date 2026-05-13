@@ -31,6 +31,22 @@ def compact_text(value: object, limit: int = 500) -> str:
     return text
 
 
+def json_safe(value: object):
+    """Return a JSON-serializable copy of Firestore/SDK-shaped values."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [json_safe(item) for item in value]
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+    return compact_text(value, 1000)
+
+
 def normalize_key(value: object) -> str:
     text = str(value or "").strip().lower()
     text = unicodedata.normalize("NFKD", text)
@@ -234,7 +250,7 @@ def derivation_prompt(
         "Convierte el analisis en opciones de podcast original. "
         "JSON requerido: titles[{title,hook,seoKeywords[],retentionReason}], recommendedTitle, "
         "episodeBrief, structure[{section,purpose}], openingHook, cta, similarityWarning.\n\n"
-        + json.dumps(payload, ensure_ascii=False)
+        + json.dumps(json_safe(payload), ensure_ascii=False)
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 

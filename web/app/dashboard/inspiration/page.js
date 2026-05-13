@@ -521,6 +521,20 @@ export default function InspirationPage() {
               </button>
             </div>
 
+            {(notice || error) && (
+              <div
+                style={{
+                  marginTop: "var(--s-4)",
+                  color: error ? "var(--bad)" : "var(--ok)",
+                  border: `1px solid ${error ? "var(--bad)" : "var(--ok)"}`,
+                  borderRadius: "var(--r-2)",
+                  padding: "var(--s-3)",
+                }}
+              >
+                {error || notice}
+              </div>
+            )}
+
             {derivation && (
               <div style={{ marginTop: "var(--s-4)", display: "grid", gap: "var(--s-4)" }}>
                 {similarityRisk && (

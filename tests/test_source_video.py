@@ -1,8 +1,11 @@
+from datetime import datetime, timezone
+
 from scripts.source_video import (
     build_fallback_analysis,
     build_project_topic,
     chunk_transcript,
     clean_transcript,
+    derivation_prompt,
     normalize_derivation,
     parse_youtube_url,
     similarity_guard,
@@ -54,3 +57,14 @@ def test_fallback_analysis_and_project_topic_are_original_brief():
     assert "Brief original para podcast" in topic
     assert "No copiar frases literales" in topic
     assert "Cuando la vida te pide cambiar" in topic
+
+
+def test_derivation_prompt_accepts_firestore_like_dates():
+    analysis = {
+        "centralThesis": "El miedo paraliza cuando la persona cree que esta sola.",
+        "createdAt": datetime(2026, 5, 12, tzinfo=timezone.utc),
+        "structureBeats": [{"order": 1, "label": "Hook", "purpose": "Abrir tension"}],
+    }
+    messages = derivation_prompt(analysis, {"title": "Video fuente"})
+    assert "2026-05-12" in messages[1]["content"]
+    assert "Object of type" not in messages[1]["content"]
