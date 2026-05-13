@@ -106,6 +106,43 @@ function scoreTone(score) {
   return "bad";
 }
 
+function normalizedText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function adaptationLooksUnfitForAgent(adaptation, agentId) {
+  if (!adaptation || agentId !== "agent_podcast_general") return false;
+  const text = normalizedText([
+    adaptation.visibleTitle,
+    adaptation.shortTopic,
+    adaptation.inspirationBrief,
+    ...(adaptation.adaptationRules || []),
+  ].join(" "));
+  const blocked = [
+    "cristo",
+    "biblia",
+    "biblica",
+    "biblico",
+    "mateo 8",
+    "dios",
+    "oracion",
+    "divina",
+    "divino",
+    "capitan",
+    "capitanes",
+    "sermon",
+    "predicacion",
+    "predicador",
+    "exegesis",
+    "teologica",
+    "ontologica",
+  ];
+  return blocked.some((term) => text.includes(term));
+}
+
 export default function InspirationPage() {
   const { user, profile } = useAuth();
   const router = useRouter();
@@ -143,6 +180,8 @@ export default function InspirationPage() {
   const selectedCollection = collections.find((item) => item.collectionId === selectedCollectionId);
   const titleOptions = derivation?.titles || [];
   const similarityRisk = adaptation?.sourceSafety?.similarityRisk || derivation?.similarity?.risk || "";
+  const adaptationNeedsRefresh = adaptationLooksUnfitForAgent(adaptation, effectiveSelectedAgentId);
+  const usableAdaptation = adaptationNeedsRefresh ? null : adaptation;
 
   async function apiFetch(path, options = {}) {
     const res = await authedFetch(user, `${getApiBase()}${path}`, options);
@@ -356,6 +395,11 @@ export default function InspirationPage() {
           allowLowFit,
         }),
       });
+      if (adaptationLooksUnfitForAgent(data.adaptation, effectiveSelectedAgentId)) {
+        setAdaptation(null);
+        setError("La adaptación que devolvió el servidor todavía no corresponde a este agente. No la voy a preparar como proyecto.");
+        return null;
+      }
       setAdaptation(data.adaptation);
       setSelectedTitle(data.adaptation?.visibleTitle || data.adaptation?.shortTopic || selectedTitle);
       setNotice("Adaptacion lista. El titulo corto se usara para preparar proyecto.");
@@ -407,9 +451,13 @@ export default function InspirationPage() {
     setError("");
     setNotice("");
     try {
-      let nextAdaptation = adaptation;
+      let nextAdaptation = usableAdaptation;
       if (!nextAdaptation?.adaptationId) nextAdaptation = await adaptToAgent(true);
       if (!nextAdaptation?.adaptationId) return;
+      if (adaptationLooksUnfitForAgent(nextAdaptation, effectiveSelectedAgentId)) {
+        setError("Esta adaptación sigue demasiado pegada al video fuente. No la voy a mandar a proyecto para proteger el agente.");
+        return;
+      }
       const data = await apiFetch(`/source-videos/${encodeURIComponent(source.sourceVideoId)}/prepare-project-v2`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -797,14 +845,23 @@ export default function InspirationPage() {
               </div>
             )}
 
-            {adaptation && (
+            {adaptationNeedsRefresh && (
+              <div className="cf-card" style={{ padding: "var(--s-4)", borderRadius: "var(--r-2)", marginTop: "var(--s-4)", borderColor: "var(--bad)" }}>
+                <div className="cf-eyebrow" style={{ color: "var(--bad)" }}>Adaptación no compatible</div>
+                <p className="cf-caption" style={{ lineHeight: 1.5, margin: "8px 0 0", color: "var(--bad)" }}>
+                  Esta versión todavía conserva lenguaje del video fuente y no corresponde a la identidad del agente seleccionado. Pulsa “Adaptar a agente” para regenerarla; no se preparará el proyecto con este texto.
+                </p>
+              </div>
+            )}
+
+            {usableAdaptation && (
               <div className="cf-card" style={{ padding: "var(--s-4)", borderRadius: "var(--r-2)", marginTop: "var(--s-4)" }}>
                 <div className="cf-eyebrow">Titulo corto para crear</div>
-                <h3 style={{ color: "var(--paper)", margin: "8px 0" }}>{adaptation.visibleTitle}</h3>
-                <p className="cf-caption" style={{ lineHeight: 1.5 }}>{adaptation.inspirationBrief}</p>
-                {adaptation.warnings?.length > 0 && (
+                <h3 style={{ color: "var(--paper)", margin: "8px 0" }}>{usableAdaptation.visibleTitle}</h3>
+                <p className="cf-caption" style={{ lineHeight: 1.5 }}>{usableAdaptation.inspirationBrief}</p>
+                {usableAdaptation.warnings?.length > 0 && (
                   <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
-                    {adaptation.warnings.map((warning) => <div key={warning} className="cf-caption" style={{ color: "var(--bad)" }}>{warning}</div>)}
+                    {usableAdaptation.warnings.map((warning) => <div key={warning} className="cf-caption" style={{ color: "var(--bad)" }}>{warning}</div>)}
                   </div>
                 )}
               </div>
@@ -815,7 +872,7 @@ export default function InspirationPage() {
                 <Icon name={busyAction === "adapt" ? "spinner" : "check"} size={16} />
                 {busyAction === "adapt" ? "Adaptando..." : "Adaptar a agente"}
               </button>
-              <button className="cf-btn cf-btn--primary" type="button" onClick={prepareProject} disabled={loading || !analysis || similarityRisk === "high"}>
+              <button className="cf-btn cf-btn--primary" type="button" onClick={prepareProject} disabled={loading || !analysis || similarityRisk === "high" || adaptationNeedsRefresh}>
                 <Icon name={busyAction === "prepare" ? "spinner" : "arrowRight"} size={16} />
                 {busyAction === "prepare" ? "Preparando..." : "Preparar proyecto"}
               </button>

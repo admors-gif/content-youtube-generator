@@ -6397,9 +6397,28 @@ async def source_videos_prepare_project_v2(source_video_id: str, request: Reques
         analysis_id, analysis = _source_video_latest_analysis(db, source_video_id, (body or {}).get("analysisId") or source_data.get("analysisId") or "")
         derivation_id, derivation = _source_video_latest_derivation(db, source_video_id, (body or {}).get("derivationId") or source_data.get("derivationId") or "")
         adaptation_id, adaptation = _source_video_latest_adaptation(db, source_video_id, (body or {}).get("adaptationId") or source_data.get("adaptationId") or "")
+        agent = _source_video_agent_by_any_id(db, principal, agent_id)
+        normalized_adaptation = _source_video_normalize_adaptation(
+            adaptation,
+            analysis,
+            derivation,
+            source_data,
+            agent,
+            adaptation.get("visibleTitle") or adaptation.get("shortTopic") or "",
+        )
+        normalized_adaptation.update({
+            "sourceVideoId": source_video_id,
+            "analysisId": analysis_id,
+            "derivationId": derivation_id,
+            "agentId": agent.get("agentId") or agent_id,
+            "agentName": agent.get("name") or "Podcast",
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        if normalized_adaptation != adaptation:
+            db.collection("sourceVideoAdaptations").document(adaptation_id).set(normalized_adaptation, merge=True)
+            adaptation = {**adaptation, **normalized_adaptation}
         if (adaptation.get("sourceSafety") or {}).get("similarityRisk") == "high" or (derivation.get("similarity") or {}).get("risk") == "high":
             raise HTTPException(status_code=409, detail="adaptation too similar to source transcript")
-        agent = _source_video_agent_by_any_id(db, principal, agent_id)
         payload = _source_video_project_intent_payload(
             uid=principal.get("uid") or "admin",
             agent=agent,
