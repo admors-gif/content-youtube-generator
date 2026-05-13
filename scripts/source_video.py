@@ -483,12 +483,70 @@ def adaptation_prompt(
     )
     user = (
         "Adapta esta fuente al agente destino. Si el agente es 'Esto no es amor', transforma la idea hacia apego, miedo, "
-        "control, abandono, limites, autoestima o relaciones; no conserves formato de predicacion. "
+        "control, abandono, limites, autoestima o relaciones; no conserves formato de predicacion, exegesis biblica, "
+        "Cristo, capitanes, sermones ni referencias religiosas explicitas en el titulo o brief final. "
         "JSON requerido: visibleTitle, shortTopic, inspirationBrief, agentFitSummary, warnings[], sourceSafety{similarityRisk,copyrightRisk,identityRisk}, "
         "adaptationRules[], whyThisWorks.\n\n"
         + json.dumps(json_safe(payload), ensure_ascii=False)
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def _normalized_search_text(value: object) -> str:
+    text = unicodedata.normalize("NFKD", str(value or "").lower())
+    return "".join(ch for ch in text if not unicodedata.combining(ch))
+
+
+def _default_agent_relationship_adaptation(analysis: dict, derivation: dict) -> dict:
+    thesis = compact_text(analysis.get("centralThesis") or "", 420)
+    pain = compact_text(analysis.get("audiencePain") or "", 260)
+    title = "Cuando el miedo a perder el control te hace confundir amor con refugio"
+    text = _normalized_search_text(" ".join([thesis, pain, " ".join((analysis.get("contentDNA") or {}).get("themes") or [])]))
+    if "abandono" in text or "rechazo" in text:
+        title = "Cuando el miedo al abandono te hace aceptar menos amor"
+    elif "ansiedad" in text:
+        title = "Cuando la ansiedad te hace rogar una señal de amor"
+    elif "control" in text:
+        title = "Cuando perder el control te hace perseguir a quien se aleja"
+
+    return {
+        "visibleTitle": title,
+        "shortTopic": compact_text(title, MAX_INTENT_TOPIC_CHARS),
+        "inspirationBrief": compact_text(
+            "Reimagina la tesis del video fuente dentro de la identidad Esto No Es Amor: "
+            "el miedo deja de tratarse como predicacion o doctrina y se convierte en una herida emocional. "
+            "El episodio debe explorar como la necesidad de control, certeza y refugio puede confundirse con amor, "
+            "por que una persona se aferra a alguien que no la elige con claridad, y como recuperar dignidad sin "
+            "culpa ni persecucion. Usa una metafora noir emocional: una tormenta interna, un corazon que busca "
+            "controlar lo incontrolable, y una salida hacia limites, amor propio y paz.",
+            1200,
+        ),
+        "adaptationRules": [
+            "Traducir cualquier espiritualidad explicita a lenguaje emocional universal.",
+            "No usar Cristo, Biblia, sermon, capitanes ni predicacion en el resultado final.",
+            "Centrar el conflicto en apego, control, miedo al abandono, autoestima y limites.",
+            "Mantener la identidad noir emocional de Esto No Es Amor.",
+        ],
+        "whyThisWorks": "Convierte una tension humana probada, miedo y control, en un angulo relacional compatible con el canal.",
+    }
+
+
+def _default_agent_output_is_unadapted(out: dict, source: dict) -> bool:
+    source_title = source.get("title") or ""
+    combined = _normalized_search_text(
+        " ".join([
+            out.get("visibleTitle") or "",
+            out.get("shortTopic") or "",
+            out.get("inspirationBrief") or "",
+            source_title if source_title and source_title in (out.get("visibleTitle") or "") else "",
+        ])
+    )
+    blocked = [
+        "cristo", "biblia", "biblica", "biblico", "mateo", "dios", "fe ", " fe",
+        "oracion", "divina", "divino", "capitan", "capitanes", "sermon", "predicacion",
+        "predicador", "exegesis", "teologica", "ontologica",
+    ]
+    return any(term in combined for term in blocked)
 
 
 def normalize_adaptation(raw: dict | None, analysis: dict, derivation: dict, source: dict, agent: dict, selected_title: str = "") -> dict:
@@ -541,6 +599,15 @@ def normalize_adaptation(raw: dict | None, analysis: dict, derivation: dict, sou
         **fallback["sourceSafety"],
         **{k: compact_text(v, 80) for k, v in safety.items()},
     }
+    if (agent.get("agentId") or "") == DEFAULT_TARGET_AGENT_ID and _default_agent_output_is_unadapted(out, source):
+        forced = _default_agent_relationship_adaptation(analysis, derivation)
+        out.update(forced)
+        out["warnings"] = _as_list(
+            (out.get("warnings") or []) + ["La salida original seguia demasiado cerca del nicho espiritual; se reencuadro a Esto No Es Amor."],
+            limit=6,
+            item_limit=180,
+        )
+        out["sourceSafety"] = {**out["sourceSafety"], "identityRisk": "medium"}
     return out
 
 

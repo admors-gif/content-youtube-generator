@@ -9,6 +9,7 @@ from scripts.source_video import (
     clean_transcript,
     draft_agent_payload_from_collection,
     derivation_prompt,
+    normalize_adaptation,
     normalize_derivation,
     parse_youtube_url,
     project_intent_payload,
@@ -117,6 +118,33 @@ def test_project_intent_payload_keeps_short_topic_and_internal_brief_separate():
     assert len(intent["shortTopic"]) <= 170
     assert intent["inspirationBrief"]["episodeBrief"] == adaptation["inspirationBrief"]
     assert intent["inspirationBrief"]["sourceChannel"] == "Dante Gebel"
+
+
+def test_normalize_adaptation_reframes_spiritual_output_for_esto_no_es_amor():
+    source = {"title": "Dante Gebel #345 | Por que tienes miedo", "channelName": "Dante Gebel"}
+    analysis = {
+        "centralThesis": "El miedo aparece cuando perdemos el control y buscamos a Cristo como Capitan.",
+        "emotionalPromise": "Transformar miedo en fe.",
+        "audiencePain": "ansiedad, control, miedo al abandono",
+        "structureBeats": [{"order": 1, "label": "Tormenta", "purpose": "abrir miedo"}],
+    }
+    derivation = normalize_derivation(None, analysis, source)
+    raw = {
+        "visibleTitle": "Capitan de Capitanes: la noche que deje de tener miedo",
+        "shortTopic": "Capitan de Capitanes",
+        "inspirationBrief": "Cristo como capitan en la tormenta y exegesis biblica.",
+    }
+    out = normalize_adaptation(
+        raw,
+        analysis,
+        derivation,
+        source,
+        {"agentId": "agent_podcast_general", "name": "Esto no es amor", "format": "podcast"},
+    )
+    lowered = (out["visibleTitle"] + " " + out["inspirationBrief"]).lower()
+    assert "capitan" not in lowered
+    assert "cristo" not in lowered
+    assert "amor" in lowered or "control" in lowered
 
 
 def test_collection_aggregate_can_seed_draft_agent_payload():

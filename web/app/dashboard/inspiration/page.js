@@ -127,6 +127,7 @@ export default function InspirationPage() {
   const [selectedCollectionId, setSelectedCollectionId] = useState("");
   const [newCollectionName, setNewCollectionName] = useState("Motivacion espiritual suave");
   const [loading, setLoading] = useState(false);
+  const [busyAction, setBusyAction] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
@@ -321,6 +322,7 @@ export default function InspirationPage() {
 
   async function handleDerivePodcast() {
     setLoading(true);
+    setBusyAction("derive");
     setError("");
     setNotice("");
     try {
@@ -331,14 +333,16 @@ export default function InspirationPage() {
       setError(err.message);
     } finally {
       setLoading(false);
+      setBusyAction("");
     }
   }
 
   async function adaptToAgent(allowLowFit = false) {
     if (!source?.sourceVideoId || !analysis?.analysisId || !effectiveSelectedAgentId) return null;
     setLoading(true);
+    setBusyAction("adapt");
     setError("");
-    setNotice("");
+    setNotice("Adaptando el video fuente a la identidad del agente...");
     try {
       const nextDerivation = derivation || await derivePodcast();
       const data = await apiFetch(`/source-videos/${encodeURIComponent(source.sourceVideoId)}/adapt-to-agent`, {
@@ -362,12 +366,14 @@ export default function InspirationPage() {
       return null;
     } finally {
       setLoading(false);
+      setBusyAction("");
     }
   }
 
   async function saveIdea() {
     if (!source?.sourceVideoId) return;
     setLoading(true);
+    setBusyAction("save");
     setError("");
     setNotice("");
     try {
@@ -390,12 +396,14 @@ export default function InspirationPage() {
       setError(err.message);
     } finally {
       setLoading(false);
+      setBusyAction("");
     }
   }
 
   async function prepareProject() {
     if (!source?.sourceVideoId || !effectiveSelectedAgentId) return;
     setLoading(true);
+    setBusyAction("prepare");
     setError("");
     setNotice("");
     try {
@@ -417,6 +425,7 @@ export default function InspirationPage() {
       setError(err.message);
     } finally {
       setLoading(false);
+      setBusyAction("");
     }
   }
 
@@ -757,7 +766,8 @@ export default function InspirationPage() {
                 </select>
               </label>
               <button className="cf-btn cf-btn--secondary" type="button" onClick={handleDerivePodcast} disabled={loading || !analysis}>
-                <Icon name="sparkles" size={16} /> Generar brief
+                <Icon name={busyAction === "derive" ? "spinner" : "sparkles"} size={16} />
+                {busyAction === "derive" ? "Generando brief..." : "Generar brief"}
               </button>
             </div>
 
@@ -802,10 +812,12 @@ export default function InspirationPage() {
 
             <div style={{ display: "flex", gap: "var(--s-3)", flexWrap: "wrap", marginTop: "var(--s-4)" }}>
               <button className="cf-btn cf-btn--secondary" type="button" onClick={() => adaptToAgent(true)} disabled={loading || !analysis}>
-                <Icon name="check" size={16} /> Adaptar a agente
+                <Icon name={busyAction === "adapt" ? "spinner" : "check"} size={16} />
+                {busyAction === "adapt" ? "Adaptando..." : "Adaptar a agente"}
               </button>
               <button className="cf-btn cf-btn--primary" type="button" onClick={prepareProject} disabled={loading || !analysis || similarityRisk === "high"}>
-                <Icon name="arrowRight" size={16} /> Preparar proyecto
+                <Icon name={busyAction === "prepare" ? "spinner" : "arrowRight"} size={16} />
+                {busyAction === "prepare" ? "Preparando..." : "Preparar proyecto"}
               </button>
             </div>
           </section>
