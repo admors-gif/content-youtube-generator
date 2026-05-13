@@ -270,11 +270,111 @@ def _format_radar_context_for_research(radar_context: dict | None) -> str:
     return "\n\n".join(parts)
 
 
+def _compact_context_value(value, limit: int = 900) -> str:
+    text = " ".join(str(value or "").split()).strip()
+    if limit and len(text) > limit:
+        return text[: limit - 1].rstrip() + "…"
+    return text
+
+
+def _format_source_inspiration_for_research(source_inspiration: dict | None) -> str:
+    """
+    Convierte un projectIntent de Inspiración V2 en contexto interno para el
+    generador. No es investigación web: es un brief editorial derivado de un
+    video fuente, con guardas explícitas para transformar sin copiar.
+    """
+    if not isinstance(source_inspiration, dict) or not source_inspiration:
+        return ""
+    brief = source_inspiration.get("inspirationBrief") or {}
+    safety = source_inspiration.get("sourceSafety") or {}
+    if not isinstance(brief, dict):
+        return ""
+
+    parts = [
+        "BRIEF INTERNO DE INSPIRACION V2",
+        "Usa este material como ADN editorial, NO como texto a copiar.",
+        "No imites la voz, frases, ejemplos privados ni marca del creador fuente.",
+        "No menciones afiliacion, autorizacion ni relacion con el canal fuente.",
+        "Transforma la idea central al lenguaje, identidad y estructura del agente destino.",
+    ]
+
+    source_title = _compact_context_value(brief.get("sourceTitle"), 180)
+    source_channel = _compact_context_value(brief.get("sourceChannel"), 120)
+    if source_title or source_channel:
+        parts.append(f"REFERENCIA INTERNA: {source_title} | Canal: {source_channel}")
+
+    visible_title = _compact_context_value(source_inspiration.get("visibleTitle") or source_inspiration.get("shortTopic"), 180)
+    short_topic = _compact_context_value(source_inspiration.get("shortTopic"), 180)
+    if visible_title:
+        parts.append(f"TITULO EDITORIAL PROPUESTO: {visible_title}")
+    if short_topic and short_topic != visible_title:
+        parts.append(f"TEMA CORTO: {short_topic}")
+
+    source_dna = brief.get("sourceDNA") if isinstance(brief.get("sourceDNA"), dict) else {}
+    content_dna = brief.get("contentDNA") if isinstance(brief.get("contentDNA"), dict) else {}
+    spiritual = brief.get("spiritualProfile") if isinstance(brief.get("spiritualProfile"), dict) else {}
+
+    core_message = _compact_context_value(source_dna.get("coreMessage") or brief.get("openingHook"), 900)
+    if core_message:
+        parts.append(f"MENSAJE CENTRAL A TRANSFORMAR: {core_message}")
+
+    episode_brief = _compact_context_value(brief.get("episodeBrief"), 1400)
+    if episode_brief:
+        parts.append(f"BRIEF DEL EPISODIO ORIGINAL: {episode_brief}")
+
+    themes = content_dna.get("themes") or []
+    if themes:
+        parts.append("TEMAS A TRABAJAR: " + ", ".join(_compact_context_value(t, 80) for t in themes[:10] if t))
+
+    audience_pain = content_dna.get("audiencePain") or []
+    if audience_pain:
+        parts.append("DOLOR DE AUDIENCIA: " + " | ".join(_compact_context_value(t, 160) for t in audience_pain[:6] if t))
+
+    retention = content_dna.get("retentionBeats") or []
+    if retention:
+        parts.append("MOMENTOS DE RETENCION A REINTERPRETAR: " + " | ".join(_compact_context_value(t, 180) for t in retention[:7] if t))
+
+    structure = brief.get("structure") or []
+    if isinstance(structure, list) and structure:
+        parts.append("ESTRUCTURA FUENTE A REIMAGINAR:")
+        for i, beat in enumerate(structure[:10], 1):
+            if isinstance(beat, dict):
+                label = _compact_context_value(beat.get("label") or beat.get("beat") or f"Beat {i}", 90)
+                purpose = _compact_context_value(beat.get("purpose") or beat.get("summary") or "", 180)
+                parts.append(f"{i}. {label}: {purpose}".rstrip(": "))
+            else:
+                parts.append(f"{i}. {_compact_context_value(beat, 220)}")
+
+    rules = brief.get("adaptationRules") or []
+    if rules:
+        parts.append("REGLAS DE ADAPTACION AL AGENTE: " + " | ".join(_compact_context_value(t, 180) for t in rules[:8] if t))
+
+    if spiritual.get("level"):
+        parts.append(
+            "POLITICA ESPIRITUAL: "
+            + _compact_context_value(spiritual.get("level"), 40)
+            + " | "
+            + _compact_context_value(spiritual.get("transformationPolicy"), 220)
+        )
+
+    if safety:
+        parts.append(
+            "SEGURIDAD / REUSO: "
+            f"copyright={_compact_context_value(safety.get('copyrightRisk'), 40)}, "
+            f"similaridad={_compact_context_value(safety.get('similarityRisk'), 40)}, "
+            f"identidad={_compact_context_value(safety.get('identityRisk'), 40)}."
+        )
+
+    parts.append("SALIDA ESPERADA: contenido nuevo, original y compatible con el agente. Conserva la tesis emocional, no el texto literal.")
+    return "\n\n".join(part for part in parts if part)
+
+
 def generate_script(
     topic: str,
     agent_file: str = "agent_erotico_historico.md",
     project_id: str = None,
     radar_context: dict | None = None,
+    source_inspiration: dict | None = None,
     agent_prompt_override: str | None = None,
 ) -> dict:
     """
@@ -294,17 +394,23 @@ def generate_script(
     print(f"   Modelo: {CLAUDE_MODEL_SCRIPT if claude_client else GPT_MODEL}")
     print(f"   Agente: {agent_name} ({agent_file})")
     
-    # ── Paso 0: Investigación Web ──
-    research_context = _format_radar_context_for_research(radar_context) or research_topic(topic, project_id)
+    # ── Paso 0: Contexto editorial / investigación ──
+    source_context = _format_source_inspiration_for_research(source_inspiration)
+    radar_context_text = _format_radar_context_for_research(radar_context)
+    research_context = "\n\n".join(part for part in (source_context, radar_context_text) if part).strip()
+    if not research_context:
+        research_context = research_topic(topic, project_id)
     research_block = ""
     if research_context:
-        research_block = f"""\n\n═══ INVESTIGACIÓN WEB ACTUAL ═══
-Usa los siguientes datos reales y actuales como base factual para tu narrativa.
-Incorpora nombres, fechas, cifras y hechos específicos de estas fuentes.
-NO copies el texto directamente — reformula con tu estilo cinematográfico.
+        block_title = "CONTEXTO EDITORIAL INTERNO" if (source_context or radar_context_text) else "INVESTIGACIÓN WEB ACTUAL"
+        research_block = f"""\n\n═══ CONTEXTO EDITORIAL ═══
+{block_title}
+Usa el siguiente contexto como base de trabajo.
+Cuando venga de Inspiracion, tratalo como ADN editorial interno: transforma, no copies.
+Cuando venga de fuentes web, incorpora hechos verificables sin copiar el texto directamente.
 
 {research_context}
-═══ FIN DE INVESTIGACIÓN ═══\n"""
+═══ FIN DE CONTEXTO ═══\n"""
     
     # Cargar el prompt del AI Agent seleccionado
     agent_prompt = agent_prompt_override or load_prompt(agent_file)
@@ -330,7 +436,7 @@ Requisitos:
 - Incluye detalles históricos específicos (nombres, fechas, costumbres)
 - NO uses viñetas ni encabezados — narrativa pura y fluida
 - Cada sección debe fluir orgánicamente hacia la siguiente
-{"- IMPORTANTE: Incorpora datos y hechos de la investigación web proporcionada" if research_context else ""}"""
+{"- IMPORTANTE: Usa el contexto editorial proporcionado sin copiarlo literalmente" if research_context else ""}"""
                 }
             ],
         )
@@ -364,8 +470,10 @@ Requisitos:
             "words": word_count,
             "estimated_duration_minutes": round(estimated_minutes, 1),
             "generated_at": datetime.now().isoformat(),
-            "web_research": bool(research_context),
-            "research_sources": len(research_context.split("FUENTE")) - 1 if research_context else 0,
+            "web_research": bool(research_context and not source_context and not radar_context_text),
+            "radar_context": bool(radar_context_text),
+            "source_inspiration": bool(source_context),
+            "research_sources": 0 if source_context else len(research_context.split("FUENTE")) - 1 if research_context else 0,
         }
     }
     
@@ -2274,6 +2382,7 @@ def generate_podcast_script(
     agent_file: str = "agent_podcast_general.md",
     project_id: str = None,
     agent_prompt_override: str | None = None,
+    source_inspiration: dict | None = None,
 ) -> dict:
     """
     Genera un guión de podcast conversacional (2 hosts) usando el motor de guion configurado.
@@ -2285,17 +2394,21 @@ def generate_podcast_script(
     print(f"   Modelo: {CLAUDE_MODEL_SCRIPT if claude_client else GPT_MODEL}")
     print(f"   Agente: {agent_name} ({agent_file})")
 
-    # Investigación web previa (igual que documental)
-    research_context = research_topic(topic, project_id)
+    # Contexto editorial previo: Inspiracion V2 tiene prioridad para evitar
+    # contaminar el guion con busquedas web genericas sobre un titulo corto.
+    source_context = _format_source_inspiration_for_research(source_inspiration)
+    research_context = source_context or research_topic(topic, project_id)
     research_block = ""
     if research_context:
-        research_block = f"""\n\n═══ INVESTIGACIÓN WEB ACTUAL ═══
-Usa los siguientes datos reales como base factual para la conversación.
-Incorpora cifras, fechas y ejemplos específicos en boca de MATEO (que es el host estructurado).
-NO copies directo — los hosts hablan de los datos, no los recitan.
+        block_title = "BRIEF INTERNO DE INSPIRACION" if source_context else "INVESTIGACIÓN WEB ACTUAL"
+        research_block = f"""\n\n═══ CONTEXTO EDITORIAL ═══
+{block_title}
+Usa el siguiente contexto como base para la conversación.
+Si viene de Inspiracion, conserva la tesis emocional y la estructura, pero crea un episodio original.
+NO copies directo — los hosts hablan de la idea transformada, no recitan el material fuente.
 
 {research_context}
-═══ FIN DE INVESTIGACIÓN ═══\n"""
+═══ FIN DE CONTEXTO ═══\n"""
 
     agent_prompt = agent_prompt_override or load_prompt(agent_file)
 
@@ -2350,8 +2463,9 @@ Devuelve solo el guión, sin headers ni comentarios."""
             "estimated_duration_minutes": round(estimated_minutes, 1),
             "format": "podcast",
             "generated_at": datetime.now().isoformat(),
-            "web_research": bool(research_context),
-            "research_sources": len(research_context.split("FUENTE")) - 1 if research_context else 0,
+            "web_research": bool(research_context and not source_context),
+            "source_inspiration": bool(source_context),
+            "research_sources": 0 if source_context else len(research_context.split("FUENTE")) - 1 if research_context else 0,
         },
     }
 
@@ -2610,6 +2724,7 @@ def run_full_pipeline(
     generation_options = generation_options or {}
     agent_prompt_override = (generation_options.get("agent_prompt_override") or "").strip()
     custom_agent_options = generation_options.get("custom_agent") if isinstance(generation_options.get("custom_agent"), dict) else {}
+    source_inspiration_options = generation_options.get("source_inspiration") if isinstance(generation_options.get("source_inspiration"), dict) else {}
     personalization_options = generation_options.get("personalization") or {}
     brand_profile_id = (generation_options.get("brand_profile_id") or generation_options.get("brandProfileId") or "").strip()
     brand_profile = generation_options.get("brand_profile_snapshot") or generation_options.get("brandProfileSnapshot")
@@ -2689,6 +2804,7 @@ def run_full_pipeline(
                 agent_file,
                 project_id,
                 agent_prompt_override=agent_prompt_override,
+                source_inspiration=source_inspiration_options,
             )
         elif is_autohypnosis:
             result = generate_autohypnosis_script(
@@ -2714,6 +2830,7 @@ def run_full_pipeline(
                 agent_file,
                 project_id,
                 radar_context=generation_options.get("radar_context"),
+                source_inspiration=source_inspiration_options,
                 agent_prompt_override=agent_prompt_override,
             )
         script = result["script"]
@@ -2899,6 +3016,8 @@ def run_full_pipeline(
                 "templateKey": custom_agent_options.get("templateKey"),
                 "compiledPromptVersion": custom_agent_options.get("compiledPromptVersion"),
             }
+        if source_inspiration_options:
+            full_result["sourceInspiration"] = source_inspiration_options
         if public_figure_visuals.get("detected"):
             full_result["publicFigureVisuals"] = public_figure_visuals
         if is_autohypnosis or is_long_meditation:
@@ -3037,6 +3156,8 @@ def run_full_pipeline(
                 if custom_agent_options:
                     firestore_payload["agentSource"] = "custom"
                     firestore_payload["customAgent"] = full_result["customAgent"]
+                if source_inspiration_options:
+                    firestore_payload["sourceInspiration"] = source_inspiration_options
                 if is_long_meditation:
                     firestore_payload["script.speechEstimatedMinutes"] = result["metadata"].get("estimated_speech_minutes")
                     firestore_payload["script.targetMinutes"] = result["metadata"].get("target_duration_minutes")

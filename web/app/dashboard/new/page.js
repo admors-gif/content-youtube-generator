@@ -325,6 +325,8 @@ export default function NewProjectPage() {
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [topic, setTopic] = useState("");
   const [prefillSource, setPrefillSource] = useState("");
+  const [projectIntentId, setProjectIntentId] = useState("");
+  const [projectIntent, setProjectIntent] = useState(null);
   const [creating, setCreating] = useState(false);
 
   const [ideaInput, setIdeaInput] = useState("");
@@ -375,9 +377,51 @@ export default function NewProjectPage() {
   useEffect(() => {
     if (didApplyPrefill.current) return;
     const searchParams = new URLSearchParams(window.location.search);
+    const intentId = searchParams.get("intentId") || "";
     const prefillAgentId = searchParams.get("agentId") || "";
     const prefillTopic = searchParams.get("topic") || "";
     const source = searchParams.get("from") || "";
+    if (intentId) {
+      if (!user) return;
+      let cancelled = false;
+      async function loadProjectIntent() {
+        try {
+          const res = await fetch(`${getApiBase()}/project-intents/${encodeURIComponent(intentId)}`, {
+            headers: await authHeaders(user),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.detail || data.error || "No se pudo cargar el intent de Inspiracion.");
+          if (cancelled) return;
+          const prefill = data.prefill || {};
+          const agent = allAgents.find((item) => item.agentId === prefill.agentId);
+          if (prefill.agentId && !agent) return;
+          if (agent) {
+            setPlatform(agent.platform || "youtube");
+            setSelectedAgent(agent);
+            const defaultProfile = agent.durationProfiles?.find((p) => p.id === (agent.platform === "tiktok" ? "90s" : "60m"))
+              || agent.durationProfiles?.[0];
+            if (defaultProfile) setDurationProfile(defaultProfile.id);
+            if (agent.sourceGenres?.length) setSourceGenre(agent.sourceGenres[0].id);
+          }
+          const nextTopic = prefill.topic || prefill.visibleTitle || data.intent?.shortTopic || data.intent?.visibleTitle || "";
+          if (nextTopic) {
+            setTopic(nextTopic);
+            setIdeaInput(nextTopic);
+          }
+          setProjectIntentId(intentId);
+          setProjectIntent(data.intent || null);
+          setPrefillSource("inspiration");
+          if (agent && nextTopic) setStep(2);
+          didApplyPrefill.current = true;
+        } catch (err) {
+          alert(err.message);
+        }
+      }
+      loadProjectIntent();
+      return () => {
+        cancelled = true;
+      };
+    }
     if (!prefillAgentId && !prefillTopic) return;
 
     const agent = allAgents.find((item) => item.agentId === prefillAgentId);
@@ -400,7 +444,7 @@ export default function NewProjectPage() {
       didApplyPrefill.current = true;
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [allAgents]);
+  }, [allAgents, user]);
 
   const selectAgent = (agent) => {
     setSelectedAgent(agent);
@@ -523,6 +567,7 @@ export default function NewProjectPage() {
           ...(personalizationPayload
             ? { personalization: personalizationPayload }
             : {}),
+          ...(projectIntentId ? { intentId: projectIntentId } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -1394,6 +1439,7 @@ export default function NewProjectPage() {
                 }}
               >
                 Tema preparado desde {prefillSource === "radar" ? "Radar" : prefillSource === "inspiration" ? "Inspiración" : "Biblioteca"}. Aún no se ha cobrado ningún crédito; el consumo empieza solo al pulsar el botón final.
+                {projectIntent?.inspirationBrief?.sourceTitle ? ` Brief interno: ${projectIntent.inspirationBrief.sourceTitle}.` : ""}
               </div>
             )}
 

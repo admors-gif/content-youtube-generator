@@ -85,17 +85,25 @@ from scripts.custom_agents import (
 from scripts.source_video import (
     DEFAULT_NICHE as SOURCE_VIDEO_DEFAULT_NICHE,
     DEFAULT_TARGET_AGENT_ID as SOURCE_VIDEO_DEFAULT_TARGET_AGENT_ID,
+    adaptation_prompt as _source_video_adaptation_prompt,
+    agent_fit as _source_video_agent_fit,
+    aggregate_collection_dna as _source_video_aggregate_collection_dna,
     analysis_prompt as _source_video_analysis_prompt,
     build_project_topic as _source_video_project_topic,
     chunk_transcript as _source_video_chunk_transcript,
     clean_transcript as _source_video_clean_transcript,
     compact_text as _source_video_compact_text,
+    draft_agent_payload_from_collection as _source_video_draft_agent_payload,
     derivation_prompt as _source_video_derivation_prompt,
+    enrich_analysis_dna as _source_video_enrich_analysis_dna,
+    normalize_adaptation as _source_video_normalize_adaptation,
     normalize_analysis as _source_video_normalize_analysis,
     normalize_derivation as _source_video_normalize_derivation,
     parse_json_object as _source_video_parse_json,
     parse_youtube_url as _source_video_parse_youtube_url,
+    project_intent_payload as _source_video_project_intent_payload,
     public_source_video as _source_video_public_doc,
+    route_source_video as _source_video_route,
     similarity_guard as _source_video_similarity_guard,
     stable_source_video_id as _source_video_stable_id,
     transcript_hash as _source_video_transcript_hash,
@@ -5931,6 +5939,104 @@ def _source_video_candidate(agent: dict, source: dict, analysis: dict, derivatio
     }
 
 
+def _source_video_candidate_agents(db=None, principal: dict | None = None) -> list[dict]:
+    agents = []
+    for agent in _radar_agent_catalog():
+        if agent.get("format") == "podcast" or agent.get("agentId") == SOURCE_VIDEO_DEFAULT_TARGET_AGENT_ID:
+            agents.append(agent)
+    try:
+        if db is not None and _custom_agents_enabled():
+            for doc in db.collection("customAgents").stream():
+                data = doc.to_dict() or {}
+                if data.get("status") != "active":
+                    continue
+                if data.get("format") != "podcast" and data.get("templateKey") != "podcast_two_hosts":
+                    continue
+                if not (principal or {}).get("admin") and data.get("ownerUid") != (principal or {}).get("uid"):
+                    continue
+                agents.append(_custom_public_agent({**data, "customAgentId": doc.id}))
+    except Exception:
+        pass
+    seen = set()
+    unique = []
+    for agent in agents:
+        aid = agent.get("agentId") or agent.get("customAgentId")
+        if aid and aid not in seen:
+            unique.append(agent)
+            seen.add(aid)
+    return unique
+
+
+def _source_video_agent_by_any_id(db, principal: dict, agent_id: str) -> dict:
+    agent_id = (agent_id or SOURCE_VIDEO_DEFAULT_TARGET_AGENT_ID).strip()
+    custom_snap = None
+    if agent_id.startswith("custom_"):
+        custom_snap = db.collection("customAgents").document(agent_id).get()
+        if custom_snap.exists:
+            data = custom_snap.to_dict() or {}
+            if data.get("status") not in {"active", "testing", "draft"}:
+                raise HTTPException(status_code=400, detail="custom agent not usable")
+            if not principal.get("admin") and data.get("ownerUid") != principal.get("uid"):
+                raise HTTPException(status_code=403, detail="custom agent access denied")
+            return _custom_public_agent({**data, "customAgentId": agent_id})
+    agent = _radar_agent_by_id(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="agent not found")
+    return agent
+
+
+def _source_video_public_adaptation(doc_id: str, data: dict | None) -> dict:
+    data = data or {}
+    return _serialize_firestore_value({"adaptationId": data.get("adaptationId") or doc_id, **data})
+
+
+def _source_video_public_intent(doc_id: str, data: dict | None) -> dict:
+    data = data or {}
+    return _serialize_firestore_value({"intentId": data.get("intentId") or doc_id, **data})
+
+
+def _source_video_get_project_intent(db, intent_id: str, principal: dict):
+    snap = db.collection("projectIntents").document(intent_id).get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="project intent not found")
+    data = snap.to_dict() or {}
+    if not principal.get("admin") and data.get("userId") != principal.get("uid"):
+        raise HTTPException(status_code=403, detail="project intent access denied")
+    status = str(data.get("status") or "prepared").lower()
+    if status in {"expired", "archived"}:
+        raise HTTPException(status_code=400, detail="project intent is not usable")
+    expires_at = data.get("expiresAt")
+    if expires_at:
+        try:
+            now = datetime.now(timezone.utc)
+            if getattr(expires_at, "tzinfo", None) is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at < now:
+                raise HTTPException(status_code=400, detail="project intent expired")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+    return snap, data
+
+
+def _source_video_latest_adaptation(db, source_video_id: str, adaptation_id: str = "") -> tuple[str, dict]:
+    if adaptation_id:
+        snap = db.collection("sourceVideoAdaptations").document(adaptation_id).get()
+        if snap.exists:
+            return snap.id, snap.to_dict() or {}
+    docs = list(
+        db.collection("sourceVideoAdaptations")
+        .where("sourceVideoId", "==", source_video_id)
+        .limit(20)
+        .stream()
+    )
+    docs.sort(key=lambda doc: str((doc.to_dict() or {}).get("createdAt") or ""), reverse=True)
+    if not docs:
+        raise HTTPException(status_code=400, detail="source video has no adaptation")
+    return docs[0].id, docs[0].to_dict() or {}
+
+
 @app.post("/source-videos/import")
 async def source_videos_import(request: Request):
     principal = _require_source_video_admin(request)
@@ -6020,6 +6126,8 @@ def source_videos_get(source_video_id: str, request: Request):
         _ref, snap, data = _source_video_get_doc(db, source_video_id, principal)
         analysis = {}
         derivation = {}
+        adaptation = {}
+        route = {}
         if data.get("analysisId"):
             a_snap = db.collection("sourceVideoAnalyses").document(data["analysisId"]).get()
             if a_snap.exists:
@@ -6028,6 +6136,13 @@ def source_videos_get(source_video_id: str, request: Request):
             d_snap = db.collection("sourceVideoDerivations").document(data["derivationId"]).get()
             if d_snap.exists:
                 derivation = _source_video_public_derivation(d_snap.id, d_snap.to_dict() or {})
+        if data.get("adaptationId"):
+            ad_snap = db.collection("sourceVideoAdaptations").document(data["adaptationId"]).get()
+            if ad_snap.exists:
+                adaptation = _source_video_public_adaptation(ad_snap.id, ad_snap.to_dict() or {})
+        route_snap = db.collection("sourceVideoRoutes").document(source_video_id).get()
+        if route_snap.exists:
+            route = (route_snap.to_dict() or {}).get("route") or {}
         transcript_snap = db.collection("sourceVideoTranscripts").document(source_video_id).get()
         transcript_meta = {}
         if transcript_snap.exists:
@@ -6043,6 +6158,8 @@ def source_videos_get(source_video_id: str, request: Request):
             "item": _serialize_firestore_value(_source_video_public_doc(snap.id, data)),
             "analysis": analysis,
             "derivation": derivation,
+            "adaptation": adaptation,
+            "route": _serialize_firestore_value(route),
             "transcript": transcript_meta,
         }
     except HTTPException:
@@ -6179,6 +6296,364 @@ async def source_videos_derive_podcast(source_video_id: str, request: Request):
         return {"ok": True, "derivation": _source_video_public_derivation(derivation_ref.id, derivation)}
     except HTTPException:
         raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/source-videos/{source_video_id}/route")
+async def source_videos_route(source_video_id: str, request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        _source_ref, _snap, source_data = _source_video_get_doc(db, source_video_id, principal)
+        _analysis_id, analysis = _source_video_latest_analysis(db, source_video_id, (body or {}).get("analysisId") or source_data.get("analysisId") or "")
+        route = _source_video_route(analysis, _source_video_candidate_agents(db, principal))
+        db.collection("sourceVideoRoutes").document(source_video_id).set({
+            "sourceVideoId": source_video_id,
+            "analysisId": analysis.get("analysisId") or _analysis_id,
+            "route": route,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+        return {"ok": True, "route": _serialize_firestore_value(route)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/source-videos/{source_video_id}/adapt-to-agent")
+async def source_videos_adapt_to_agent(source_video_id: str, request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    agent_id = str((body or {}).get("agentId") or SOURCE_VIDEO_DEFAULT_TARGET_AGENT_ID).strip()
+    selected_title = _source_video_compact_text((body or {}).get("selectedTitle") or "", 140)
+    allow_low_fit = bool((body or {}).get("allowLowFit"))
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        source_ref, _snap, source_data = _source_video_get_doc(db, source_video_id, principal)
+        analysis_id, analysis = _source_video_latest_analysis(db, source_video_id, (body or {}).get("analysisId") or source_data.get("analysisId") or "")
+        derivation_id, derivation = _source_video_latest_derivation(db, source_video_id, (body or {}).get("derivationId") or source_data.get("derivationId") or "")
+        agent = _source_video_agent_by_any_id(db, principal, agent_id)
+        fit = _source_video_agent_fit(analysis, agent)
+        raw, model = _source_video_llm_json(
+            _source_video_adaptation_prompt(
+                analysis,
+                derivation,
+                source_data,
+                agent,
+                selected_title=selected_title,
+                allow_low_fit=allow_low_fit,
+            ),
+            max_tokens=1800,
+        )
+        adaptation = _source_video_normalize_adaptation(raw, analysis, derivation, source_data, agent, selected_title)
+        adaptation.update({
+            "sourceVideoId": source_video_id,
+            "analysisId": analysis_id,
+            "derivationId": derivation_id,
+            "agentId": agent.get("agentId") or agent_id,
+            "agentName": agent.get("name") or "Podcast",
+            "agentFit": fit,
+            "allowLowFit": allow_low_fit,
+            "model": model,
+            "createdAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        adaptation_ref = db.collection("sourceVideoAdaptations").document()
+        adaptation["adaptationId"] = adaptation_ref.id
+        adaptation_ref.set(adaptation)
+        source_ref.set({"adaptationId": adaptation_ref.id, "status": "adapted", "updatedAt": firestore.SERVER_TIMESTAMP}, merge=True)
+        return {"ok": True, "adaptation": _source_video_public_adaptation(adaptation_ref.id, adaptation)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/source-videos/{source_video_id}/prepare-project-v2")
+async def source_videos_prepare_project_v2(source_video_id: str, request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    agent_id = str((body or {}).get("agentId") or SOURCE_VIDEO_DEFAULT_TARGET_AGENT_ID).strip()
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        source_ref, _snap, source_data = _source_video_get_doc(db, source_video_id, principal)
+        analysis_id, analysis = _source_video_latest_analysis(db, source_video_id, (body or {}).get("analysisId") or source_data.get("analysisId") or "")
+        derivation_id, derivation = _source_video_latest_derivation(db, source_video_id, (body or {}).get("derivationId") or source_data.get("derivationId") or "")
+        adaptation_id, adaptation = _source_video_latest_adaptation(db, source_video_id, (body or {}).get("adaptationId") or source_data.get("adaptationId") or "")
+        if (adaptation.get("sourceSafety") or {}).get("similarityRisk") == "high" or (derivation.get("similarity") or {}).get("risk") == "high":
+            raise HTTPException(status_code=409, detail="adaptation too similar to source transcript")
+        agent = _source_video_agent_by_any_id(db, principal, agent_id)
+        payload = _source_video_project_intent_payload(
+            uid=principal.get("uid") or "admin",
+            agent=agent,
+            source=_source_video_public_doc(source_video_id, source_data),
+            analysis=analysis,
+            derivation=derivation,
+            adaptation=adaptation,
+            source_video_id=source_video_id,
+            derivation_id=derivation_id,
+            adaptation_id=adaptation_id,
+        )
+        intent_ref = db.collection("projectIntents").document()
+        expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+        payload.update({
+            "intentId": intent_ref.id,
+            "createdAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+            "expiresAt": expires_at,
+        })
+        intent_ref.set(payload)
+        params = urllib.parse.urlencode({"intentId": intent_ref.id})
+        prepared_url = f"/dashboard/new?{params}"
+        source_ref.set({
+            "projectIntentId": intent_ref.id,
+            "status": "project_prepared",
+            "preparedAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+        return {
+            "ok": True,
+            "intent": _source_video_public_intent(intent_ref.id, payload),
+            "preparedUrl": prepared_url,
+            "creditCharged": False,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.get("/project-intents/{intent_id}")
+def project_intents_get(intent_id: str, request: Request):
+    principal = _require_principal(request, allow_admin=True)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        snap, data = _source_video_get_project_intent(db, intent_id, principal)
+        return {
+            "ok": True,
+            "intent": _source_video_public_intent(snap.id, data),
+            "prefill": {
+                "agentId": data.get("agentId") or "",
+                "topic": data.get("shortTopic") or data.get("visibleTitle") or "",
+                "visibleTitle": data.get("visibleTitle") or "",
+                "from": "inspiration",
+                "intentId": snap.id,
+                "sourceVideoId": data.get("sourceVideoId") or "",
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+def _inspiration_collection_public(doc_id: str, data: dict | None) -> dict:
+    data = data or {}
+    return _serialize_firestore_value({"collectionId": data.get("collectionId") or doc_id, **data})
+
+
+def _inspiration_get_collection(db, collection_id: str, principal: dict):
+    snap = db.collection("inspirationCollections").document(collection_id).get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="collection not found")
+    data = snap.to_dict() or {}
+    if not principal.get("admin") and data.get("userId") != principal.get("uid"):
+        raise HTTPException(status_code=403, detail="collection access denied")
+    return snap, data
+
+
+@app.post("/inspiration/collections")
+async def inspiration_collections_create(request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    name = _source_video_compact_text((body or {}).get("name") or "Motivacion espiritual suave", 100)
+    niche = _source_video_compact_text((body or {}).get("niche") or SOURCE_VIDEO_DEFAULT_NICHE, 160)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        ref = db.collection("inspirationCollections").document()
+        payload = {
+            "collectionId": ref.id,
+            "userId": principal.get("uid") or "admin",
+            "name": name,
+            "niche": niche,
+            "sourceVideoIds": [],
+            "aggregateDNA": {},
+            "suggestedAgentTemplate": "podcast_two_hosts",
+            "status": "collecting",
+            "createdAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+        ref.set(payload)
+        return {"ok": True, "collection": _inspiration_collection_public(ref.id, payload)}
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.get("/inspiration/collections")
+def inspiration_collections_list(request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        items = []
+        for doc in db.collection("inspirationCollections").limit(100).stream():
+            data = doc.to_dict() or {}
+            if not principal.get("admin") and data.get("userId") != principal.get("uid"):
+                continue
+            items.append(_inspiration_collection_public(doc.id, data))
+        items.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+        return {"ok": True, "collections": items}
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220], "collections": []})
+
+
+@app.post("/inspiration/collections/{collection_id}/add-source")
+async def inspiration_collection_add_source(collection_id: str, request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    source_video_id = str((body or {}).get("sourceVideoId") or "").strip()
+    if not source_video_id:
+        raise HTTPException(status_code=400, detail="sourceVideoId required")
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        snap, data = _inspiration_get_collection(db, collection_id, principal)
+        _source_video_get_doc(db, source_video_id, principal)
+        ids = list(data.get("sourceVideoIds") or [])
+        if source_video_id not in ids:
+            ids.append(source_video_id)
+        update = {
+            "sourceVideoIds": ids,
+            "status": "collecting",
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+        snap.reference.set(update, merge=True)
+        return {"ok": True, "collection": _inspiration_collection_public(collection_id, {**data, **update})}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/inspiration/collections/{collection_id}/analyze")
+async def inspiration_collection_analyze(collection_id: str, request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        snap, data = _inspiration_get_collection(db, collection_id, principal)
+        sources = []
+        analyses = []
+        for source_video_id in (data.get("sourceVideoIds") or [])[:30]:
+            try:
+                _src_ref, _src_snap, source_data = _source_video_get_doc(db, source_video_id, principal)
+                _analysis_id, analysis = _source_video_latest_analysis(db, source_video_id, source_data.get("analysisId") or "")
+                sources.append(_source_video_public_doc(source_video_id, source_data))
+                analyses.append(analysis)
+            except Exception:
+                continue
+        if not sources:
+            raise HTTPException(status_code=400, detail="collection has no analyzed sources")
+        aggregate = _source_video_aggregate_collection_dna(sources, analyses)
+        update = {
+            "aggregateDNA": aggregate,
+            "suggestedAgentTemplate": aggregate.get("suggestedAgentTemplate") or "podcast_two_hosts",
+            "status": "ready_for_agent",
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+        snap.reference.set(update, merge=True)
+        return {"ok": True, "collection": _inspiration_collection_public(collection_id, {**data, **update})}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/inspiration/collections/{collection_id}/draft-agent")
+async def inspiration_collection_draft_agent(collection_id: str, request: Request):
+    principal = _require_source_video_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        snap, data = _inspiration_get_collection(db, collection_id, principal)
+        aggregate = data.get("aggregateDNA") if isinstance(data.get("aggregateDNA"), dict) else {}
+        if not aggregate:
+            sources = []
+            analyses = []
+            for source_video_id in (data.get("sourceVideoIds") or [])[:30]:
+                try:
+                    _src_ref, _src_snap, source_data = _source_video_get_doc(db, source_video_id, principal)
+                    _analysis_id, analysis = _source_video_latest_analysis(db, source_video_id, source_data.get("analysisId") or "")
+                    sources.append(_source_video_public_doc(source_video_id, source_data))
+                    analyses.append(analysis)
+                except Exception:
+                    continue
+            aggregate = _source_video_aggregate_collection_dna(sources, analyses)
+        if not aggregate or not aggregate.get("sourceCount"):
+            raise HTTPException(status_code=400, detail="collection needs analyzed sources")
+        draft_payload = _source_video_draft_agent_payload(
+            {**data, "agentName": (body or {}).get("name") or data.get("agentName")},
+            aggregate,
+        )
+        record = _custom_build_agent_record(
+            draft_payload,
+            owner_uid=principal.get("uid") or "admin",
+            firestore_module=firestore,
+            existing_id=None,
+        )
+        agent_ref = db.collection("customAgents").document(record["customAgentId"])
+        agent_ref.set(record)
+        update = {
+            "status": "agent_drafted",
+            "customAgentId": record["customAgentId"],
+            "aggregateDNA": aggregate,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+        snap.reference.set(update, merge=True)
+        return {
+            "ok": True,
+            "collection": _inspiration_collection_public(collection_id, {**data, **update}),
+            "agent": _custom_agent_doc_payload(agent_ref.get()),
+        }
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
 
@@ -10098,6 +10573,8 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
     principal = _require_principal(request)
     body = await request.json()
     payload = _validate_project_payload(body, principal=principal)
+    intent_id = str(body.get("intentId") or body.get("intent_id") or "").strip()
+    intent_data = None
     dry_run = bool(body.get("dryRun")) or request.query_params.get("dryRun", "").lower() in {
         "1",
         "true",
@@ -10105,6 +10582,26 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
     }
 
     try:
+        if intent_id:
+            _ensure_firebase_initialized()
+            from firebase_admin import firestore
+            db = firestore.client()
+            _intent_snap, intent_data = _source_video_get_project_intent(db, intent_id, principal)
+            if intent_data.get("agentId") and intent_data.get("agentId") != payload.get("agent_id"):
+                raise HTTPException(status_code=400, detail="project intent agent mismatch")
+            source_inspiration = {
+                "intentId": intent_id,
+                "sourceVideoId": intent_data.get("sourceVideoId") or "",
+                "derivationId": intent_data.get("derivationId") or "",
+                "adaptationId": intent_data.get("adaptationId") or "",
+                "visibleTitle": intent_data.get("visibleTitle") or "",
+                "shortTopic": intent_data.get("shortTopic") or "",
+                "inspirationBrief": intent_data.get("inspirationBrief") or {},
+                "sourceSafety": intent_data.get("sourceSafety") or {},
+            }
+            generation_options = dict(payload.get("generation_options") or {})
+            generation_options["source_inspiration"] = source_inspiration
+            payload["generation_options"] = generation_options
         custom_agent = payload.get("custom_agent") or {}
         project_extra = None
         credit_metadata = None
@@ -10124,7 +10621,18 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
                 "customAgentId": payload["agent_id"],
                 "agentTemplateKey": custom_agent.get("templateKey") or "",
             }
-        return _create_project_with_credit(
+        if intent_data:
+            project_extra = {
+                **(project_extra or {}),
+                "sourceInspiration": {
+                    "intentId": intent_id,
+                    "sourceVideoId": intent_data.get("sourceVideoId") or "",
+                    "sourceTitle": (intent_data.get("inspirationBrief") or {}).get("sourceTitle") or "",
+                    "sourceChannel": (intent_data.get("inspirationBrief") or {}).get("sourceChannel") or "",
+                    "safety": intent_data.get("sourceSafety") or {},
+                },
+            }
+        result = _create_project_with_credit(
             principal=principal,
             payload=payload,
             background_tasks=background_tasks,
@@ -10132,6 +10640,16 @@ async def create_project(request: Request, background_tasks: BackgroundTasks):
             project_extra=project_extra,
             credit_metadata=credit_metadata,
         )
+        if intent_data and not dry_run:
+            try:
+                db.collection("projectIntents").document(intent_id).set({
+                    "status": "project_created",
+                    "projectId": result.get("projectId"),
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                }, merge=True)
+            except Exception:
+                pass
+        return result
     except HTTPException:
         raise
     except Exception as e:
