@@ -8,8 +8,11 @@ from scripts.generate_content import (
     _build_autohypnosis_visual_scenes,
     _build_long_meditation_visual_scenes,
     _distribute_duration_seconds,
+    _distribute_long_meditation_duration_seconds,
+    _long_meditation_has_open_breath_cue,
     _long_meditation_duration_profile,
     _normalize_autohypnosis_delivery,
+    _repair_open_breathwork_segments,
     _normalize_personalization_payload,
     _personalization_prompt_block,
     _load_wellness_music_manifest,
@@ -121,6 +124,15 @@ def test_long_meditation_duration_distribution_has_no_drift():
     assert min(durations) > 0
 
 
+def test_immersive_duration_distribution_reserves_final_buffer():
+    durations = _distribute_long_meditation_duration_seconds(60 * 60, 26, final_buffer_seconds=10 * 60)
+
+    assert len(durations) == 26
+    assert sum(durations) == 60 * 60
+    assert durations[-1] == 10 * 60
+    assert max(durations[:-1]) < durations[-1]
+
+
 def test_long_meditation_visual_scenes_preserve_script_and_target_duration():
     script = _sample_autohypnosis_script(30)
     profile = _long_meditation_duration_profile("3h")
@@ -159,10 +171,28 @@ def test_immersive_long_meditation_profile_adds_dynamic_tts_settings():
 
     assert profile["variant"] == "immersive_v2"
     assert profile["speech_minutes"] > _long_meditation_duration_profile("60m")["speech_minutes"]
+    assert profile["final_buffer_minutes"] == 10
+    assert profile["words"] == "4,500 a 5,000"
     assert scenes[0]["delivery_phase"] == "breathwork"
+    assert scenes[-1]["integration_buffer_seconds"] == 10 * 60
+    assert scenes[-1]["target_duration_seconds"] == 10 * 60
     assert scenes[0]["tts_settings"]["speed"] < 0.90
     assert any(scene.get("delivery_phase") == "reflection" for scene in scenes)
     assert all("tts_settings" in scene for scene in scenes)
+
+
+def test_immersive_long_meditation_repairs_open_breathwork_segments():
+    segments = [
+        "Vamos a respirar juntos. Inhala suave... ocho... siete... Sosten si se siente comodo...",
+        "cuatro... tres... dos... uno... y ahora exhala lento... ocho... siete... vuelve a respirar natural.",
+        "Continua descansando.",
+    ]
+
+    assert _long_meditation_has_open_breath_cue(segments[0]) is True
+    repaired = _repair_open_breathwork_segments(segments)
+    assert len(repaired) == 2
+    assert _long_meditation_has_open_breath_cue(repaired[0]) is False
+    assert "exhala lento" in repaired[0]
 
 
 def test_personalization_prompt_block_is_safe_and_frequency_aware():

@@ -1058,8 +1058,10 @@ LONG_MEDITATION_V2_DURATION_PROFILES = {
         "target_minutes": 30,
         "speech_minutes": 18,
         "characters": "12,500 a 15,500",
+        "words": "2,400 a 2,900",
         "visual_scenes": 14,
         "affirmation_spacing_minutes": 1.2,
+        "final_buffer_minutes": 5,
         "delivery_profile": "immersive_v2",
         "intensity": "guiada",
         "breathwork_density": "media",
@@ -1070,8 +1072,10 @@ LONG_MEDITATION_V2_DURATION_PROFILES = {
         "target_minutes": 60,
         "speech_minutes": 34,
         "characters": "23,000 a 28,000",
+        "words": "3,700 a 4,300",
         "visual_scenes": 24,
         "affirmation_spacing_minutes": 1.6,
+        "final_buffer_minutes": 8,
         "delivery_profile": "immersive_v2",
         "intensity": "guiada",
         "breathwork_density": "media-alta",
@@ -1082,8 +1086,10 @@ LONG_MEDITATION_V2_DURATION_PROFILES = {
         "target_minutes": 60,
         "speech_minutes": 42,
         "characters": "28,000 a 34,000",
+        "words": "4,500 a 5,000",
         "visual_scenes": 26,
         "affirmation_spacing_minutes": 1.4,
+        "final_buffer_minutes": 10,
         "delivery_profile": "immersive_v2",
         "intensity": "inmersiva",
         "breathwork_density": "alta",
@@ -1094,8 +1100,10 @@ LONG_MEDITATION_V2_DURATION_PROFILES = {
         "target_minutes": 180,
         "speech_minutes": 52,
         "characters": "35,000 a 42,000",
+        "words": "5,800 a 6,800",
         "visual_scenes": 36,
         "affirmation_spacing_minutes": 3.5,
+        "final_buffer_minutes": 20,
         "delivery_profile": "immersive_v2",
         "intensity": "profunda",
         "breathwork_density": "media",
@@ -2185,6 +2193,26 @@ def _distribute_duration_seconds(total_seconds: int, scene_count: int) -> list[i
     return durations
 
 
+def _distribute_long_meditation_duration_seconds(total_seconds: int, scene_count: int, final_buffer_seconds: int = 0) -> list[int]:
+    scene_count = max(1, int(scene_count or 1))
+    total_seconds = max(scene_count, int(total_seconds or scene_count))
+    final_buffer_seconds = max(0, int(final_buffer_seconds or 0))
+    if scene_count <= 1 or final_buffer_seconds <= 0:
+        return _distribute_duration_seconds(total_seconds, scene_count)
+
+    # Keep a final contemplative buffer so the active guided portion can have
+    # shorter voice gaps while the long silence happens only after closure.
+    max_buffer = max(0, total_seconds - (scene_count - 1))
+    final_buffer_seconds = min(final_buffer_seconds, max_buffer)
+    active_seconds = total_seconds - final_buffer_seconds
+    durations = _distribute_duration_seconds(active_seconds, scene_count - 1)
+    durations.append(final_buffer_seconds)
+    drift = total_seconds - sum(durations)
+    if drift:
+        durations[-1] += drift
+    return durations
+
+
 def _wellness_visual_variation_clause(
     topic: str,
     scene_index: int,
@@ -2317,6 +2345,51 @@ def _long_meditation_scene_tts_settings(profile: dict, index: int, total: int) -
     return {"phase": phase, **presets[phase]}
 
 
+def _normalized_latin_text(value: object) -> str:
+    text = unicodedata.normalize("NFKD", str(value or "").lower())
+    return "".join(ch for ch in text if not unicodedata.combining(ch))
+
+
+def _long_meditation_has_open_breath_cue(segment: str) -> bool:
+    """
+    Detects unsafe segment endings such as "reten..." without a following
+    exhale cue. Long meditation audio is padded per scene, so a segment must
+    never end while the listener is holding breath.
+    """
+    tail = _normalized_latin_text(segment)[-520:]
+    if not tail.strip():
+        return False
+    cue_positions = []
+    for cue in ("inhala", "inhalando", "reten", "retenemos", "retener", "sosten", "sostener", "manten el aire", "mantener el aire", "aguanta"):
+        pos = tail.rfind(cue)
+        if pos >= 0:
+            cue_positions.append((pos, cue))
+    if not cue_positions:
+        return False
+    last_pos, last_cue = max(cue_positions, key=lambda item: item[0])
+    after = tail[last_pos:]
+    if any(done in after for done in ("exhala", "exhalando", "suelta el aire", "respira natural", "respiracion natural", "vuelve a respirar")):
+        return False
+    return last_cue in {"inhala", "inhalando", "reten", "retenemos", "retener", "sosten", "sostener", "manten el aire", "mantener el aire", "aguanta"}
+
+
+def _repair_open_breathwork_segments(segments: list[str]) -> list[str]:
+    repaired = [str(segment or "").strip() for segment in segments if str(segment or "").strip()]
+    i = 0
+    while i < len(repaired):
+        if _long_meditation_has_open_breath_cue(repaired[i]):
+            if i + 1 < len(repaired):
+                repaired[i] = f"{repaired[i]}\n\n{repaired.pop(i + 1)}".strip()
+                continue
+            repaired[i] = (
+                repaired[i].rstrip()
+                + "\n\nY si estabas sosteniendo el aire, exhala suavemente ahora... "
+                "vuelve a una respiracion natural... sin prisa..."
+            )
+        i += 1
+    return repaired
+
+
 def _build_long_meditation_visual_scenes(
     topic: str,
     script_text: str,
@@ -2332,12 +2405,16 @@ def _build_long_meditation_visual_scenes(
     topic_tags = _topic_tags(topic)
     target_scene_count = int(profile.get("visual_scenes") or 8)
     segments = _split_text_into_balanced_segments(script_text, target_scene_count)
+    if profile.get("delivery_profile") == "immersive_v2":
+        segments = _repair_open_breathwork_segments(segments)
     if not segments:
         return []
 
-    durations = _distribute_duration_seconds(
+    final_buffer_seconds = int(float(profile.get("final_buffer_minutes") or 0) * 60)
+    durations = _distribute_long_meditation_duration_seconds(
         int(float(profile.get("target_minutes", 60)) * 60),
         len(segments),
+        final_buffer_seconds if profile.get("delivery_profile") == "immersive_v2" else 0,
     )
     safety_clauses = [
         "no readable text",
@@ -2370,6 +2447,9 @@ def _build_long_meditation_visual_scenes(
             "target_duration_seconds": durations[i],
             "pace": "long_meditation",
         })
+        if profile.get("delivery_profile") == "immersive_v2" and i == len(segments) - 1 and final_buffer_seconds:
+            visual_scenes[-1]["integration_buffer_seconds"] = final_buffer_seconds
+            visual_scenes[-1]["pace"] = "long_meditation_final_buffer"
         if tts_settings:
             visual_scenes[-1]["delivery_phase"] = tts_settings.pop("phase")
             visual_scenes[-1]["tts_settings"] = tts_settings
@@ -2603,11 +2683,19 @@ def generate_long_meditation_script(
     personalization_section = f"\n\n{personalization_block}" if personalization_block else ""
     immersive_requirements = ""
     if profile.get("delivery_profile") == "immersive_v2":
+        final_buffer_minutes = float(profile.get("final_buffer_minutes") or 0)
+        active_minutes = max(1, float(profile.get("target_minutes") or 60) - final_buffer_minutes)
         immersive_requirements = f"""
 - Modo de intensidad: {profile.get('intensity', 'guiada')}
 - Densidad de respiracion guiada: {profile.get('breathwork_density', 'media')}
 - Densidad de reflexion interior: {profile.get('reflection_density', 'media')}
+- Palabras objetivo aproximadas: {profile.get('words', 'mantener una guia hablada presente')}
+- Parte activa guiada: aproximadamente {active_minutes:g} minutos; deja menos espacios sin voz durante esta parte
+- Buffer final contemplativo: aproximadamente {final_buffer_minutes:g} minutos con musica y visuales lentos despues de una despedida clara
+- Antes del buffer final, di claramente que ahora quedara un tiempo de integracion en silencio/musica para relajarse y volver poco a poco a la conciencia plena
 - Incluye respiraciones acompanadas con conteos completos y pausas verbales reales
+- Cada ejercicio de respiracion es atomico: si dices inhala o sosten/reten, debes completar tambien la exhalacion y devolver al oyente a respiracion natural antes de cualquier pausa larga
+- Nunca termines un bloque despues de "inhala", "reten", "sosten" o "manten el aire"; termina solo despues de "exhala" o "respira natural"
 - Alterna respiracion, presencia corporal, visualizacion, afirmaciones y reflexion
 - No hagas toda la sesion lenta: respiracion suave, reflexion natural, afirmaciones medio-lentas
 - Evita reinicios bruscos despues de pausas largas; retoma con frases puente como "sin prisa", "y poco a poco", "cuando estes listo"."""
@@ -2679,6 +2767,8 @@ Devuelve solo el guion hablado final."""
             "duration_label": profile["label"],
             "speech_target_minutes": profile["speech_minutes"],
             "visual_scene_target": profile["visual_scenes"],
+            "final_buffer_minutes": profile.get("final_buffer_minutes", 0),
+            "word_target": profile.get("words"),
             "format": LONG_MEDITATION_FORMAT,
             "variant": profile.get("variant", "classic"),
             "delivery_profile": profile.get("delivery_profile", "classic"),
@@ -3100,6 +3190,8 @@ def run_full_pipeline(
                 "speech_target_minutes": result["metadata"].get("speech_target_minutes"),
                 "estimated_speech_minutes": result["metadata"].get("estimated_speech_minutes"),
                 "visual_scene_target": result["metadata"].get("visual_scene_target"),
+                "final_buffer_minutes": result["metadata"].get("final_buffer_minutes"),
+                "word_target": result["metadata"].get("word_target"),
                 "affirmation_spacing_minutes": _long_meditation_duration_profile(
                     result["metadata"].get("duration_profile"),
                     topic,
