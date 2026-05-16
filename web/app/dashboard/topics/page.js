@@ -115,6 +115,17 @@ function downloadRowsAsCsv(rows) {
   URL.revokeObjectURL(url);
 }
 
+function buildPreparedProjectUrl(row) {
+  const params = new URLSearchParams({
+    agentId: row.agentId || "",
+    topic: row.topic || "",
+    from: "topics",
+  });
+  if (row.candidateHash) params.set("candidateHash", row.candidateHash);
+  if (row.durationProfile) params.set("durationProfile", row.durationProfile);
+  return `/dashboard/new?${params.toString()}`;
+}
+
 function flattenGroups(groups) {
   const rows = [];
   for (const group of groups || []) {
@@ -142,6 +153,8 @@ function flattenGroups(groups) {
         riskLevel: item.riskLevel || "low",
         riskLabel: riskMeta(item.riskLevel).label,
         projectId: item.projectId || "",
+        candidateHash: item.candidateHash || "",
+        durationProfile: item.durationProfile || "",
         hasVideo: false,
         shortsCount: 0,
         createdAt: item.createdAt || "",
@@ -170,6 +183,8 @@ function flattenGroups(groups) {
         riskLevel: "low",
         riskLabel: "Riesgo bajo",
         projectId: item.projectId || "",
+        candidateHash: "",
+        durationProfile: "",
         hasVideo: Boolean(item.hasVideo || item.videoUrl),
         shortsCount: Number(item.shortsCount || 0),
         createdAt: item.createdAt || "",
@@ -483,6 +498,11 @@ export default function TopicsPage() {
                           <Link className="cf-btn cf-btn--secondary cf-btn--sm" href={`/dashboard/project/${row.projectId}`} style={{ textDecoration: "none" }}>
                             <Icon name="externalLink" size={13} />
                             Abrir
+                          </Link>
+                        ) : row.type === "idea" ? (
+                          <Link className="cf-btn cf-btn--primary cf-btn--sm" href={buildPreparedProjectUrl(row)} style={{ textDecoration: "none" }}>
+                            <Icon name="arrowRight" size={13} />
+                            Preparar
                           </Link>
                         ) : (
                           <span className="cf-caption">Sin proyecto</span>

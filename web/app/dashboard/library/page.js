@@ -63,6 +63,7 @@ function buildPreparedProjectUrl(item) {
     from: "library",
   });
   if (item.candidateHash) params.set("candidateHash", item.candidateHash);
+  if (item.durationProfile) params.set("durationProfile", item.durationProfile);
   return `/dashboard/new?${params.toString()}`;
 }
 
@@ -227,6 +228,7 @@ export default function LibraryPage() {
   });
   const [creatingHash, setCreatingHash] = useState("");
   const [archivingId, setArchivingId] = useState("");
+  const [seedingWellness, setSeedingWellness] = useState(false);
 
   const fetchLibrary = useCallback(async () => {
     const res = await authedFetch(user, `${getApiBase()}/library/agents`);
@@ -337,6 +339,26 @@ export default function LibraryPage() {
     }
   };
 
+  const seedWellnessTopics = async () => {
+    if (!user || !admin) return;
+    setSeedingWellness(true);
+    setError("");
+    setNotice("");
+    try {
+      const res = await authedFetch(user, `${getApiBase()}/library/seed-wellness-topics`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.error || "No se pudieron importar los temas.");
+      setNotice(`Temas wellness listos: ${data.created || 0} nuevos, ${data.updated || 0} ya existentes.`);
+      await loadLibrary();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSeedingWellness(false);
+    }
+  };
+
   if (!authLoading && !admin) {
     return (
       <div className="cf-card" style={{ padding: "var(--s-7)", textAlign: "center" }}>
@@ -359,10 +381,21 @@ export default function LibraryPage() {
               Ideas guardadas, proyectos creados, material completado y huecos editoriales.
             </p>
           </div>
-          <button className="cf-btn cf-btn--secondary" onClick={loadLibrary} disabled={loading} type="button">
-            <Icon name="refresh" size={16} />
-            {loading ? "Cargando" : "Actualizar"}
-          </button>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              className="cf-btn cf-btn--secondary"
+              onClick={seedWellnessTopics}
+              disabled={seedingWellness}
+              type="button"
+            >
+              <Icon name="sparkles" size={16} />
+              {seedingWellness ? "Importando" : "Cargar 50 meditaciones"}
+            </button>
+            <button className="cf-btn cf-btn--secondary" onClick={loadLibrary} disabled={loading} type="button">
+              <Icon name="refresh" size={16} />
+              {loading ? "Cargando" : "Actualizar"}
+            </button>
+          </div>
         </div>
       </header>
 

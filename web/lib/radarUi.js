@@ -33,6 +33,9 @@ export const RADAR_INTENT_OPTIONS = [
 export const RADAR_FORMAT_OPTIONS = [
   { id: "all", label: "Todos" },
   { id: "youtube_long", label: "YouTube largo" },
+  { id: "autohipnosis", label: "Autohipnosis" },
+  { id: "meditacion_larga", label: "Meditacion larga" },
+  { id: "meditacion_inmersiva", label: "Meditacion inmersiva" },
   { id: "tiktok", label: "TikTok" },
   { id: "both", label: "Multicanal" },
 ];
@@ -71,6 +74,9 @@ export function formatRecommendation(value) {
   if (key === "both") return "Multicanal";
   if (key === "tiktok") return "TikTok";
   if (key === "youtube_long") return "YouTube largo";
+  if (key === "autohipnosis") return "Autohipnosis";
+  if (key === "meditacion_larga") return "Meditacion larga";
+  if (key === "meditacion_inmersiva") return "Meditacion inmersiva";
   return key.replace(/_/g, " ");
 }
 

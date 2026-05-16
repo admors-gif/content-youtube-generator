@@ -4502,6 +4502,7 @@ def _radar_upsert_library_candidate(db, firestore, uid: str, candidate: dict, *,
             "reason": candidate.get("riskReason") or "",
         },
         "recommendedFormat": candidate.get("recommendedFormat") or "youtube_long",
+        "durationProfile": candidate.get("durationProfile") or "",
         "seoTitle": candidate.get("seoTitle") or candidate.get("angle") or candidate.get("title"),
         "seoKeywords": candidate.get("seoKeywords") or [],
         "searchIntent": candidate.get("searchIntent") or "",
@@ -4701,6 +4702,7 @@ def _library_public_item(doc_id: str, data: dict) -> dict:
         "riskLevel": risk.get("level") or data.get("riskLevel") or "low",
         "riskReason": risk.get("reason") or data.get("riskReason") or "",
         "recommendedFormat": data.get("recommendedFormat") or "youtube_long",
+        "durationProfile": data.get("durationProfile") or ((data.get("candidate") or {}).get("durationProfile") or ""),
         "seoTitle": data.get("seoTitle") or ((data.get("candidate") or {}).get("seoTitle") or ""),
         "seoKeywords": data.get("seoKeywords") or ((data.get("candidate") or {}).get("seoKeywords") or []),
         "searchIntent": data.get("searchIntent") or ((data.get("candidate") or {}).get("searchIntent") or ""),
@@ -4729,6 +4731,214 @@ def _library_public_project(doc_id: str, data: dict) -> dict:
         "shortsCount": len(shorts) if isinstance(shorts, list) else 0,
         "createdAt": _serialize_firestore_value(data.get("createdAt")),
         "updatedAt": _serialize_firestore_value(data.get("completedAt") or data.get("updatedAt") or data.get("createdAt")),
+    }
+
+
+WELLNESS_CURATED_TOPICS_V1 = [
+    ("Escucha esto antes de rendirte: autohipnosis para recuperar fuerza interior", "Para resiliencia, cansancio emocional y volver a intentarlo."),
+    ("Autohipnosis para dejar de autosabotearte mientras duermes", "Cambiar diálogo interno y reforzar identidad."),
+    ("Meditación profunda para soltar ansiedad y volver a sentir control", "Ideal para respiración guiada y seguridad corporal."),
+    ("Reprograma tu mente para tener disciplina sin sentirte castigado", "Disciplina suave, identidad, constancia."),
+    ("Autohipnosis para amor propio: deja de buscar validación afuera", "Muy fuerte para retención emocional."),
+    ("Meditación para dormir y despertar con una nueva versión de ti", "Sueño y transformación personal."),
+    ("Escucha esto 21 noches: afirmaciones para confianza profunda", "Retención por reto repetible."),
+    ("Autohipnosis para sanar tu relación contigo mismo", "Cálida, introspectiva, universal."),
+    ("Meditación guiada para soltar el miedo al futuro", "Ansiedad anticipatoria, calma y presencia."),
+    ("Reprograma tu mente para dejar de procrastinar", "Productividad emocional, no agresiva."),
+    ("Meditación para dejar de pensar demasiado y descansar la mente", "SEO fuerte: pensar demasiado."),
+    ("Autohipnosis para sentirte suficiente aunque nadie te lo diga", "Alto potencial emocional."),
+    ("Meditación profunda para cerrar ciclos y no mirar atrás", "Rupturas, cambios, pérdidas simbólicas."),
+    ("Escucha esto cuando sientas que no puedes más", "Click emocional fuerte, útil para apoyo interno."),
+    ("Autohipnosis para construir autoestima desde cero", "Básica, evergreen, muy buscable."),
+    ("Meditación para calmar el sistema nervioso antes de dormir", "Wellness seguro, útil y SEO."),
+    ("Reprograma tu mente para elegirte a ti primero", "Amor propio y límites."),
+    ("Meditación guiada para perdonarte y empezar otra vez", "Culpa, compasión, renacimiento."),
+    ("Autohipnosis para atraer paz interior, no caos emocional", "Buen tono espiritual suave."),
+    ("Meditación para dejar de vivir en modo supervivencia", "Resonante, con cuidado de no prometer terapia."),
+    ("Escucha esto si estás cansado de ser fuerte todo el tiempo", "Hook emocional alto."),
+    ("Autohipnosis para recuperar motivación cuando perdiste el rumbo", "Dirección, claridad y energía."),
+    ("Meditación profunda para confiar más en ti", "Simple, buscable, útil."),
+    ("Reprograma tu mente para hablarte bonito", "Diferenciador, cercano y viralizable."),
+    ("Meditación para soltar pensamientos negativos antes de dormir", "SEO fuerte."),
+    ("Autohipnosis para dejar de complacer a todos", "Límites, identidad y autoestima."),
+    ("Meditación para sanar la niña o el niño interior con suavidad", "Emocional, profunda, con lenguaje seguro."),
+    ("Escucha esto para volver a sentir esperanza", "Retención alta por estado emocional."),
+    ("Autohipnosis para sentir seguridad en tu cuerpo", "Somática, respiración, grounding."),
+    ("Meditación para liberar culpa que ya no te pertenece", "Profunda, narrativamente potente."),
+    ("Reprograma tu mente para levantarte con energía y propósito", "Mañana, productividad, identidad."),
+    ("Meditación nocturna para apagar la mente y dormir profundo", "SEO clásico."),
+    ("Autohipnosis para dejar de compararte con los demás", "Muy actual, redes sociales, autoestima."),
+    ("Meditación para transformar miedo en confianza", "Claridad emocional y visualización."),
+    ("Escucha esto cuando te sientas perdido en la vida", "Gran click emocional."),
+    ("Autohipnosis para crear una identidad disciplinada y tranquila", "Sofisticada, ideal para formato inmersivo."),
+    ("Meditación para soltar apego emocional y recuperar tu paz", "Puede conectar con Esto no es amor sin ser podcast."),
+    ("Reprograma tu mente para merecer cosas buenas", "Merecimiento, autoestima, abundancia emocional."),
+    ("Meditación para dejar ir el pasado sin pelear con él", "Muy buena para guion poético."),
+    ("Autohipnosis para dormir con afirmaciones de amor propio", "Sueño y afirmaciones para repetición."),
+    ("Meditación para confiar en el proceso cuando nada parece avanzar", "Espiritual suave, útil y retentiva."),
+    ("Escucha esto si necesitas empezar de nuevo", "Universal y emocional."),
+    ("Autohipnosis para romper patrones que te mantienen estancado", "Transformación personal, clickbait sano."),
+    ("Meditación para calmar ansiedad social y sentirte más seguro", "Acompañamiento seguro, sin claims clínicos."),
+    ("Reprograma tu mente para dejar de castigarte por tus errores", "Culpa, compasión, crecimiento."),
+    ("Meditación profunda para reconectar con tu propósito", "Espiritual suave, motivacional."),
+    ("Autohipnosis para sentir paz aunque tu vida esté cambiando", "Transiciones, incertidumbre, duelo simbólico."),
+    ("Meditación para dejar de necesitar respuestas inmediatas", "Ansiedad, control, paciencia."),
+    ("Escucha esto antes de dormir: tu mente sabe cómo sanar con calma", "Potente, con lenguaje cuidadoso sin promesa médica."),
+    ("Autohipnosis para convertirte en la persona que prometiste ser", "Alto impacto para disciplina e identidad."),
+]
+
+
+def _wellness_plain_text(value: str) -> str:
+    text = str(value or "").lower()
+    replacements = str.maketrans({
+        "á": "a",
+        "é": "e",
+        "í": "i",
+        "ó": "o",
+        "ú": "u",
+        "ü": "u",
+        "ñ": "n",
+    })
+    return re.sub(r"\s+", " ", text.translate(replacements)).strip()
+
+
+def _wellness_seed_agent_for_title(title: str) -> dict:
+    normalized = _wellness_plain_text(title)
+    is_meditation = normalized.startswith("meditacion") or "meditacion " in normalized
+    if is_meditation:
+        return {
+            "agentId": "agent_meditacion_larga_v2",
+            "agentName": "Meditacion Inmersiva",
+            "agentFile": "agent_meditacion_larga_v2.md",
+            "format": "meditacion_larga",
+            "recommendedFormat": "meditacion_inmersiva",
+            "durationProfile": "60m-guided",
+        }
+    return {
+        "agentId": "agent_autohipnosis",
+        "agentName": "Autohipnosis Guiada",
+        "agentFile": "agent_autohipnosis.md",
+        "format": "autohipnosis",
+        "recommendedFormat": "autohipnosis",
+        "durationProfile": "",
+    }
+
+
+def _wellness_seed_keywords(title: str, summary: str) -> list[str]:
+    normalized = _wellness_plain_text(f"{title} {summary}")
+    keywords = []
+    for keyword in [
+        "autohipnosis",
+        "meditacion",
+        "ansiedad",
+        "dormir",
+        "amor propio",
+        "autoestima",
+        "disciplina",
+        "procrastinar",
+        "confianza",
+        "paz interior",
+        "miedo",
+        "culpa",
+        "proposito",
+        "apego",
+        "afirmaciones",
+    ]:
+        if keyword in normalized:
+            keywords.append(keyword)
+    return keywords[:6] or ["wellness", "transformacion personal"]
+
+
+def _wellness_seed_scores(title: str, summary: str) -> dict:
+    normalized = _wellness_plain_text(f"{title} {summary}")
+    viral = 68
+    retention = 70
+    seo = 72
+    if normalized.startswith("escucha esto"):
+        viral += 12
+        retention += 10
+    if "21 noches" in normalized or "mientras duermes" in normalized or "antes de dormir" in normalized:
+        retention += 12
+        seo += 8
+    if "ansiedad" in normalized or "dormir" in normalized or "autoestima" in normalized or "amor propio" in normalized:
+        seo += 8
+    if "reprograma tu mente" in normalized:
+        viral += 8
+        retention += 6
+    viral = min(94, viral)
+    retention = min(95, retention)
+    seo = min(95, seo)
+    overall = round((viral * 0.28) + (retention * 0.28) + (seo * 0.2) + (84 * 0.16) + (90 * 0.08))
+    return {
+        "audience": viral,
+        "fit": 88,
+        "storyArc": retention,
+        "freshness": 68,
+        "productionEase": 86,
+        "risk": 88,
+        "overall": overall,
+        "viral": viral,
+        "seo": seo,
+        "clickbait": viral,
+        "retention": retention,
+    }
+
+
+def _wellness_seed_risk(title: str, summary: str) -> tuple[str, str]:
+    normalized = _wellness_plain_text(f"{title} {summary}")
+    caution_terms = ["sanar", "ansiedad", "sistema nervioso", "ansiedad social", "trauma"]
+    if any(term in normalized for term in caution_terms):
+        return "medium", "Wellness sensible: usar lenguaje de acompanamiento, no prometer cura ni reemplazar apoyo profesional."
+    return "low", "Tema de bienestar general con bajo riesgo si mantiene lenguaje seguro."
+
+
+def _wellness_seed_candidate(title: str, summary: str, index: int) -> dict:
+    agent = _wellness_seed_agent_for_title(title)
+    scores = _wellness_seed_scores(title, summary)
+    risk_level, risk_reason = _wellness_seed_risk(title, summary)
+    candidate_hash = hashlib.sha1(
+        f"wellness-curated-v1:{agent['agentId']}:{title}".encode("utf-8", errors="ignore")
+    ).hexdigest()[:20]
+    return {
+        "candidateHash": candidate_hash,
+        "agentId": agent["agentId"],
+        "agentName": agent["agentName"],
+        "agentFile": agent["agentFile"],
+        "platform": "youtube",
+        "format": agent["format"],
+        "category": "wellness",
+        "intent": "evergreen",
+        "radarIntent": "evergreen",
+        "title": title,
+        "headline": title,
+        "summary": summary,
+        "angle": title,
+        "whyNow": "Idea curada manualmente para una cola evergreen de meditaciones y autohipnosis.",
+        "sources": [],
+        "recommendedFormat": agent["recommendedFormat"],
+        "durationProfile": agent["durationProfile"],
+        "riskLevel": risk_level,
+        "riskReason": risk_reason,
+        "sourceQuery": "curated-wellness-50",
+        "sourceType": "curated_wellness_seed",
+        "seoTitle": title,
+        "seoKeywords": _wellness_seed_keywords(title, summary),
+        "searchIntent": "biblioteca curada de meditaciones y autohipnosis",
+        "knowledgeSignals": [],
+        "scores": scores,
+        "editorialScore": scores["overall"],
+        "titleLab": {
+            "seedTopic": title,
+            "group": "curated_wellness",
+            "generationMode": "manual_seed",
+            "viralScore": scores["viral"],
+            "seoScore": scores["seo"],
+            "clickbaitScore": scores["clickbait"],
+            "fitScore": scores["fit"],
+            "retentionScore": scores["retention"],
+            "retentionReason": summary,
+            "rank": index,
+        },
     }
 
 
@@ -7123,6 +7333,38 @@ def library_archive_item(item_id: str, request: Request):
         return {"ok": True, "itemId": item_id, "status": "archived"}
     except HTTPException:
         raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200]})
+
+
+@app.post("/library/seed-wellness-topics")
+def library_seed_wellness_topics(request: Request):
+    principal = _radar_require_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        created = 0
+        updated = 0
+        items = []
+        for index, (title, summary) in enumerate(WELLNESS_CURATED_TOPICS_V1, start=1):
+            candidate = _wellness_seed_candidate(title, summary, index)
+            doc_id = _radar_library_doc_id(principal["uid"], candidate["candidateHash"])
+            existed = db.collection("topicLibrary").document(doc_id).get().exists
+            saved = _radar_upsert_library_candidate(db, firestore, principal["uid"], candidate, status="saved")
+            if existed:
+                updated += 1
+            else:
+                created += 1
+            if len(items) < 10:
+                items.append(_library_public_item(saved["itemId"], saved))
+        return {
+            "ok": True,
+            "created": created,
+            "updated": updated,
+            "total": len(WELLNESS_CURATED_TOPICS_V1),
+            "items": items,
+        }
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": str(exc)[:200]})
 

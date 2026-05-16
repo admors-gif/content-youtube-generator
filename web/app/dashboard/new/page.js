@@ -380,6 +380,7 @@ export default function NewProjectPage() {
     const intentId = searchParams.get("intentId") || "";
     const prefillAgentId = searchParams.get("agentId") || "";
     const prefillTopic = searchParams.get("topic") || "";
+    const prefillDurationProfile = searchParams.get("durationProfile") || "";
     const source = searchParams.get("from") || "";
     if (intentId) {
       if (!user) return;
@@ -430,7 +431,8 @@ export default function NewProjectPage() {
       if (agent) {
         setPlatform(agent.platform || "youtube");
         setSelectedAgent(agent);
-        const defaultProfile = agent.durationProfiles?.find((p) => p.id === (agent.platform === "tiktok" ? "90s" : "60m"))
+        const defaultProfile = agent.durationProfiles?.find((p) => p.id === prefillDurationProfile)
+          || agent.durationProfiles?.find((p) => p.id === (agent.platform === "tiktok" ? "90s" : "60m"))
           || agent.durationProfiles?.[0];
         if (defaultProfile) setDurationProfile(defaultProfile.id);
         if (agent.sourceGenres?.length) setSourceGenre(agent.sourceGenres[0].id);
