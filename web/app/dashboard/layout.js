@@ -3,6 +3,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
+import PwaRuntime from "@/components/PwaRuntime";
 
 export default function DashboardLayout({ children }) {
   const { user, loading } = useAuth();
@@ -33,6 +34,7 @@ export default function DashboardLayout({ children }) {
     <div className="cf-shell">
       <Sidebar />
       <main className="cf-main">{children}</main>
+      <PwaRuntime />
     </div>
   );
 }

@@ -373,6 +373,159 @@ def _require_admin(request: Request, *, allow_local: bool = False) -> dict:
     raise HTTPException(status_code=403, detail="admin access required")
 
 
+def _notifications_enabled() -> bool:
+    return os.environ.get("CONTENT_FACTORY_NOTIFICATIONS_ENABLED", "true").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+
+def _notification_data(data: dict | None = None) -> dict:
+    clean = {}
+    for key, value in (data or {}).items():
+        if value is None:
+            continue
+        clean[str(key)] = str(value)[:1024]
+    return clean
+
+
+def _send_push_to_user(db, firestore, uid: str, *, title: str, body: str, data: dict | None = None) -> dict:
+    if not _notifications_enabled() or not uid:
+        return {"sent": 0, "skipped": True, "reason": "disabled_or_missing_uid"}
+    try:
+        from firebase_admin import messaging
+    except Exception as exc:
+        return {"sent": 0, "error": f"firebase messaging unavailable: {str(exc)[:120]}"}
+
+    token_refs = list(
+        db.collection("users")
+        .document(uid)
+        .collection("notificationTokens")
+        .where("active", "==", True)
+        .stream()
+    )
+    sent = 0
+    failed = 0
+    stale = 0
+    payload_data = _notification_data(data)
+    for token_doc in token_refs:
+        token_data = token_doc.to_dict() or {}
+        token = token_data.get("token") or ""
+        if not token:
+            continue
+        message = messaging.Message(
+            token=token,
+            notification=messaging.Notification(title=title[:80], body=body[:220]),
+            data=payload_data,
+            webpush=messaging.WebpushConfig(
+                fcm_options=messaging.WebpushFCMOptions(link=payload_data.get("url") or "/dashboard"),
+                notification=messaging.WebpushNotification(
+                    icon="/icons/icon-192.png",
+                    badge="/icons/icon-192.png",
+                ),
+            ),
+            android=messaging.AndroidConfig(
+                priority="high",
+                notification=messaging.AndroidNotification(
+                    icon="ic_stat_content_factory",
+                    color="#E0533D",
+                    channel_id="project_updates",
+                ),
+            ),
+            apns=messaging.APNSConfig(
+                payload=messaging.APNSPayload(
+                    aps=messaging.Aps(sound="default", badge=1),
+                ),
+            ),
+        )
+        try:
+            messaging.send(message)
+            sent += 1
+            token_doc.reference.set({
+                "lastSentAt": firestore.SERVER_TIMESTAMP,
+                "lastError": firestore.DELETE_FIELD,
+            }, merge=True)
+        except Exception as exc:
+            failed += 1
+            error_text = str(exc)[:220]
+            if "registration-token-not-registered" in error_text or "not registered" in error_text.lower():
+                stale += 1
+                token_doc.reference.set({
+                    "active": False,
+                    "staleAt": firestore.SERVER_TIMESTAMP,
+                    "lastError": error_text,
+                }, merge=True)
+            else:
+                token_doc.reference.set({"lastError": error_text}, merge=True)
+    return {"sent": sent, "failed": failed, "stale": stale, "tokens": len(token_refs)}
+
+
+def _notify_project_event(db, firestore, project_id: str, project: dict, *, kind: str, title: str, body: str, extra: dict | None = None) -> dict:
+    uid = project.get("userId") or ""
+    if not uid:
+        return {"sent": 0, "skipped": True, "reason": "missing_owner"}
+    event_id = hashlib.sha256(f"{uid}:{project_id}:{kind}".encode("utf-8")).hexdigest()
+    event_ref = db.collection("notificationEvents").document(event_id)
+    if event_ref.get().exists:
+        return {"sent": 0, "skipped": True, "reason": "duplicate_event", "eventId": event_id}
+    url = f"/dashboard/project/{project_id}"
+    data = {
+        "kind": kind,
+        "projectId": project_id,
+        "title": title,
+        "body": body,
+        "url": url,
+        **(extra or {}),
+    }
+    result = _send_push_to_user(db, firestore, uid, title=title, body=body, data=data)
+    event_ref.set({
+        "eventId": event_id,
+        "userId": uid,
+        "projectId": project_id,
+        "kind": kind,
+        "title": title,
+        "body": body,
+        "url": url,
+        "result": result,
+        "createdAt": firestore.SERVER_TIMESTAMP,
+    })
+    return {"eventId": event_id, **result}
+
+
+def _notify_project_event_by_id(project_id: str, *, kind: str, title: str, body: str, extra: dict | None = None) -> dict:
+    if not _notifications_enabled():
+        return {"sent": 0, "skipped": True, "reason": "disabled"}
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        snap = db.collection("projects").document(project_id).get()
+        if not snap.exists:
+            return {"sent": 0, "skipped": True, "reason": "project_not_found"}
+        return _notify_project_event(
+            db,
+            firestore,
+            project_id,
+            snap.to_dict() or {},
+            kind=kind,
+            title=title,
+            body=body,
+            extra=extra,
+        )
+    except Exception as exc:
+        try:
+            log.warning("project_notification_failed", project_id=project_id, kind=kind, error=str(exc)[:200])
+        except Exception:
+            pass
+        return {"sent": 0, "error": str(exc)[:200]}
+
+
 def _safe_int(value, default: int = 0) -> int:
     try:
         return int(value)
@@ -4955,6 +5108,16 @@ def thumbnails_build(project_id: str, request: Request, force: bool = False, pre
         results = build_thumbnails_for_project(video_dir, project_id, title, agent_id=agent_id, premium=premium)
         if results:
             doc_ref.update({"thumbnails": results})
+            _notify_project_event(
+                db,
+                firestore,
+                project_id,
+                {**(data or {}), "thumbnails": results},
+                kind="project_thumbnails_ready",
+                title="Miniaturas listas",
+                body=(data.get("title") or "Tu proyecto")[:120],
+                extra={"count": len(results)},
+            )
         return {"thumbnails": results, "count": len(results), "cached": False}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)[:200]})
@@ -4985,6 +5148,16 @@ def shorts_build(project_id: str, request: Request):
         results = build_shorts_for_project(video_dir, project_id)
         if results:
             db.collection("projects").document(project_id).update({"shorts": results})
+            _notify_project_event(
+                db,
+                firestore,
+                project_id,
+                {**(data or {}), "shorts": results},
+                kind="project_shorts_ready",
+                title="Shorts listos",
+                body=(data.get("title") or "Tu proyecto")[:120],
+                extra={"count": len(results)},
+            )
         return {"shorts": results, "count": len(results)}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)[:200]})
@@ -11014,6 +11187,105 @@ async def reset_project_status(request: Request):
         return {"status": "error", "message": str(e)}
 
 
+@app.post("/notifications/register")
+async def notifications_register(request: Request):
+    principal = _require_principal(request)
+    body = await request.json()
+    token = str(body.get("token") or "").strip()
+    if len(token) < 20 or len(token) > 5000:
+        raise HTTPException(status_code=400, detail="invalid notification token")
+    platform = str(body.get("platform") or "web").strip().lower()[:40]
+    user_agent = str(body.get("userAgent") or request.headers.get("user-agent") or "")[:500]
+    app_version = str(body.get("appVersion") or "")[:80]
+    token_id = _token_hash(token)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        ref = (
+            db.collection("users")
+            .document(principal["uid"])
+            .collection("notificationTokens")
+            .document(token_id)
+        )
+        ref.set({
+            "tokenHash": token_id,
+            "token": token,
+            "platform": platform,
+            "userAgent": user_agent,
+            "appVersion": app_version,
+            "active": True,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+            "createdAt": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+        return {"ok": True, "tokenHash": token_id, "platform": platform}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"notification register failed: {str(exc)[:160]}")
+
+
+@app.post("/notifications/unregister")
+async def notifications_unregister(request: Request):
+    principal = _require_principal(request)
+    body = await request.json()
+    token = str(body.get("token") or "").strip()
+    token_hash = str(body.get("tokenHash") or body.get("token_hash") or "").strip()
+    token_id = token_hash or (_token_hash(token) if token else "")
+    if not token_id:
+        raise HTTPException(status_code=400, detail="token or tokenHash required")
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        ref = (
+            firestore.client()
+            .collection("users")
+            .document(principal["uid"])
+            .collection("notificationTokens")
+            .document(token_id)
+        )
+        ref.set({
+            "active": False,
+            "unregisteredAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }, merge=True)
+        return {"ok": True, "tokenHash": token_id}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"notification unregister failed: {str(exc)[:160]}")
+
+
+@app.post("/notifications/test")
+async def notifications_test(request: Request):
+    principal = _require_admin(request)
+    body = await request.json()
+    uid = str(body.get("uid") or principal.get("uid") or "").strip()
+    if not uid or uid == "admin":
+        raise HTTPException(status_code=400, detail="uid required for test notification")
+    title = str(body.get("title") or "Content Factory").strip()[:80]
+    message = str(body.get("body") or "Notificaciones móviles activas.").strip()[:220]
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        result = _send_push_to_user(
+            db,
+            firestore,
+            uid,
+            title=title,
+            body=message,
+            data={"kind": "test", "url": "/dashboard"},
+        )
+        db.collection("notificationEvents").document().set({
+            "userId": uid,
+            "kind": "test",
+            "title": title,
+            "body": message,
+            "result": result,
+            "createdAt": firestore.SERVER_TIMESTAMP,
+        })
+        return {"ok": True, **result}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"test notification failed: {str(exc)[:160]}")
+
+
 @app.post("/recover-from-disk/{project_id}")
 async def recover_from_disk(project_id: str, request: Request):
     """
@@ -11139,6 +11411,15 @@ async def recover_from_disk(project_id: str, request: Request):
             "productionLockedAt": firestore.DELETE_FIELD,
         }
         doc_ref.update(update_payload)
+        _notify_project_event(
+            db,
+            firestore,
+            project_id,
+            {**(data or {}), **update_payload},
+            kind="project_completed",
+            title="Entrega recuperada",
+            body=(data.get("title") or "Tu proyecto")[:160],
+        )
 
         return {
             "ok": True,
@@ -11193,6 +11474,12 @@ def run_script(topic, agent_file, project_id, generation_options=None):
         result = run_full_pipeline(topic, agent_file, project_id, generation_options=generation_options)
         if result:
             print(f"✅ [API] Pipeline completed successfully for '{topic}'", flush=True)
+            _notify_project_event_by_id(
+                project_id,
+                kind="project_review_ready",
+                title="Guion listo para revisar",
+                body=str(topic or "Tu proyecto")[:160],
+            )
             # Moderation gate — corre justo despues de generar el guion para
             # que el usuario vea el verdict antes de aprobar a produccion.
             try:
@@ -11822,6 +12109,19 @@ def run_production(project_id):
                 update_payload["tiktok.delivery.coverUrl"] = tiktok_cover_result["signed_url"]
 
         doc_ref.update(update_payload)
+        _notify_project_event(
+            db,
+            firestore,
+            project_id,
+            {**(project or {}), **update_payload},
+            kind="project_completed",
+            title=status_msg,
+            body=(project.get("title") or "Tu proyecto")[:160],
+            extra={
+                "shortsCount": len(shorts_results),
+                "thumbnailsCount": len(thumbnails_results),
+            },
+        )
 
         print(f"🏆 [PRODUCE] Cinematic production complete! Subs: {has_subs} | Storage: {bool(storage_info)} | Shorts: {len(shorts_results)} | Thumbs: {len(thumbnails_results)} | {final_path}")
 
@@ -11839,11 +12139,23 @@ def run_production(project_id):
                 "progress.percent": 0,
                 "progress.stepName": "La producción tardó más de lo esperado",
             })
+            _notify_project_event_by_id(
+                project_id,
+                kind="project_failed",
+                title="Producción detenida",
+                body="La producción tardó más de lo esperado.",
+            )
         except Exception:
             pass
         raise
     except Exception as e:
         update_progress(0, "Error: se detuvo la producción", "error")
+        _notify_project_event_by_id(
+            project_id,
+            kind="project_failed",
+            title="Producción detenida",
+            body=f"Error: {str(e)[:120]}",
+        )
         print(f"❌ [PRODUCE] Error: {e}")
     finally:
         # SIEMPRE liberar el lock de producción al terminar (éxito, error,

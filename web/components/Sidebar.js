@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import Icon from "@/components/Icon";
 import { getCreditCounts } from "@/lib/credits";
@@ -88,10 +89,11 @@ function Brand() {
   );
 }
 
-function NavLink({ item, isActive }) {
+function NavLink({ item, isActive, onNavigate }) {
   return (
     <Link
       href={item.href}
+      onClick={onNavigate}
       style={{
         textDecoration: "none",
         display: "flex",
@@ -296,6 +298,7 @@ function UserRow({ profile, onSignOut }) {
 export default function Sidebar() {
   const pathname = usePathname();
   const { user, profile, signOut } = useAuth();
+  const [mobileOpen, setMobileOpen] = useState(false);
   const admin = isAdminUser(user, profile);
   const navItems = admin
     ? [
@@ -321,44 +324,80 @@ export default function Sidebar() {
     )?.id || null;
 
   return (
-    <aside
-      style={{
-        position: "fixed",
-        left: 0,
-        top: 0,
-        bottom: 0,
-        width: "var(--sidebar-w)",
-        background: "var(--ink-0)",
-        borderRight: "1px solid var(--rule-1)",
-        padding: "24px 16px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--s-3)",
-        zIndex: 5,
-      }}
-    >
-      <Brand />
+    <>
+      <header className="cf-mobile-topbar">
+        <button
+          type="button"
+          className="cf-mobile-menu-btn"
+          onClick={() => setMobileOpen(true)}
+          aria-label="Abrir navegación"
+        >
+          <Icon name="dashboard" size={18} />
+        </button>
+        <Link href="/dashboard" className="cf-mobile-brand" aria-label="Content Factory dashboard">
+          <span>CONTENT</span>
+          <strong>Factory</strong>
+          <i />
+        </Link>
+        <Link href="/dashboard/new" className="cf-mobile-new" aria-label="Nuevo video">
+          <Icon name="plus" size={18} />
+        </Link>
+      </header>
 
-      <div
+      {mobileOpen && (
+        <button
+          type="button"
+          className="cf-sidebar-scrim"
+          aria-label="Cerrar navegación"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      <aside
+        className={`cf-sidebar ${mobileOpen ? "is-open" : ""}`}
         style={{
-          font: "var(--t-mono-sm)",
-          color: "var(--paper-mute)",
-          padding: "0 12px",
-          marginBottom: 4,
+          position: "fixed",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: "var(--sidebar-w)",
+          background: "var(--ink-0)",
+          borderRight: "1px solid var(--rule-1)",
+          padding: "24px 16px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--s-3)",
+          zIndex: 20,
         }}
       >
-        NAVEGACIÓN
-      </div>
-      <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {navItems.map((n) => (
-          <NavLink key={n.id} item={n} isActive={activeId === n.id} />
-        ))}
-      </nav>
+        <Brand />
 
-      <div style={{ flex: 1 }} />
+        <div
+          style={{
+            font: "var(--t-mono-sm)",
+            color: "var(--paper-mute)",
+            padding: "0 12px",
+            marginBottom: 4,
+          }}
+        >
+          NAVEGACIÓN
+        </div>
+        <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {navItems.map((n) => (
+            <NavLink
+              key={n.id}
+              item={n}
+              isActive={activeId === n.id}
+              onNavigate={() => setMobileOpen(false)}
+            />
+          ))}
+        </nav>
 
-      {profile && <PlanStrip profile={profile} />}
-      {profile && <UserRow profile={profile} onSignOut={signOut} />}
-    </aside>
+        <div style={{ flex: 1 }} />
+
+        {profile && <PlanStrip profile={profile} />}
+        {profile && <UserRow profile={profile} onSignOut={signOut} />}
+      </aside>
+    </>
   );
 }

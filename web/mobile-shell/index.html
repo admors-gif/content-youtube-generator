@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B0B0E" />
+    <title>Content Factory</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #0b0b0e;
+        color: #f4f1ea;
+      }
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at 50% 0%, rgba(224, 83, 61, 0.18), transparent 42%),
+          #0b0b0e;
+      }
+      main {
+        width: min(420px, calc(100vw - 48px));
+        text-align: center;
+      }
+      .brand {
+        font-size: 42px;
+        font-weight: 800;
+        font-style: italic;
+        letter-spacing: -0.03em;
+      }
+      .dot {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        margin-left: 4px;
+        background: #e0533d;
+      }
+      p {
+        color: #b6b2a8;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="brand">Content Factory<span class="dot"></span></div>
+      <p>Abriendo el estudio móvil...</p>
+    </main>
+  </body>
+</html>
