@@ -504,8 +504,72 @@ body::before {
     max-width: 100%;
     height: auto;
   }
+  .cf-main .cf-card {
+    min-width: 0;
+  }
+  .cf-main .cf-display {
+    font-size: clamp(40px, 12vw, 64px);
+    line-height: 0.98;
+  }
+  .cf-stat-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .cf-stat-card {
+    min-width: 0 !important;
+    overflow: hidden;
+  }
+  .cf-stat-value {
+    font-size: clamp(32px, 9vw, 42px) !important;
+    line-height: 1 !important;
+    overflow-wrap: anywhere;
+  }
+  .cf-project-row-body {
+    gap: var(--s-4) !important;
+  }
+  .cf-project-title,
+  .cf-publication-title {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    line-height: 1.18 !important;
+    overflow-wrap: anywhere;
+  }
+  .cf-publication-row {
+    grid-template-columns: 1fr !important;
+    align-items: stretch !important;
+  }
+  .cf-publication-actions {
+    justify-content: flex-start !important;
+  }
+  .cf-filter-strip {
+    align-items: stretch !important;
+  }
+  .cf-filter-search {
+    flex: 1 0 100%;
+    min-width: 0 !important;
+    width: 100%;
+  }
+  .cf-filter-search .cf-input {
+    width: 100% !important;
+  }
+  .cf-billing-current {
+    align-items: flex-start !important;
+  }
+  .cf-plan-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .cf-plan-price-row {
+    flex-wrap: wrap;
+  }
+  .cf-billing-note {
+    align-items: flex-start !important;
+  }
   .cf-btn {
     min-height: 44px;
+    max-width: 100%;
+    white-space: normal;
+    text-align: center;
   }
   .cf-pwa-card {
     left: 12px;
@@ -548,5 +612,60 @@ body::before {
   .cf-home-hero-copy {
     max-width: 320px !important;
     font-size: 18px !important;
+  }
+  .cf-stat-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .cf-dashboard-stats,
+  .cf-publication-stats {
+    gap: var(--s-3) !important;
+  }
+  .cf-stat-card {
+    padding: 18px !important;
+  }
+  .cf-project-row-body {
+    flex-direction: column;
+  }
+  .cf-project-thumb {
+    width: 100% !important;
+    height: auto !important;
+    aspect-ratio: 16 / 9;
+    max-height: 180px;
+  }
+  .cf-project-actions {
+    align-self: stretch !important;
+    justify-content: space-between;
+    width: 100%;
+  }
+  .cf-project-actions .cf-btn {
+    min-width: 44px;
+    justify-content: center;
+  }
+  .cf-project-title {
+    font-size: 18px !important;
+  }
+  .cf-publication-row {
+    padding: 18px !important;
+    gap: var(--s-4) !important;
+  }
+  .cf-publication-actions .cf-btn {
+    flex: 1 1 120px;
+    justify-content: center;
+  }
+  .cf-filter-strip .cf-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .cf-billing-current,
+  .cf-billing-note {
+    padding: 18px !important;
+  }
+  .cf-billing-current .cf-btn,
+  .cf-billing-note .cf-btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .cf-plan-card {
+    padding: 18px !important;
   }
 }

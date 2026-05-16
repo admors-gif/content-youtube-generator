@@ -109,6 +109,7 @@ function ProjectRow({ project, onOpen, onDelete, fadeClass }) {
         }}
       >
         <div
+          className="cf-project-row-body"
           style={{
             display: "flex",
             alignItems: "flex-start",
@@ -117,6 +118,7 @@ function ProjectRow({ project, onOpen, onDelete, fadeClass }) {
         >
           {/* Thumbnail con monograma */}
           <div
+            className="cf-project-thumb"
             style={{
               width: 120,
               height: 68,
@@ -160,7 +162,7 @@ function ProjectRow({ project, onOpen, onDelete, fadeClass }) {
           </div>
 
           {/* Meta */}
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="cf-project-meta" style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
                 display: "flex",
@@ -192,6 +194,7 @@ function ProjectRow({ project, onOpen, onDelete, fadeClass }) {
               </span>
             </div>
             <div
+              className="cf-project-title"
               style={{
                 font: "var(--t-h3)",
                 color: "var(--paper)",
@@ -225,6 +228,7 @@ function ProjectRow({ project, onOpen, onDelete, fadeClass }) {
 
           {/* Acciones */}
           <div
+            className="cf-project-actions"
             style={{
               display: "flex",
               alignItems: "center",
@@ -301,7 +305,7 @@ function ProjectRow({ project, onOpen, onDelete, fadeClass }) {
 function Stat({ label, value, sub, accent }) {
   return (
     <div
-      className="cf-card"
+      className="cf-card cf-stat-card"
       style={{
         padding: "var(--s-5)",
         flex: 1,
@@ -318,6 +322,7 @@ function Stat({ label, value, sub, accent }) {
         {label}
       </div>
       <div
+        className="cf-stat-value"
         style={{
           font: "var(--t-h1)",
           color: accent || "var(--paper)",
@@ -556,6 +561,7 @@ export default function DashboardPage() {
 
       {/* Stat trio */}
       <div
+        className="cf-stat-grid cf-dashboard-stats"
         style={{
           display: "flex",
           gap: "var(--s-4)",
@@ -654,6 +660,7 @@ export default function DashboardPage() {
 
       {/* Filter strip */}
       <div
+        className="cf-filter-strip"
         style={{
           display: "flex",
           alignItems: "center",
@@ -693,7 +700,7 @@ export default function DashboardPage() {
           );
         })}
         <div style={{ flex: 1 }} />
-        <div style={{ position: "relative" }}>
+        <div className="cf-filter-search" style={{ position: "relative" }}>
           <span
             style={{
               position: "absolute",

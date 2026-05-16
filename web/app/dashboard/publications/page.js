@@ -71,11 +71,12 @@ function actionIcon(kind) {
 
 function Stat({ label, value, sub, accent }) {
   return (
-    <div className="cf-card" style={{ padding: "var(--s-5)", minWidth: 190, flex: 1 }}>
+    <div className="cf-card cf-stat-card" style={{ padding: "var(--s-5)", minWidth: 190, flex: 1 }}>
       <div className="cf-mono-sm" style={{ marginBottom: 10 }}>
         {label}
       </div>
       <div
+        className="cf-stat-value"
         style={{
           fontFamily: "var(--font-display)",
           fontWeight: 800,
@@ -106,7 +107,7 @@ function PublicationRow({ item, index }) {
 
   return (
     <div
-      className={`cf-card cf-fade cf-fade--${(index % 4) + 1}`}
+      className={`cf-card cf-publication-row cf-fade cf-fade--${(index % 4) + 1}`}
       style={{
         padding: "var(--s-5)",
         display: "grid",
@@ -135,7 +136,7 @@ function PublicationRow({ item, index }) {
           )}
         </div>
         <h2
-          className="cf-h3"
+          className="cf-h3 cf-publication-title"
           style={{
             margin: "0 0 8px",
             overflow: "hidden",
@@ -194,7 +195,7 @@ function PublicationRow({ item, index }) {
         )}
       </div>
 
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+      <div className="cf-publication-actions" style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
         {video.youtubeStudioUrl && (
           <a
             className="cf-btn cf-btn--ghost cf-btn--sm"
@@ -319,6 +320,7 @@ export default function PublicationsPage() {
       </header>
 
       <div
+        className="cf-stat-grid cf-publication-stats"
         style={{
           display: "flex",
           gap: "var(--s-4)",
@@ -333,7 +335,7 @@ export default function PublicationsPage() {
       </div>
 
       <div
-        className="cf-card cf-fade cf-fade--1"
+        className="cf-card cf-filter-strip cf-fade cf-fade--1"
         style={{
           padding: "var(--s-4)",
           marginBottom: "var(--s-5)",
@@ -358,7 +360,7 @@ export default function PublicationsPage() {
           );
         })}
         <div style={{ flex: 1 }} />
-        <div style={{ position: "relative", minWidth: 260 }}>
+        <div className="cf-filter-search" style={{ position: "relative", minWidth: 260 }}>
           <span
             style={{
               position: "absolute",

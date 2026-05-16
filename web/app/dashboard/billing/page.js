@@ -102,7 +102,7 @@ export default function BillingPage() {
 
       {/* Plan actual */}
       <div
-        className="cf-card cf-fade cf-fade--1"
+        className="cf-card cf-billing-current cf-fade cf-fade--1"
         style={{
           padding: "var(--s-5)",
           marginBottom: "var(--s-6)",
@@ -186,6 +186,7 @@ export default function BillingPage() {
 
       {/* Tabla de planes */}
       <div
+        className="cf-plan-grid"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
@@ -198,7 +199,7 @@ export default function BillingPage() {
           return (
             <div
               key={p.id}
-              className={`cf-card cf-fade cf-fade--${i + 1}`}
+              className={`cf-card cf-plan-card cf-fade cf-fade--${i + 1}`}
               style={{
                 padding: "var(--s-5)",
                 position: "relative",
@@ -238,7 +239,7 @@ export default function BillingPage() {
               >
                 {p.name}
               </div>
-              <div style={{ marginBottom: 16, display: "flex", alignItems: "baseline", gap: 4 }}>
+              <div className="cf-plan-price-row" style={{ marginBottom: 16, display: "flex", alignItems: "baseline", gap: 4 }}>
                 <span
                   style={{
                     fontFamily: "var(--font-display)",
@@ -327,7 +328,7 @@ export default function BillingPage() {
 
       {/* Footer note */}
       <div
-        className="cf-card"
+        className="cf-card cf-billing-note"
         style={{
           padding: "var(--s-4) var(--s-5)",
           display: "flex",
