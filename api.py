@@ -4503,6 +4503,12 @@ def _radar_upsert_library_candidate(db, firestore, uid: str, candidate: dict, *,
         },
         "recommendedFormat": candidate.get("recommendedFormat") or "youtube_long",
         "durationProfile": candidate.get("durationProfile") or "",
+        "sourceType": candidate.get("sourceType") or "",
+        "seriesName": candidate.get("seriesName") or "",
+        "seriesObjective": candidate.get("seriesObjective") or "",
+        "seriesCta": candidate.get("seriesCta") or "",
+        "seriesIndex": candidate.get("seriesIndex") or 0,
+        "seriesItemIndex": candidate.get("seriesItemIndex") or 0,
         "seoTitle": candidate.get("seoTitle") or candidate.get("angle") or candidate.get("title"),
         "seoKeywords": candidate.get("seoKeywords") or [],
         "searchIntent": candidate.get("searchIntent") or "",
@@ -4703,6 +4709,12 @@ def _library_public_item(doc_id: str, data: dict) -> dict:
         "riskReason": risk.get("reason") or data.get("riskReason") or "",
         "recommendedFormat": data.get("recommendedFormat") or "youtube_long",
         "durationProfile": data.get("durationProfile") or ((data.get("candidate") or {}).get("durationProfile") or ""),
+        "sourceType": data.get("sourceType") or candidate.get("sourceType") or "",
+        "seriesName": data.get("seriesName") or candidate.get("seriesName") or "",
+        "seriesObjective": data.get("seriesObjective") or candidate.get("seriesObjective") or "",
+        "seriesCta": data.get("seriesCta") or candidate.get("seriesCta") or "",
+        "seriesIndex": data.get("seriesIndex") or candidate.get("seriesIndex") or 0,
+        "seriesItemIndex": data.get("seriesItemIndex") or candidate.get("seriesItemIndex") or 0,
         "seoTitle": data.get("seoTitle") or ((data.get("candidate") or {}).get("seoTitle") or ""),
         "seoKeywords": data.get("seoKeywords") or ((data.get("candidate") or {}).get("seoKeywords") or []),
         "searchIntent": data.get("searchIntent") or ((data.get("candidate") or {}).get("searchIntent") or ""),
@@ -4785,6 +4797,180 @@ WELLNESS_CURATED_TOPICS_V1 = [
     ("Meditación para dejar de necesitar respuestas inmediatas", "Ansiedad, control, paciencia."),
     ("Escucha esto antes de dormir: tu mente sabe cómo sanar con calma", "Potente, con lenguaje cuidadoso sin promesa médica."),
     ("Autohipnosis para convertirte en la persona que prometiste ser", "Alto impacto para disciplina e identidad."),
+]
+
+
+PODCAST_ESTO_NO_ES_AMOR_SERIES_V1 = [
+    {
+        "name": "Serie 1: No era amor, era apego",
+        "objective": "Que la gente entienda de inmediato de que trata la marca.",
+        "cta": "Comenta 'apego' si alguna vez confundiste ansiedad con amor.",
+        "topics": [
+            "No era amor, era apego emocional",
+            "No extrañas a la persona, extrañas cómo te hacía sentir",
+            "Si te ignora y lo quieres más, esto está pasando dentro de ti",
+            "La ansiedad no es una señal de amor",
+            "No estabas enamorado, estabas buscando validación",
+            "Cuando alguien te da migajas, tu mente las convierte en esperanza",
+            "La incertidumbre también puede volverse adictiva",
+            "No era conexión, era una herida activada",
+            "El apego se disfraza de amor cuando tienes miedo a perder",
+            "Esto no es amor: es tu sistema nervioso en modo supervivencia",
+        ],
+    },
+    {
+        "name": "Serie 2: La obsesión por quien no te elige",
+        "objective": "Explotar uno de los dolores mas fuertes del nicho.",
+        "cta": "¿Qué te costó más soltar: la persona o la historia que imaginaste?",
+        "topics": [
+            "Por qué no puedes dejar de pensar en alguien que no te elige",
+            "Entre más te ignora, más lo quieres: la razón real",
+            "Por qué te obsesionas con quien te da atención a ratos",
+            "No quieres a esa persona: quieres que esta vez sí te elijan",
+            "Cuando el rechazo se vuelve una misión personal",
+            "La parte de ti que no puede soltar no busca amor, busca reparación",
+            "Por qué revisar su perfil te calma por unos segundos",
+            "El peligro de convertir una migaja en una señal",
+            "No extrañas la relación, extrañas la posibilidad",
+            "Por qué duele más soltar la fantasía que a la persona",
+        ],
+    },
+    {
+        "name": "Serie 3: Personas emocionalmente no disponibles",
+        "objective": "Atraer a personas que repiten vinculos ambiguos.",
+        "cta": "¿Alguna vez te enamoraste más de los momentos buenos que de la realidad?",
+        "topics": [
+            "Señales de que estás con alguien emocionalmente no disponible",
+            "Por qué te atraen las personas frías",
+            "Si solo te busca cuando te alejas, no es amor",
+            "No confundas distancia emocional con misterio",
+            "El encanto peligroso de quien nunca se entrega completo",
+            "Cuando te enamoras de momentos, no de una relación",
+            "Si tienes que pedir claridad, quizá ya tienes la respuesta",
+            "Las señales mixtas también son una señal",
+            "No te enamoraste de su amor, te enamoraste de sus momentos buenos",
+            "Te está dando poco, pero tú estás imaginando mucho",
+        ],
+    },
+    {
+        "name": "Serie 4: Herida de abandono",
+        "objective": "Profundizar y hacer que la audiencia sienta que esto habla de ella.",
+        "cta": "¿Tu miedo más grande es perder a la persona o sentir que no fuiste suficiente?",
+        "topics": [
+            "La herida de abandono: por qué te aferras a quien se va",
+            "Si tienes miedo de que te dejen, puedes aceptar migajas",
+            "Cuando haces de todo para que no te abandonen",
+            "Por qué te desespera que alguien cambie contigo",
+            "La ansiedad de no saber si todavía le importas",
+            "Cuando el silencio activa tu miedo más profundo",
+            "No es amor si vives intentando evitar que se vaya",
+            "Por qué te cuesta tanto estar en paz cuando alguien se aleja",
+            "La herida de abandono no quiere amor, quiere certeza",
+            "El amor sano no te hace sentir reemplazable",
+        ],
+    },
+    {
+        "name": "Serie 5: Herida de rechazo",
+        "objective": "Conectar con autoestima, valor personal y necesidad de validacion.",
+        "cta": "Escribe 'me elijo' si estás cansado de esperar validación.",
+        "topics": [
+            "La herida de rechazo: por qué sientes que nunca eres suficiente",
+            "No ser elegido no significa no valer",
+            "Cuando el rechazo se siente como prueba de que no mereces amor",
+            "Por qué necesitas que esa persona te elija para sentirte bien",
+            "No fuiste demasiado; estabas con alguien que no sabía recibirte",
+            "Deja de convertir el rechazo en identidad",
+            "La parte de ti que no fue elegida sigue buscando ser elegida",
+            "Cuando intentas demostrar que sí vales",
+            "No necesitas convencer a alguien de ver tu valor",
+            "Tu valor no se reduce por quien no supo elegirte",
+        ],
+    },
+    {
+        "name": "Serie 6: Autoestima y dignidad",
+        "objective": "Crear videos guardables y compartibles.",
+        "cta": "¿Cuál fue la migaja que más te costó dejar de aceptar?",
+        "topics": [
+            "Cada vez que aceptas migajas, tu autoestima escucha",
+            "Tu dignidad no se pierde de golpe, se negocia poquito a poquito",
+            "No confundas paciencia con abandono propio",
+            "Si tienes que rogar atención, ahí no es",
+            "Amar demasiado también puede ser abandonarte",
+            "Elegirte puede doler, pero perderte duele más",
+            "No tienes que demostrar que mereces amor",
+            "Si alguien te hace sentir invisible, no es tu lugar",
+            "La persona que te ama no te hace competir por su atención",
+            "El día que entiendes tu valor, dejas de audicionar por amor",
+        ],
+    },
+    {
+        "name": "Serie 7: Ghosting, silencio y cierre",
+        "objective": "Provocar comentarios porque casi todos tienen una historia.",
+        "cta": "¿Te hicieron ghosting o tú fuiste quien tuvo que desaparecer para sanar?",
+        "topics": [
+            "Ghosting: por qué duele tanto",
+            "El silencio también es una respuesta",
+            "No necesitas una explicación para empezar a sanar",
+            "El cierre no siempre viene de la otra persona",
+            "Si desapareció sin hablar, eso también habla de su capacidad emocional",
+            "Deja de buscar cierre donde hubo inmadurez",
+            "No llenes su silencio con culpa propia",
+            "A veces no extrañas a la persona, extrañas una explicación",
+            "Tu paz no puede depender de quien no sabe comunicarse",
+            "Cerrar un ciclo también puede ser dejar de preguntar por qué",
+        ],
+    },
+    {
+        "name": "Serie 8: Temas controversiales",
+        "objective": "Generar comentarios, debate y retencion.",
+        "cta": "¿Estás de acuerdo o esto te parece demasiado fuerte?",
+        "topics": [
+            "No todas las relaciones merecen una segunda oportunidad",
+            "El contacto cero no es inmadurez, a veces es protección",
+            "No debes luchar por alguien que no te está eligiendo",
+            "El amor no se ruega, aunque te duela aceptarlo",
+            "No todo lo que duele es una lección espiritual",
+            "A veces bloquear también es amor propio",
+            "No necesitas perdonar para empezar a sanar",
+            "Extrañar no significa que debas volver",
+            "A veces el “casi algo” duele más que una relación formal",
+            "La nostalgia también miente",
+        ],
+    },
+    {
+        "name": "Serie 9: Química, intensidad y caos",
+        "objective": "Desarmar la idea romantica de que intensidad significa amor.",
+        "cta": "¿Te ha pasado que la paz te parece rara después de relaciones intensas?",
+        "topics": [
+            "Química no significa compatibilidad",
+            "No todo lo intenso es amor",
+            "La paz puede parecer aburrida si vienes del caos",
+            "El drama no es pasión",
+            "El caos no es conexión",
+            "Si necesitas sufrir para sentir que amas, hay una herida",
+            "La estabilidad no es aburrida, es seguridad",
+            "No confundas mariposas con señales de alarma",
+            "El amor sano no se siente como persecución",
+            "La persona correcta no despierta tu ansiedad, despierta tu paz",
+        ],
+    },
+    {
+        "name": "Serie 10: Reconstrucción y amor sano",
+        "objective": "Terminar el ciclo con esperanza, no solo dolor.",
+        "cta": "",
+        "topics": [
+            "El amor sano no te deja adivinando",
+            "La reciprocidad también es amor",
+            "No es mucho pedir que te quieran bien",
+            "Quien te ama no te hace sentir difícil de querer",
+            "Aprender a recibir amor sano también es sanar",
+            "Sanar es dejar de elegir desde el miedo",
+            "Volver a ti también es una historia de amor",
+            "No busques a quien te complete; vuelve a ti",
+            "Cuando dejas de perseguir amor, recuperas tu vida",
+            "Esto no es amor: es el inicio de tu regreso a ti",
+        ],
+    },
 ]
 
 
@@ -4938,6 +5124,156 @@ def _wellness_seed_candidate(title: str, summary: str, index: int) -> dict:
             "retentionScore": scores["retention"],
             "retentionReason": summary,
             "rank": index,
+        },
+    }
+
+
+def _podcast_series_keywords(title: str, series_name: str) -> list[str]:
+    normalized = _wellness_plain_text(f"{title} {series_name}")
+    keywords = []
+    for keyword in [
+        "apego",
+        "apego emocional",
+        "ansiedad",
+        "validacion",
+        "migajas",
+        "rechazo",
+        "abandono",
+        "ghosting",
+        "silencio",
+        "cierre",
+        "contacto cero",
+        "autoestima",
+        "dignidad",
+        "amor propio",
+        "persona no disponible",
+        "senal mixta",
+        "quimica",
+        "intensidad",
+        "caos",
+        "amor sano",
+        "reciprocidad",
+    ]:
+        if keyword in normalized:
+            keywords.append(keyword.replace("validacion", "validación").replace("senal", "señal"))
+    if "no te elige" in normalized or "no ser elegido" in normalized:
+        keywords.append("no ser elegido")
+    if "sistema nervioso" in normalized:
+        keywords.append("sistema nervioso")
+    return list(dict.fromkeys(keywords))[:7] or ["esto no es amor", "relaciones", "amor sano"]
+
+
+def _podcast_series_scores(title: str, series_index: int) -> dict:
+    normalized = _wellness_plain_text(title)
+    viral = 72
+    retention = 74
+    seo = 70
+    hook = 72
+    if normalized.startswith("por que") or normalized.startswith("si ") or normalized.startswith("cuando "):
+        viral += 7
+        hook += 8
+        retention += 6
+    if normalized.startswith("no ") or "no es amor" in normalized or "no era amor" in normalized:
+        viral += 6
+        retention += 5
+    if any(term in normalized for term in ["ghosting", "contacto cero", "migajas", "ansiedad", "rechazo", "abandono", "apego", "amor sano"]):
+        seo += 10
+        viral += 5
+    if any(term in normalized for term in ["duele", "miedo", "silencio", "fantasia", "reemplazable", "invisible"]):
+        retention += 8
+        hook += 6
+    if series_index in {2, 4, 5, 7, 8}:
+        retention += 4
+    viral = min(96, viral)
+    retention = min(97, retention)
+    seo = min(94, seo)
+    hook = min(96, hook)
+    fit = 96
+    overall = round((viral * 0.28) + (retention * 0.26) + (seo * 0.18) + (hook * 0.12) + (fit * 0.12) + (86 * 0.04))
+    return {
+        "audience": viral,
+        "fit": fit,
+        "storyArc": retention,
+        "freshness": 72,
+        "productionEase": 88,
+        "risk": 84,
+        "overall": min(96, overall),
+        "viral": viral,
+        "seo": seo,
+        "clickbait": hook,
+        "retention": retention,
+    }
+
+
+def _podcast_series_risk(title: str) -> tuple[str, str]:
+    normalized = _wellness_plain_text(title)
+    sensitive_terms = [
+        "sistema nervioso",
+        "herida",
+        "ansiedad",
+        "supervivencia",
+        "sanar",
+        "trauma",
+    ]
+    if any(term in normalized for term in sensitive_terms):
+        return "medium", "Tema emocional sensible: tratar como reflexion educativa, sin diagnosticar ni prometer cura."
+    return "low", "Tema relacional evergreen de bajo riesgo si mantiene tono reflexivo y no acusatorio."
+
+
+def _podcast_series_candidate(series: dict, title: str, series_index: int, item_index: int) -> dict:
+    scores = _podcast_series_scores(title, series_index)
+    risk_level, risk_reason = _podcast_series_risk(title)
+    candidate_hash = hashlib.sha1(
+        f"esto-no-es-amor-series-v1:{series_index}:{item_index}:{title}".encode("utf-8", errors="ignore")
+    ).hexdigest()[:20]
+    summary = _radar_compact_text(
+        f"{series.get('name')}. Objetivo editorial: {series.get('objective')}. CTA sugerido: {series.get('cta') or 'Cerrar con esperanza y regreso a ti.'}",
+        520,
+    )
+    return {
+        "candidateHash": candidate_hash,
+        "agentId": "agent_podcast_general",
+        "agentName": "Esto no es amor",
+        "agentFile": "agent_podcast_general.md",
+        "platform": "youtube",
+        "format": "podcast",
+        "category": "relationships",
+        "intent": "evergreen",
+        "radarIntent": "evergreen",
+        "title": title,
+        "headline": title,
+        "summary": summary,
+        "angle": title,
+        "whyNow": "Serie editorial curada para los proximos 100 videos de Esto no es amor.",
+        "sources": [],
+        "recommendedFormat": "youtube_long",
+        "durationProfile": "",
+        "riskLevel": risk_level,
+        "riskReason": risk_reason,
+        "sourceQuery": "curated-esto-no-es-amor-100",
+        "sourceType": "curated_podcast_series",
+        "seoTitle": title,
+        "seoKeywords": _podcast_series_keywords(title, series.get("name") or ""),
+        "searchIntent": "serie curada de Esto no es amor",
+        "knowledgeSignals": [],
+        "seriesName": series.get("name") or "",
+        "seriesObjective": series.get("objective") or "",
+        "seriesCta": series.get("cta") or "",
+        "seriesIndex": series_index,
+        "seriesItemIndex": item_index,
+        "scores": scores,
+        "editorialScore": scores["overall"],
+        "titleLab": {
+            "seedTopic": title,
+            "group": f"esto_no_es_amor_serie_{series_index}",
+            "generationMode": "manual_series",
+            "viralScore": scores["viral"],
+            "seoScore": scores["seo"],
+            "clickbaitScore": scores["clickbait"],
+            "fitScore": scores["fit"],
+            "retentionScore": scores["retention"],
+            "retentionReason": series.get("objective") or "",
+            "rank": item_index,
         },
     }
 
@@ -7363,6 +7699,41 @@ def library_seed_wellness_topics(request: Request):
             "created": created,
             "updated": updated,
             "total": len(WELLNESS_CURATED_TOPICS_V1),
+            "items": items,
+        }
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:200]})
+
+
+@app.post("/library/seed-podcast-topics")
+def library_seed_podcast_topics(request: Request):
+    principal = _radar_require_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        created = 0
+        updated = 0
+        total = 0
+        items = []
+        for series_index, series in enumerate(PODCAST_ESTO_NO_ES_AMOR_SERIES_V1, start=1):
+            for item_index, title in enumerate(series.get("topics") or [], start=1):
+                total += 1
+                candidate = _podcast_series_candidate(series, title, series_index, item_index)
+                doc_id = _radar_library_doc_id(principal["uid"], candidate["candidateHash"])
+                existed = db.collection("topicLibrary").document(doc_id).get().exists
+                saved = _radar_upsert_library_candidate(db, firestore, principal["uid"], candidate, status="saved")
+                if existed:
+                    updated += 1
+                else:
+                    created += 1
+                if len(items) < 10:
+                    items.append(_library_public_item(saved["itemId"], saved))
+        return {
+            "ok": True,
+            "created": created,
+            "updated": updated,
+            "total": total,
             "items": items,
         }
     except Exception as exc:

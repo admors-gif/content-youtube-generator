@@ -159,7 +159,7 @@ function flattenGroups(groups) {
         shortsCount: 0,
         createdAt: item.createdAt || "",
         updatedAt: item.updatedAt || "",
-        sourceLabel: item.searchIntent || item.intent || "Biblioteca",
+        sourceLabel: item.seriesName || item.searchIntent || item.intent || "Biblioteca",
       });
     }
     for (const item of group.projects || []) {

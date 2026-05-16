@@ -46,6 +46,9 @@ function matchesText(item, query, agentName) {
     ...(item.seoKeywords || []),
     item.angle,
     item.summary,
+    item.seriesName,
+    item.seriesObjective,
+    item.seriesCta,
     item.status,
     item.recommendedFormat,
     agentName,
@@ -80,6 +83,15 @@ function IdeaCard({ item, creating, archiving, onCreate, onArchive }) {
             <span className={`cf-badge ${status.badge}`}>{status.label}</span>
             <span className={`cf-badge ${risk.badge}`}>{risk.label}</span>
             <span className="cf-badge cf-badge--neutral">{formatRecommendation(item.recommendedFormat)}</span>
+            {item.seriesName ? (
+              <span
+                className="cf-badge cf-badge--creator"
+                title={item.seriesObjective || item.seriesName}
+                style={{ maxWidth: "100%", whiteSpace: "normal", lineHeight: 1.35 }}
+              >
+                {item.seriesName}
+              </span>
+            ) : null}
           </div>
           <h3 className="cf-h3" style={{ margin: "0 0 8px", lineHeight: 1.2 }}>
             {item.seoTitle || item.angle || item.title}
@@ -96,6 +108,11 @@ function IdeaCard({ item, creating, archiving, onCreate, onArchive }) {
           <p className="cf-body" style={{ margin: 0, lineHeight: 1.5 }}>
             {item.summary || item.title}
           </p>
+          {item.seriesCta ? (
+            <p className="cf-caption" style={{ margin: "10px 0 0", lineHeight: 1.45 }}>
+              CTA: {item.seriesCta}
+            </p>
+          ) : null}
           {item.knowledgeSignals?.length > 0 && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
               {item.knowledgeSignals.slice(0, 3).map((signal) => (
@@ -229,6 +246,7 @@ export default function LibraryPage() {
   const [creatingHash, setCreatingHash] = useState("");
   const [archivingId, setArchivingId] = useState("");
   const [seedingWellness, setSeedingWellness] = useState(false);
+  const [seedingPodcast, setSeedingPodcast] = useState(false);
 
   const fetchLibrary = useCallback(async () => {
     const res = await authedFetch(user, `${getApiBase()}/library/agents`);
@@ -359,6 +377,26 @@ export default function LibraryPage() {
     }
   };
 
+  const seedPodcastTopics = async () => {
+    if (!user || !admin) return;
+    setSeedingPodcast(true);
+    setError("");
+    setNotice("");
+    try {
+      const res = await authedFetch(user, `${getApiBase()}/library/seed-podcast-topics`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.error || "No se pudieron importar los temas.");
+      setNotice(`Temas de Esto no es amor listos: ${data.created || 0} nuevos, ${data.updated || 0} ya existentes.`);
+      await loadLibrary();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSeedingPodcast(false);
+    }
+  };
+
   if (!authLoading && !admin) {
     return (
       <div className="cf-card" style={{ padding: "var(--s-7)", textAlign: "center" }}>
@@ -390,6 +428,15 @@ export default function LibraryPage() {
             >
               <Icon name="sparkles" size={16} />
               {seedingWellness ? "Importando" : "Cargar 50 meditaciones"}
+            </button>
+            <button
+              className="cf-btn cf-btn--secondary"
+              onClick={seedPodcastTopics}
+              disabled={seedingPodcast}
+              type="button"
+            >
+              <Icon name="bookOpen" size={16} />
+              {seedingPodcast ? "Importando" : "Cargar 100 Esto no es amor"}
             </button>
             <button className="cf-btn cf-btn--secondary" onClick={loadLibrary} disabled={loading} type="button">
               <Icon name="refresh" size={16} />
