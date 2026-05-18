@@ -1059,6 +1059,8 @@ LONG_MEDITATION_V2_DURATION_PROFILES = {
         "speech_minutes": 18,
         "characters": "12,500 a 15,500",
         "words": "2,400 a 2,900",
+        "minimum_words": 2600,
+        "ideal_words": 2900,
         "visual_scenes": 14,
         "affirmation_spacing_minutes": 1.2,
         "final_buffer_minutes": 5,
@@ -1073,6 +1075,8 @@ LONG_MEDITATION_V2_DURATION_PROFILES = {
         "speech_minutes": 34,
         "characters": "23,000 a 28,000",
         "words": "3,700 a 4,300",
+        "minimum_words": 4000,
+        "ideal_words": 4400,
         "visual_scenes": 24,
         "affirmation_spacing_minutes": 1.6,
         "final_buffer_minutes": 8,
@@ -1087,6 +1091,8 @@ LONG_MEDITATION_V2_DURATION_PROFILES = {
         "speech_minutes": 42,
         "characters": "28,000 a 34,000",
         "words": "4,500 a 5,000",
+        "minimum_words": 4700,
+        "ideal_words": 5200,
         "visual_scenes": 26,
         "affirmation_spacing_minutes": 1.4,
         "final_buffer_minutes": 10,
@@ -1101,6 +1107,8 @@ LONG_MEDITATION_V2_DURATION_PROFILES = {
         "speech_minutes": 52,
         "characters": "35,000 a 42,000",
         "words": "5,800 a 6,800",
+        "minimum_words": 6000,
+        "ideal_words": 6800,
         "visual_scenes": 36,
         "affirmation_spacing_minutes": 3.5,
         "final_buffer_minutes": 20,
@@ -1965,6 +1973,116 @@ def _long_meditation_duration_profile(
     return {**profiles[key], "key": key, "variant": "immersive_v2" if is_immersive_v2 else "classic"}
 
 
+def _long_meditation_minimum_words(profile: dict) -> int:
+    """Minimum spoken density for immersive sessions before final music buffer."""
+    explicit = (profile or {}).get("minimum_words")
+    try:
+        if explicit:
+            return int(explicit)
+    except Exception:
+        pass
+    if (profile or {}).get("delivery_profile") != "immersive_v2":
+        return 0
+    speech_minutes = float((profile or {}).get("speech_minutes") or 0)
+    if speech_minutes <= 0:
+        return 0
+    return int(max(0, speech_minutes * LONG_MEDITATION_ESTIMATED_WPM * 0.9))
+
+
+def _expand_long_meditation_script_if_short(
+    script_text: str,
+    *,
+    topic: str,
+    profile: dict,
+    agent_prompt: str,
+    personalization_block: str = "",
+) -> tuple[str, dict]:
+    """Expands underfilled immersive scripts so the active portion has less silence."""
+    before_words = len((script_text or "").split())
+    minimum_words = _long_meditation_minimum_words(profile)
+    stats = {
+        "expanded": False,
+        "before_words": before_words,
+        "after_words": before_words,
+        "minimum_words": minimum_words,
+        "ideal_words": int((profile or {}).get("ideal_words") or 0),
+    }
+    if (profile or {}).get("delivery_profile") != "immersive_v2" or not minimum_words or before_words >= minimum_words:
+        return script_text, stats
+
+    ideal_words = int(stats["ideal_words"] or max(minimum_words + 250, before_words + 500))
+    final_buffer_minutes = float((profile or {}).get("final_buffer_minutes") or 0)
+    active_minutes = max(1, float((profile or {}).get("target_minutes") or 60) - final_buffer_minutes)
+    needed = max(300, ideal_words - before_words)
+    expansion_message = f"""El siguiente guion de meditacion inmersiva quedo demasiado corto para producir una experiencia fluida.
+
+OBJETIVO ORIGINAL: {topic}
+{personalization_block}
+
+Perfil:
+- Modo: {profile.get('label')}
+- Parte activa guiada: aproximadamente {active_minutes:g} minutos antes del buffer final
+- Buffer final musical: {final_buffer_minutes:g} minutos
+- Palabras actuales: {before_words}
+- Minimo obligatorio: {minimum_words}
+- Objetivo ideal: {ideal_words}
+
+Tarea:
+- Devuelve una VERSION COMPLETA EXPANDIDA del guion, no solo fragmentos nuevos.
+- Agrega aproximadamente {needed} palabras utiles sin relleno.
+- Aumenta presencia durante la parte activa: respiraciones acompanadas, transiciones suaves, body scan, visualizacion, afirmaciones e integracion.
+- No dejes ejercicios de respiracion abiertos: cada inhala/reten/sosten debe cerrar con exhalacion y respiracion natural.
+- Manten texto plano, una sola voz, sin encabezados, sin bullets, sin markdown.
+- No prometas curas, resultados garantizados ni tratamiento medico.
+- Conserva una despedida clara antes del buffer final musical.
+
+GUION ACTUAL:
+{script_text}
+
+Devuelve solo el guion final expandido."""
+
+    try:
+        print(
+            f"   ⚠️  Guion inmersivo corto ({before_words} palabras). "
+            f"Expandiendo a minimo {minimum_words}..."
+        )
+        if claude_client:
+            response = claude_client.messages.create(
+                model=CLAUDE_MODEL_SCRIPT,
+                max_tokens=16000,
+                system=agent_prompt,
+                messages=[{"role": "user", "content": expansion_message}],
+            )
+            expanded = response.content[0].text
+        else:
+            response = openai_client.chat.completions.create(
+                model=GPT_MODEL,
+                messages=[
+                    {"role": "system", "content": agent_prompt},
+                    {"role": "user", "content": expansion_message},
+                ],
+            )
+            expanded = response.choices[0].message.content
+        expanded = _normalize_autohypnosis_delivery(expanded)
+        after_words = len(expanded.split())
+        if after_words > before_words:
+            stats.update({
+                "expanded": True,
+                "after_words": after_words,
+                "still_short": after_words < minimum_words,
+            })
+            if after_words < minimum_words:
+                print(f"   ⚠️  Expansion aun corta: {after_words}/{minimum_words} palabras")
+            else:
+                print(f"   ✅ Guion expandido: {before_words} -> {after_words} palabras")
+            return expanded, stats
+    except Exception as exc:
+        stats["error"] = str(exc)[:180]
+        print(f"   ⚠️  Expansion inmersiva omitida: {exc}")
+
+    return script_text, stats
+
+
 PERSONALIZATION_LIMITS = {
     "preferred_name": 40,
     "purpose": 500,
@@ -2811,6 +2929,15 @@ Devuelve solo el guion hablado final."""
         used_model = GPT_MODEL
 
     script_text = _normalize_autohypnosis_delivery(script_text)
+    expansion_stats = {"expanded": False}
+    if profile.get("delivery_profile") == "immersive_v2":
+        script_text, expansion_stats = _expand_long_meditation_script_if_short(
+            script_text,
+            topic=topic,
+            profile=profile,
+            agent_prompt=agent_prompt,
+            personalization_block=personalization_block,
+        )
     char_count = len(script_text)
     word_count = len(script_text.split())
     speech_minutes = word_count / LONG_MEDITATION_ESTIMATED_WPM
@@ -2833,6 +2960,9 @@ Devuelve solo el guion hablado final."""
             "visual_scene_target": profile["visual_scenes"],
             "final_buffer_minutes": profile.get("final_buffer_minutes", 0),
             "word_target": profile.get("words"),
+            "minimum_words": profile.get("minimum_words"),
+            "ideal_words": profile.get("ideal_words"),
+            "script_expansion": expansion_stats,
             "format": LONG_MEDITATION_FORMAT,
             "variant": profile.get("variant", "classic"),
             "delivery_profile": profile.get("delivery_profile", "classic"),
@@ -3256,6 +3386,9 @@ def run_full_pipeline(
                 "visual_scene_target": result["metadata"].get("visual_scene_target"),
                 "final_buffer_minutes": result["metadata"].get("final_buffer_minutes"),
                 "word_target": result["metadata"].get("word_target"),
+                "minimum_words": result["metadata"].get("minimum_words"),
+                "ideal_words": result["metadata"].get("ideal_words"),
+                "script_expansion": result["metadata"].get("script_expansion"),
                 "affirmation_spacing_minutes": _long_meditation_duration_profile(
                     result["metadata"].get("duration_profile"),
                     topic,
