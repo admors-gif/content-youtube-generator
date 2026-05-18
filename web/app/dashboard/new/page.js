@@ -79,6 +79,26 @@ const EMPTY_PERSONALIZATION = {
   anchorPhrase: "",
 };
 
+function defaultDurationProfileForAgent(agent, preferredId = "") {
+  const profiles = agent?.durationProfiles || [];
+  if (!profiles.length) return null;
+  if (preferredId) {
+    const explicit = profiles.find((profile) => profile.id === preferredId);
+    if (explicit) return explicit;
+  }
+  const preferredIds =
+    agent?.agentId === "agent_meditacion_larga_v2"
+      ? ["60m-guided", "60m-immersive"]
+      : [agent?.platform === "tiktok" ? "90s" : "60m"];
+  for (const id of preferredIds) {
+    const match = profiles.find((profile) => profile.id === id);
+    if (match) return match;
+  }
+  return profiles.find((profile) => Number(profile.targetMinutes || 0) === 60)
+    || profiles.find((profile) => Number(profile.targetSeconds || 0) === 90)
+    || profiles[0];
+}
+
 function cleanPersonalizationText(value) {
   return value.replace(/\s+/g, " ").trim();
 }
@@ -399,8 +419,7 @@ export default function NewProjectPage() {
           if (agent) {
             setPlatform(agent.platform || "youtube");
             setSelectedAgent(agent);
-            const defaultProfile = agent.durationProfiles?.find((p) => p.id === (agent.platform === "tiktok" ? "90s" : "60m"))
-              || agent.durationProfiles?.[0];
+            const defaultProfile = defaultDurationProfileForAgent(agent, prefill.durationProfile || "");
             if (defaultProfile) setDurationProfile(defaultProfile.id);
             if (agent.sourceGenres?.length) setSourceGenre(agent.sourceGenres[0].id);
           }
@@ -431,9 +450,7 @@ export default function NewProjectPage() {
       if (agent) {
         setPlatform(agent.platform || "youtube");
         setSelectedAgent(agent);
-        const defaultProfile = agent.durationProfiles?.find((p) => p.id === prefillDurationProfile)
-          || agent.durationProfiles?.find((p) => p.id === (agent.platform === "tiktok" ? "90s" : "60m"))
-          || agent.durationProfiles?.[0];
+        const defaultProfile = defaultDurationProfileForAgent(agent, prefillDurationProfile);
         if (defaultProfile) setDurationProfile(defaultProfile.id);
         if (agent.sourceGenres?.length) setSourceGenre(agent.sourceGenres[0].id);
       }
@@ -450,8 +467,7 @@ export default function NewProjectPage() {
 
   const selectAgent = (agent) => {
     setSelectedAgent(agent);
-    const defaultProfile = agent.durationProfiles?.find((p) => p.id === (agent.platform === "tiktok" ? "90s" : "60m"))
-      || agent.durationProfiles?.[0];
+    const defaultProfile = defaultDurationProfileForAgent(agent);
     if (defaultProfile) setDurationProfile(defaultProfile.id);
     if (agent.sourceGenres?.length) setSourceGenre(agent.sourceGenres[0].id);
   };

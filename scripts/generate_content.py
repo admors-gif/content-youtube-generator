@@ -2360,7 +2360,22 @@ def _long_meditation_has_open_breath_cue(segment: str) -> bool:
     if not tail.strip():
         return False
     cue_positions = []
-    for cue in ("inhala", "inhalando", "reten", "retenemos", "retener", "sosten", "sostener", "manten el aire", "mantener el aire", "aguanta"):
+    for cue in (
+        "inhala",
+        "inhalando",
+        "reten",
+        "retenemos",
+        "retener",
+        "sosten",
+        "sostener",
+        "manten",
+        "mantener",
+        "manten el aire",
+        "mantener el aire",
+        "queda con el aire",
+        "quedate con el aire",
+        "aguanta",
+    ):
         pos = tail.rfind(cue)
         if pos >= 0:
             cue_positions.append((pos, cue))
@@ -2368,9 +2383,33 @@ def _long_meditation_has_open_breath_cue(segment: str) -> bool:
         return False
     last_pos, last_cue = max(cue_positions, key=lambda item: item[0])
     after = tail[last_pos:]
-    if any(done in after for done in ("exhala", "exhalando", "suelta el aire", "respira natural", "respiracion natural", "vuelve a respirar")):
+    if any(done in after for done in (
+        "exhala",
+        "exhalando",
+        "suelta el aire",
+        "deja salir el aire",
+        "deja que el aire salga",
+        "respira natural",
+        "respiracion natural",
+        "vuelve a respirar",
+    )):
         return False
-    return last_cue in {"inhala", "inhalando", "reten", "retenemos", "retener", "sosten", "sostener", "manten el aire", "mantener el aire", "aguanta"}
+    return last_cue in {
+        "inhala",
+        "inhalando",
+        "reten",
+        "retenemos",
+        "retener",
+        "sosten",
+        "sostener",
+        "manten",
+        "mantener",
+        "manten el aire",
+        "mantener el aire",
+        "queda con el aire",
+        "quedate con el aire",
+        "aguanta",
+    }
 
 
 def _repair_open_breathwork_segments(segments: list[str]) -> list[str]:
@@ -2410,12 +2449,17 @@ def _build_long_meditation_visual_scenes(
     if not segments:
         return []
 
+    total_seconds = int(float(profile.get("target_minutes", 60)) * 60)
     final_buffer_seconds = int(float(profile.get("final_buffer_minutes") or 0) * 60)
-    durations = _distribute_long_meditation_duration_seconds(
-        int(float(profile.get("target_minutes", 60)) * 60),
-        len(segments),
-        final_buffer_seconds if profile.get("delivery_profile") == "immersive_v2" else 0,
-    )
+    use_final_music_buffer = bool(profile.get("delivery_profile") == "immersive_v2" and final_buffer_seconds > 0)
+    active_seconds = total_seconds
+    if use_final_music_buffer:
+        max_buffer = max(0, total_seconds - len(segments))
+        final_buffer_seconds = min(final_buffer_seconds, max_buffer)
+        active_seconds = max(len(segments), total_seconds - final_buffer_seconds)
+        durations = _distribute_duration_seconds(active_seconds, len(segments))
+    else:
+        durations = _distribute_long_meditation_duration_seconds(total_seconds, len(segments), 0)
     safety_clauses = [
         "no readable text",
         "no logos",
@@ -2447,12 +2491,32 @@ def _build_long_meditation_visual_scenes(
             "target_duration_seconds": durations[i],
             "pace": "long_meditation",
         })
-        if profile.get("delivery_profile") == "immersive_v2" and i == len(segments) - 1 and final_buffer_seconds:
-            visual_scenes[-1]["integration_buffer_seconds"] = final_buffer_seconds
-            visual_scenes[-1]["pace"] = "long_meditation_final_buffer"
         if tts_settings:
             visual_scenes[-1]["delivery_phase"] = tts_settings.pop("phase")
             visual_scenes[-1]["tts_settings"] = tts_settings
+
+    if use_final_music_buffer and final_buffer_seconds:
+        category, template, base_tags = LONG_MEDITATION_VISUAL_TEMPLATES[len(segments) % len(LONG_MEDITATION_VISUAL_TEMPLATES)]
+        prompt = _append_unique_prompt_clauses(
+            template.format(topic=topic_clean),
+            safety_clauses + [
+                "final music-only integration scene after the spoken closing",
+                "empty peaceful space for rest, no people, no readable text",
+                _wellness_visual_variation_clause(topic_clean, len(segments), project_id, personalization),
+            ],
+        )
+        visual_scenes.append({
+            "scene_number": len(visual_scenes) + 1,
+            "narration_text": "",
+            "narration": "",
+            "prompt": prompt,
+            "tags": (base_tags + topic_tags + ["integration", "music"])[:5],
+            "visual_category": category,
+            "target_duration_seconds": final_buffer_seconds,
+            "integration_buffer_seconds": final_buffer_seconds,
+            "pace": "long_meditation_final_buffer",
+            "silence_only": True,
+        })
 
     return visual_scenes
 

@@ -759,6 +759,24 @@ def get_audio_duration(audio_path):
         return 5.0  # fallback
 
 
+def _generate_silence_audio(duration_seconds: float, output_path: Path) -> bool:
+    """Creates a real silent MP3 segment so long meditation music buffers survive assembly."""
+    duration_seconds = max(0.25, float(duration_seconds or 0))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi",
+        "-i", "anullsrc=r=44100:cl=stereo",
+        "-t", f"{duration_seconds:.3f}",
+        "-c:a", "libmp3lame",
+        "-b:a", "192k",
+        str(output_path),
+    ]
+    timeout = max(30, min(900, int(duration_seconds * 0.12)))
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    return result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 1000
+
+
 def _target_duration_for_scene(scene: dict, fallback_duration: float = 5.0) -> float:
     """Returns the explicit long-form scene duration when present."""
     for key in ("target_duration_seconds", "targetDurationSeconds", "duration_seconds"):
@@ -787,12 +805,25 @@ def _pad_long_meditation_audio_segments(scenes, audio_dir: Path) -> dict:
         if not num:
             continue
         audio_path = audio_dir / f"narration_{num:04d}.mp3"
+        target_duration = _target_duration_for_scene(scene, 5.0)
+        if scene.get("silence_only") or scene.get("music_only"):
+            if audio_path.exists() and audio_path.stat().st_size > 1000:
+                current_duration = get_audio_duration(audio_path)
+                if current_duration >= target_duration - 1.0:
+                    stats["skipped"] += 1
+                    continue
+            if _generate_silence_audio(target_duration, audio_path):
+                stats["padded"] += 1
+            else:
+                stats["failed"].append(num)
+                print(f"   [!] Escena {num}: no se pudo crear buffer musical sin voz")
+            continue
+
         if not audio_path.exists() or audio_path.stat().st_size < 1000:
             stats["missing"].append(num)
             continue
 
         current_duration = get_audio_duration(audio_path)
-        target_duration = _target_duration_for_scene(scene, current_duration)
         if current_duration >= target_duration - 1.0:
             stats["skipped"] += 1
             continue

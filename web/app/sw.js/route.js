@@ -9,7 +9,7 @@ const FIREBASE_CONFIG = {
 
 function swSource() {
   return `
-const CACHE_NAME = "content-factory-shell-v1";
+const CACHE_NAME = "content-factory-shell-v2";
 const OFFLINE_URL = "/offline";
 const STATIC_ASSETS = [
   OFFLINE_URL,
