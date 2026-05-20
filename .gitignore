@@ -20,6 +20,7 @@ output/auditions/
 !output/final/.gitkeep
 !output/scripts/.gitkeep
 node_modules/
+.venv/
 .next/
 *.wav
 *.mp4
