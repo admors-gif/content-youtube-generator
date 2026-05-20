@@ -50,3 +50,6 @@ test_v3_audio/
 
 # Scripts de prueba/debug ad-hoc
 scripts/check_active.py
+.vercel
+.env*.local
+web/dev-server*.log
