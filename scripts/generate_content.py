@@ -931,8 +931,20 @@ PODCAST_SPEAKER_NAMES = {
     "LUCIA": "B",        # tolerar versión sin acento
     "HOST_A": "A",
     "HOST_B": "B",
+    # Mesa redonda v1 usa varios personajes en guion, pero el render actual
+    # sigue siendo dual voice: A/B alternan voces para mantener compatibilidad.
+    "TOMAS": "A",
+    "TOMÁS": "A",
+    "DAVID": "A",
+    "ELIZABETH": "B",
+    "AMARA": "B",
+    "SILO": "A",
+    "CERO": "A",
+    "NORA": "B",
+    "VEGA": "B",
 }
 PODCAST_SHOW_NAME = "Esto no es amor"
+PODCAST_ROUNDTABLE_AGENT_FILE = "agent_podcast_mesa_redonda.md"
 
 PODCAST_TARGET_VISUAL_SCENES = 12
 PODCAST_MAX_VISUAL_SCENES = 15
@@ -2673,19 +2685,31 @@ NO copies directo — los hosts hablan de la idea transformada, no recitan el ma
 ═══ FIN DE CONTEXTO ═══\n"""
 
     agent_prompt = agent_prompt_override or load_prompt(agent_file)
+    is_roundtable = agent_file == PODCAST_ROUNDTABLE_AGENT_FILE
+    if is_roundtable:
+        format_requirements = """- 14,000 a 18,000 caracteres (estrictos)
+- Formato exacto: cada linea inicia con LUCIA:, TOMAS:, ELIZABETH:, AMARA:, DAVID: o MATEO: en mayusculas, seguido de dos puntos
+- Estructura de mesa redonda segun el ROLE definido en el system prompt
+- Debe haber tension real entre posturas; no todos deben estar de acuerdo demasiado pronto
+- Cierra con AMARA o LUCIA hablando
+- Tags emocionales solo del set permitido y con la densidad indicada
+- Idioma: espanol neutro de Latinoamerica
+- Conversacion humana, NO narracion, NO teatro ni recitado"""
+    else:
+        format_requirements = """- 14,000 a 18,000 caracteres (estrictos)
+- Formato exacto: cada linea inicia con MATEO: o LUCIA: en mayusculas, seguido de dos puntos
+- 10 secciones segun el ROLE definido en el system prompt
+- Cierra con LUCIA hablando
+- Tags emocionales solo del set permitido y con la densidad indicada
+- Idioma: espanol neutro de Latinoamerica
+- Conversacion humana, NO narracion ni recitado"""
 
     user_message = f"""Genera el guión completo de un episodio de podcast sobre el siguiente tema.
 
 TEMA: {topic}
 {research_block}
 Requisitos estrictos:
-- 14,000 a 18,000 caracteres (estrictos)
-- Formato exacto: cada línea inicia con MATEO: o LUCÍA: en mayúsculas, seguido de dos puntos
-- 10 secciones según el ROLE definido en el system prompt
-- Cierra con LUCÍA hablando
-- Tags emocionales solo del set permitido y con la densidad indicada
-- Idioma: español neutro de Latinoamérica
-- Conversación humana, NO narración ni recitado
+{format_requirements}
 
 Devuelve solo el guión, sin headers ni comentarios."""
 

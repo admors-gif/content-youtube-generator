@@ -889,7 +889,7 @@ def _brand_profile_for_project(agent_id: str, data: dict) -> tuple[str, dict]:
     YouTube/documentary behavior.
     """
     requested = str(data.get("brandProfileId") or data.get("brand_profile_id") or "").strip()
-    should_use_default = agent_id in {"agent_podcast_general", "agent_tiktok_podcast"}
+    should_use_default = agent_id in {"agent_podcast_general", "agent_podcast_mesa_redonda", "agent_tiktok_podcast"}
     if not requested and not should_use_default:
         return "", {}
     profile_id = requested or DEFAULT_BRAND_PROFILE_ID
@@ -1091,6 +1091,8 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
         generation_options["brand_profile_id"] = brand_profile_id
         generation_options["brand_profile_snapshot"] = brand_profile
     project_format = _TIKTOK_FORMAT_BY_AGENT.get(agent_id, "")
+    if agent_id.startswith("agent_podcast_"):
+        project_format = "podcast"
     tiktok_payload = {}
     if platform == "tiktok":
         duration_key = duration_profile.replace(" ", "") or "90s"
@@ -3119,6 +3121,15 @@ _AGENT_CATALOG = """
 
 _RADAR_EXTRA_AGENTS = [
     {
+        "agentId": "agent_podcast_mesa_redonda",
+        "name": "Esto no es amor: Mesa redonda",
+        "description": "Mesa de agentes IA con posturas emocionales, analiticas y poeticas sobre apego, deseo, limites y amor propio",
+        "category": "podcast",
+        "platform": "youtube",
+        "format": "podcast",
+        "promptFile": "agent_podcast_mesa_redonda.md",
+    },
+    {
         "agentId": "agent_tiktok_documentary",
         "name": "TikTok Documental",
         "description": "Mini-documentales verticales con hook inmediato, beats cortos y cierre social",
@@ -3159,6 +3170,7 @@ _RADAR_EXTRA_AGENTS = [
 _RADAR_PRIORITY_AGENT_IDS = [
     RADAR_NEWS_AGENT_ID,
     "agent_podcast_general",
+    "agent_podcast_mesa_redonda",
     "agent_tiktok_podcast",
     "agent_tiktok_documentary",
     "agent_meditacion_larga",

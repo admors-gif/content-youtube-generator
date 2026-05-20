@@ -426,6 +426,23 @@ export const SYSTEM_AGENTS = [
     color: "#14b8a6",
   },
   {
+    agentId: "agent_podcast_mesa_redonda",
+    name: "Esto no es amor: Mesa redonda",
+    emoji: "ðŸŽ™ï¸",
+    description: "Formato experimental con una mesa de agentes IA: posturas emocionales, analiticas y poeticas debaten apego, deseo, limites y amor propio.",
+    category: "podcast",
+    promptFile: "agent_podcast_mesa_redonda.md",
+    tier: "creator",
+    format: "podcast",
+    defaultVoices: { host_a: "Will", host_b: "Lina" },
+    exampleTopics: [
+      "No extraÃ±as a esa persona: extraÃ±as quiÃ©n eras cuando te miraba",
+      "Cuando el contacto cero todavÃ­a es una forma de esperar",
+      "La diferencia entre quÃ­mica y compatibilidad"
+    ],
+    color: "#B6423A",
+  },
+  {
     agentId: "agent_autohipnosis",
     name: "Autohipnosis Guiada",
     emoji: "🌙",
