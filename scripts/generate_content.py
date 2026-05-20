@@ -945,9 +945,60 @@ PODCAST_SPEAKER_NAMES = {
 }
 PODCAST_SHOW_NAME = "Esto no es amor"
 PODCAST_ROUNDTABLE_AGENT_FILE = "agent_podcast_mesa_redonda.md"
+PODCAST_ROUNDTABLE_VOICE_CONFIG_PATH = BASE_DIR / "config" / "podcast_mesa_redonda_voices.json"
 
 PODCAST_TARGET_VISUAL_SCENES = 12
 PODCAST_MAX_VISUAL_SCENES = 15
+
+
+def _load_roundtable_voice_config() -> dict:
+    try:
+        with open(PODCAST_ROUNDTABLE_VOICE_CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _roundtable_podcast_config(total_blocks: int = 0) -> dict:
+    config = _load_roundtable_voice_config()
+    characters = config.get("characters") if isinstance(config.get("characters"), list) else []
+    speaker_voices = {}
+    normalized_characters = []
+    for item in characters:
+        if not isinstance(item, dict):
+            continue
+        key = (item.get("key") or item.get("name") or "").strip().upper()
+        voice = item.get("selected_voice") or item.get("selectedVoice") or item.get("voice")
+        if key and voice:
+            speaker_voices[key] = voice
+        normalized_characters.append({
+            "key": key,
+            "name": item.get("name") or key.title(),
+            "role": item.get("role") or "",
+            "voice": voice,
+            "voice_status": item.get("voice_status") or config.get("audition_status") or "auditioning",
+        })
+    if not speaker_voices:
+        speaker_voices = {
+            "MATEO": "Will",
+            "LUCIA": "Lina",
+            "TOMAS": "Charlie",
+            "DAVID": "Liam",
+            "ELIZABETH": "Marcela",
+            "AMARA": "Jessica",
+        }
+    return {
+        "show_name": config.get("show_name") or PODCAST_SHOW_NAME,
+        "host_a": {"name": "Mateo", "voice": speaker_voices.get("MATEO", "Will")},
+        "host_b": {"name": "Lucia", "voice": speaker_voices.get("LUCIA", "Lina")},
+        "tts_engine": config.get("tts_engine") or "elevenlabs_dialogue_v3",
+        "model": config.get("model") or "eleven_v3",
+        "voice_casting_status": config.get("audition_status") or "auditioning",
+        "speaker_voices": speaker_voices,
+        "characters": normalized_characters,
+        "total_blocks": total_blocks,
+    }
 
 PODCAST_VISUAL_IDENTITY = (
     "Esto No Es Amor visual identity: dark, elegant, emotionally intense noir podcast cover image, "
@@ -1250,7 +1301,7 @@ def _parse_podcast_script(text: str) -> list:
             if speaker_code is None:
                 # Speaker desconocido: lo registramos como "?"
                 speaker_code = "?"
-            blocks.append({"speaker": speaker_code, "name": name, "text": content})
+            blocks.append({"speaker": speaker_code, "name": name, "speaker_key": name, "text": content})
             last_speaker_code = speaker_code
             last_name = name
         else:
@@ -3346,7 +3397,9 @@ def run_full_pipeline(
                 format_key=LONG_MEDITATION_FORMAT,
                 personalization=personalization_options,
             )
-        if is_podcast:
+        if is_podcast and agent_file == PODCAST_ROUNDTABLE_AGENT_FILE:
+            full_result["podcast"] = _roundtable_podcast_config(len(podcast_blocks))
+        elif is_podcast:
             full_result["podcast"] = {
                 "show_name": PODCAST_SHOW_NAME,
                 "host_a": {"name": "Mateo", "voice": "Will"},

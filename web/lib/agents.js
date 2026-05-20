@@ -435,6 +435,16 @@ export const SYSTEM_AGENTS = [
     tier: "creator",
     format: "podcast",
     defaultVoices: { host_a: "Will", host_b: "Lina" },
+    characterVoices: {
+      mateo: "Will",
+      lucia: "Lina",
+      tomas: "Charlie",
+      david: "Liam",
+      elizabeth: "Marcela",
+      amara: "Jessica",
+    },
+    ttsEngine: "elevenlabs_dialogue_v3",
+    voiceCastingStatus: "auditioning",
     exampleTopics: [
       "No extraÃ±as a esa persona: extraÃ±as quiÃ©n eras cuando te miraba",
       "Cuando el contacto cero todavÃ­a es una forma de esperar",

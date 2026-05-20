@@ -73,6 +73,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from elevenlabs_tts import (
     generate_scene_narrations,
     generate_dual_narration,
+    generate_podcast_narration,
     get_voice_for_agent, get_voice_settings, DEFAULT_VOICE, VOICE_MAP
 )
 from luma_video import (
@@ -1684,15 +1685,17 @@ if __name__ == "__main__":
     is_podcast_format = data.get("format") in {"podcast", "tiktok_podcast"}
     if is_podcast_format:
         podcast_cfg = data.get("podcast") or {}
-        voice_a = (podcast_cfg.get("host_a") or {}).get("voice") or "Salvatore"
-        voice_b = (podcast_cfg.get("host_b") or {}).get("voice") or "Serafina"
+        voice_a = (podcast_cfg.get("host_a") or {}).get("voice") or "Will"
+        voice_b = (podcast_cfg.get("host_b") or {}).get("voice") or "Lina"
+        tts_engine = podcast_cfg.get("tts_engine") or podcast_cfg.get("ttsEngine") or "auto"
         print("\n" + "=" * 60)
-        print(f"   PASO 2: Narración PODCAST (dual voice)")
+        print(f"   PASO 2: Narración PODCAST")
         print(f"   Host A: {voice_a} | Host B: {voice_b}")
+        print(f"   Engine: {tts_engine}")
         print("=" * 60)
-        tts_stats = generate_dual_narration(
+        tts_stats = generate_podcast_narration(
             scenes, audio_dir,
-            voice_a=voice_a, voice_b=voice_b,
+            podcast_cfg=podcast_cfg,
             skip_existing=True,
         )
     else:

@@ -1,0 +1,64 @@
+{
+  "show_name": "Esto no es amor",
+  "agent_file": "agent_podcast_mesa_redonda.md",
+  "model": "eleven_v3",
+  "tts_engine": "elevenlabs_dialogue_v3",
+  "audition_status": "auditioning",
+  "max_chars_per_dialogue_request": 1800,
+  "characters": [
+    {
+      "key": "MATEO",
+      "name": "Mateo",
+      "role": "moderador humano, cercano y sobrio",
+      "selected_voice": "Will",
+      "voice_status": "candidate",
+      "sample_text": "[exhales] Antes de discutir si eso era amor, pongamos la pregunta en la mesa: que parte de ti seguia esperando algo que ya no estaba ahi?",
+      "candidate_voices": ["Will", "Charlie", "Liam"]
+    },
+    {
+      "key": "LUCIA",
+      "name": "Lucia",
+      "role": "voz emocional original, calida y vulnerable",
+      "selected_voice": "Lina",
+      "voice_status": "candidate",
+      "sample_text": "[sighs] Lo dificil es que cuando alguien te mira como si fueras suficiente, el cuerpo no pregunta si eso tambien te esta rompiendo.",
+      "candidate_voices": ["Lina", "Marcela", "Jessica"]
+    },
+    {
+      "key": "TOMAS",
+      "name": "Tomas",
+      "role": "perfil frio, analitico y directo",
+      "selected_voice": "Charlie",
+      "voice_status": "candidate",
+      "sample_text": "No era una conexion profunda. Era un ciclo de recompensa intermitente, y tu sistema nervioso aprendio a llamarlo destino.",
+      "candidate_voices": ["Charlie", "Will", "Liam"]
+    },
+    {
+      "key": "DAVID",
+      "name": "David",
+      "role": "voz incomoda, breve y quirurgica",
+      "selected_voice": "Liam",
+      "voice_status": "candidate",
+      "sample_text": "La verdad incomoda es esta: a veces no quieres volver con esa persona. Quieres volver al minuto exacto en que todavia creias.",
+      "candidate_voices": ["Liam", "Charlie", "Will"]
+    },
+    {
+      "key": "ELIZABETH",
+      "name": "Elizabeth",
+      "role": "investigadora clara, rigurosa y no clinica",
+      "selected_voice": "Marcela",
+      "voice_status": "candidate",
+      "sample_text": "Hay evidencia de que la incertidumbre puede intensificar la busqueda de respuesta. Eso no vuelve sana la relacion; solo explica por que cuesta soltarla.",
+      "candidate_voices": ["Marcela", "Lina", "Jessica"]
+    },
+    {
+      "key": "AMARA",
+      "name": "Amara",
+      "role": "poeta editorial, intima y memorable",
+      "selected_voice": "Jessica",
+      "voice_status": "candidate",
+      "sample_text": "[whispers] A veces no extranamos a la persona. Extranamos la version de nosotros que todavia no sabia defenderse.",
+      "candidate_voices": ["Jessica", "Lina", "Marcela"]
+    }
+  ]
+}
