@@ -58,6 +58,28 @@ FALLBACK_FONTS = ["Arial", "Helvetica", "DejaVu Sans"]
 # Cuántas palabras mostrar a la vez
 WORDS_PER_GROUP = 3
 
+SPEAKER_LABEL_STYLES = {
+    "MATEO": {"label": "MATEO", "color": "&H00D8D8D8"},
+    "LUCIA": {"label": "LUCIA", "color": "&H00F4D7C5"},
+    "TOMAS": {"label": "TOMAS", "color": "&H00B8D7FF"},
+    "ELIZABETH": {"label": "ELIZABETH", "color": "&H00C8F0D0"},
+    "DAVID": {"label": "DAVID", "color": "&H006B77FF"},
+    "AMARA": {"label": "AMARA", "color": "&H00F0C5F5"},
+}
+
+
+def _normalize_speaker_key(value: str | None) -> str:
+    if not value:
+        return ""
+    import unicodedata
+    text = unicodedata.normalize("NFKD", str(value).strip().upper())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return "".join(ch for ch in text if ch.isalnum() or ch == "_")
+
+
+def _ass_text(value: str) -> str:
+    return str(value or "").replace("\\", "\\\\").replace("{", "").replace("}", "")
+
 
 def transcribe_with_whisper(audio_path: Path) -> dict:
     """
@@ -177,7 +199,13 @@ def transcribe_large_audio(client, audio_path: Path) -> dict:
     return {"words": all_words, "text": " ".join(w["word"] for w in all_words)}
 
 
-def generate_ass_subtitles(words: list, output_path: Path, style: dict = None) -> Path:
+def generate_ass_subtitles(
+    words: list,
+    output_path: Path,
+    style: dict = None,
+    speaker_segments: list | None = None,
+    show_speaker_labels: bool = False,
+) -> Path:
     """
     Genera archivo ASS con subtítulos estilizados.
     Agrupa palabras de a WORDS_PER_GROUP para legibilidad.
@@ -195,6 +223,12 @@ def generate_ass_subtitles(words: list, output_path: Path, style: dict = None) -
         return None
     
     s = style or STYLE_CONFIG
+    speaker_margin_v = int(s.get("speaker_margin_v") or (s["margin_v"] + 82))
+    speaker_font_size = int(s.get("speaker_font_size") or max(28, int(s["font_size"] * 0.58)))
+    speaker_styles = "\n".join(
+        f"Style: Speaker{key},{s['font_name']},{speaker_font_size},{cfg['color']},&H000000FF,{s['outline_color']},{s['shadow_color']},{s['bold']},0,0,0,100,100,1,0,1,2,1,{s.get('alignment', 2)},40,40,{speaker_margin_v},1"
+        for key, cfg in SPEAKER_LABEL_STYLES.items()
+    )
     
     # ── Header ASS ──
     ass_header = f"""[Script Info]
@@ -208,6 +242,7 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{s['font_name']},{s['font_size']},{s['primary_color']},&H000000FF,{s['outline_color']},{s['shadow_color']},{s['bold']},0,0,0,100,100,1,0,1,{s['outline_width']},{s['shadow_depth']},{s.get('alignment', 2)},40,40,{s['margin_v']},1
+{speaker_styles}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -220,7 +255,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if not group:
             continue
         
-        group_text = " ".join(w["word"] for w in group)
+        group_text = " ".join(_ass_text(w["word"]) for w in group)
         group_start = group[0]["start"]
         group_end = group[-1]["end"]
         
@@ -238,6 +273,23 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     
     # ── Generar eventos ASS ──
     events = []
+    if show_speaker_labels and speaker_segments:
+        for segment in speaker_segments:
+            speaker_key = _normalize_speaker_key(segment.get("speaker") or segment.get("name"))
+            if speaker_key not in SPEAKER_LABEL_STYLES:
+                continue
+            try:
+                start = float(segment.get("start", 0))
+                end = float(segment.get("end", 0))
+            except Exception:
+                continue
+            if end - start < 0.35:
+                continue
+            start_ts = format_ass_time(max(0, start))
+            end_ts = format_ass_time(max(start + 0.35, end))
+            label = SPEAKER_LABEL_STYLES[speaker_key]["label"]
+            text = f"{{\\fad(120,120)\\fsp4}}{label}"
+            events.append(f"Dialogue: 1,{start_ts},{end_ts},Speaker{speaker_key},,0,0,0,,{text}")
     for g in groups:
         start_ts = format_ass_time(g["start"])
         end_ts = format_ass_time(g["end"])
@@ -346,6 +398,8 @@ def add_subtitles_to_video(
     output_path: Path = None,
     style: dict = None,
     ass_filename: str = "subtitles.ass",
+    speaker_segments: list | None = None,
+    show_speaker_labels: bool = False,
 ) -> Path:
     """
     Pipeline completo: Audio → Whisper → ASS → Burn-in
@@ -397,7 +451,13 @@ def add_subtitles_to_video(
     
     # 3. Generar ASS
     ass_path = project_dir / ass_filename
-    ass_file = generate_ass_subtitles(result["words"], ass_path, style=style)
+    ass_file = generate_ass_subtitles(
+        result["words"],
+        ass_path,
+        style=style,
+        speaker_segments=speaker_segments,
+        show_speaker_labels=show_speaker_labels,
+    )
     if not ass_file:
         return None
     
@@ -416,6 +476,8 @@ def add_tiktok_subtitles_to_video(
     video_path: Path,
     audio_path: Path = None,
     output_path: Path = None,
+    speaker_segments: list | None = None,
+    show_speaker_labels: bool = False,
 ) -> Path:
     """Subtítulos verticales con margen inferior seguro para la UI de TikTok."""
     return add_subtitles_to_video(
@@ -424,6 +486,8 @@ def add_tiktok_subtitles_to_video(
         output_path=output_path,
         style=TIKTOK_STYLE_CONFIG,
         ass_filename="subtitles_tiktok.ass",
+        speaker_segments=speaker_segments,
+        show_speaker_labels=show_speaker_labels,
     )
 
 

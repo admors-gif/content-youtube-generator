@@ -96,6 +96,103 @@ def _scene_number(scene):
         return 0
 
 
+ROUNDTABLE_AGENT_FILE = "agent_podcast_mesa_redonda.md"
+ROUNDTABLE_SPEAKERS = {"MATEO", "LUCIA", "TOMAS", "ELIZABETH", "DAVID", "AMARA"}
+
+
+def _speaker_key(value: str | None) -> str:
+    if not value:
+        return ""
+    import unicodedata
+    text = unicodedata.normalize("NFKD", str(value).strip().upper())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"[^A-Z0-9_]+", "", text)
+
+
+def _is_roundtable_podcast_payload(data: dict) -> bool:
+    podcast_cfg = data.get("podcast") if isinstance(data.get("podcast"), dict) else {}
+    return (
+        data.get("agent") == ROUNDTABLE_AGENT_FILE
+        or bool(podcast_cfg.get("characters"))
+        or bool(podcast_cfg.get("speaker_voices") or podcast_cfg.get("speakerVoices"))
+    )
+
+
+def _speaker_labels_enabled(data: dict) -> bool:
+    """Speaker labels are experimental and must be enabled explicitly."""
+    podcast_cfg = data.get("podcast") if isinstance(data.get("podcast"), dict) else {}
+    subtitle_cfg = podcast_cfg.get("subtitles") if isinstance(podcast_cfg.get("subtitles"), dict) else {}
+    explicit = (
+        subtitle_cfg.get("speaker_labels")
+        or subtitle_cfg.get("speakerLabels")
+        or podcast_cfg.get("speaker_labels")
+        or podcast_cfg.get("speakerLabels")
+    )
+    return str(explicit).strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+
+def _build_podcast_speaker_segments(scenes: list, audio_dir: Path, project_dir: Path | None = None) -> list[dict]:
+    """Approximate speaker timing for subtitle labels from dialogue blocks.
+
+    Whisper provides word timestamps but not diarization. For roundtable podcasts,
+    we estimate speaker spans per scene by distributing the scene audio duration
+    across dialogue blocks according to text length. This is intentionally simple:
+    labels help orientation without changing audio generation.
+    """
+    segments: list[dict] = []
+    cursor = 0.0
+
+    for scene in scenes or []:
+        num = _scene_number(scene)
+        audio_path = audio_dir / f"narration_{num:04d}.mp3"
+        if not audio_path.exists():
+            continue
+
+        scene_duration = get_audio_duration(audio_path)
+        scene_start = cursor
+        scene_end = scene_start + max(0.0, scene_duration)
+        cursor = scene_end
+
+        blocks = scene.get("dialogue_blocks") or []
+        if not blocks or scene_duration <= 0:
+            continue
+
+        weights = []
+        for block in blocks:
+            text = re.sub(r"\[[^\]]+\]", "", str(block.get("text") or "")).strip()
+            weights.append(max(18, len(text)))
+        total_weight = sum(weights) or len(blocks)
+
+        block_start = scene_start
+        for idx, block in enumerate(blocks):
+            speaker = _speaker_key(block.get("speaker_key") or block.get("name") or block.get("speaker"))
+            if idx == len(blocks) - 1:
+                block_end = scene_end
+            else:
+                block_end = block_start + scene_duration * (weights[idx] / total_weight)
+
+            if speaker in ROUNDTABLE_SPEAKERS and block_end - block_start >= 0.2:
+                if segments and segments[-1]["speaker"] == speaker and abs(segments[-1]["end"] - block_start) < 0.15:
+                    segments[-1]["end"] = round(block_end, 3)
+                else:
+                    segments.append({
+                        "speaker": speaker,
+                        "start": round(block_start, 3),
+                        "end": round(block_end, 3),
+                        "scene": num,
+                    })
+            block_start = block_end
+
+    if project_dir and segments:
+        try:
+            with open(project_dir / "speaker_timeline.json", "w", encoding="utf-8") as f:
+                json.dump({"segments": segments}, f, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            print(f"   [!] No se pudo guardar speaker_timeline.json: {exc}")
+
+    return segments
+
+
 def _legacy_title_slug(title: str) -> str:
     slug = re.sub(r'[^a-zA-Z0-9_\-]', '_', str(title or "video_sin_titulo").replace(" ", "_"))
     return slug.strip("_-") or "video_sin_titulo"
@@ -1784,8 +1881,8 @@ if __name__ == "__main__":
     # Bifurcación por formato: podcast usa dual narration (2 voces alternando
     # por dialogue_block), narrativa/cinematico usa single voice.
     is_podcast_format = data.get("format") in {"podcast", "tiktok_podcast", YOUTUBE_SHORTS_PODCAST_FORMAT}
+    podcast_cfg = data.get("podcast") if isinstance(data.get("podcast"), dict) else {}
     if is_podcast_format:
-        podcast_cfg = data.get("podcast") or {}
         voice_a = (podcast_cfg.get("host_a") or {}).get("voice") or "Will"
         voice_b = (podcast_cfg.get("host_b") or {}).get("voice") or "Lina"
         tts_engine = podcast_cfg.get("tts_engine") or podcast_cfg.get("ttsEngine") or "auto"
@@ -1874,9 +1971,22 @@ if __name__ == "__main__":
         try:
             master_audio = project_dir / "master_audio.mp3"
             subtitle_fn = add_tiktok_subtitles_to_video if is_vertical_short_format else add_subtitles_to_video
+            subtitle_fn = add_tiktok_subtitles_to_video if is_vertical_short_format else add_subtitles_to_video
+            show_speaker_labels = (
+                is_podcast_format
+                and _is_roundtable_podcast_payload(data)
+                and _speaker_labels_enabled(data)
+            )
+            speaker_segments = (
+                _build_podcast_speaker_segments(scenes, audio_dir, project_dir)
+                if show_speaker_labels
+                else None
+            )
             subtitled_video = subtitle_fn(
                 video_path=final_video,
-                audio_path=master_audio if master_audio.exists() else None
+                audio_path=master_audio if master_audio.exists() else None,
+                speaker_segments=speaker_segments,
+                show_speaker_labels=show_speaker_labels,
             )
             if subtitled_video:
                 # El video subtitulado es ahora el principal

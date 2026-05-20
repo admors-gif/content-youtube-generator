@@ -32,14 +32,15 @@ Esto NO es una ronda fija de opiniones. No hagas que hablen en el mismo orden ni
 Reglas de ritmo:
 
 - Nunca uses una secuencia completa repetida como MATEO, LUCIA, TOMAS, ELIZABETH, DAVID, AMARA.
-- En cada microseccion deben participar solo 2 a 4 personajes, salvo momentos excepcionales.
+- En cada microseccion deben participar solo 2 o 3 personajes. Usa 4 solo cuando una tension ya necesita cierre. Nunca uses 5 o 6 voces en el mismo bloque narrativo.
+- El episodio puede tener seis personajes, pero el oyente debe sentir una conversacion guiada, no una sala llena.
 - Cada personaje debe entrar porque tiene una funcion clara: abrir tension, contradecir, matizar, aterrizar evidencia, cortar una fantasia o cerrar con una imagen.
 - Al menos 60% de las lineas deben responder directamente a la linea anterior, no solo aportar una opinion nueva.
 - Usa replicas naturales: "No estoy de acuerdo", "Espera", "Si, pero", "Ahi hay una trampa", "Lo diria distinto", "Eso suena duro, pero...", "Falta una parte".
 - Permite mini-duelos de 2 o 3 turnos entre dos voces antes de que entre una tercera.
-- MATEO no debe dominar. Interviene para abrir, reencuadrar, pedir claridad o cerrar un bloque.
-- DAVID habla poco. Sus intervenciones deben ser breves, incomodas y memorables. No lo uses como comentarista regular.
-- AMARA habla poco. No explica; cristaliza. Debe aparecer cuando una idea ya maduro y necesita volverse frase.
+- MATEO no debe dominar. Interviene para abrir, reencuadrar, pedir claridad o cerrar un bloque. Sus turnos suelen ser de 1 a 2 frases; evita monologos largos.
+- DAVID habla poco. Sus intervenciones deben ser breves, incomodas y memorables. No lo uses como comentarista regular. Debe sentirse como una aparicion especial.
+- AMARA habla poco. No explica; cristaliza. Debe aparecer cuando una idea ya maduro y necesita volverse frase. Debe sentirse como una aparicion especial.
 - ELIZABETH no debe sonar a exposicion academica. Corrige, matiza o trae evidencia cuando la conversacion la necesita.
 - LUCIA no es "la emocional" en automatico. Tambien puede contradecir si algo suena frio o injusto.
 - TOMAS no gana todas las discusiones. A veces Elizabeth o Lucia deben obligarlo a matizar.
@@ -102,8 +103,8 @@ No uses tags en cada linea. No uses [laughs] fuerte. No uses sarcasmo para humil
 
 Total: 14,000 a 18,000 caracteres.
 
-1. Cold open: DAVID, LUCIA o TOMAS abre con una frase que duela sin gritar.
-2. Planteamiento: MATEO nombra el dilema y presenta la pregunta central.
+1. Cold open: DAVID, LUCIA o TOMAS abre con una frase que duela sin gritar. Los primeros 8 a 15 segundos deben ser puro hook: 2 a 4 turnos cortos, cero explicacion, cero bienvenida, cero contexto largo.
+2. Planteamiento: MATEO nombra el dilema y presenta la pregunta central en maximo 2 frases. No presentes a los personajes; el oyente debe entenderlos por funcion.
 3. Evidencia: ELIZABETH aterriza datos, conceptos o fuentes de la investigacion.
 4. Tension: TOMAS contradice la lectura romantica o emocional.
 5. Defensa humana: LUCIA explica por que ese patron se siente como amor.
@@ -135,11 +136,18 @@ Distribucion aproximada:
 - LUCIA: 22% a 28% de los turnos.
 - TOMAS: 18% a 24% de los turnos.
 - ELIZABETH: 14% a 20% de los turnos.
-- MATEO: 14% a 18% de los turnos.
-- DAVID: 6% a 10% de los turnos.
-- AMARA: 6% a 10% de los turnos.
+- MATEO: 10% a 15% de los turnos.
+- DAVID: 4% a 7% de los turnos.
+- AMARA: 4% a 7% de los turnos.
 
 No fuerces estos porcentajes de forma mecanica. Usalos para evitar que la mesa se vuelva una ronda plana.
+
+Regla de claridad para el oyente:
+
+- En cada tercio del episodio debe haber una voz dominante clara y una voz antagonista clara.
+- Si el bloque empieza a sentirse saturado, elimina una voz antes de agregar otra.
+- Elizabeth entra cuando hay que aclarar, no cada vez que alguien menciona psicologia.
+- David y Amara deben tener menos lineas, pero mas memorables.
 
 ## ESTILO DE MARCA
 
