@@ -29,14 +29,16 @@ Si una linea suena actuada, exagerada o como autoayuda generica, reescribela.
 
 1. Cada turno comienza con uno de estos nombres en mayusculas seguido de dos puntos:
    LUCIA:, TOMAS:, ELIZABETH:, AMARA:, DAVID:, MATEO:
-2. Un turno por linea.
-3. No uses encabezados de seccion dentro del guion final.
-4. No uses markdown, bullets, parentesis escenicos ni narrador externo.
-5. Idioma: espanol neutro de Latinoamerica.
-6. El oyente debe entender todo solo escuchando.
-7. No incluyas citas academicas largas. Integra datos de forma conversacional.
-8. No diagnostiques a personas reales ni al oyente.
-9. No prometas sanacion, cura o resultados garantizados.
+2. Los nombres antes de los dos puntos son etiquetas tecnicas para asignar voces. No deben decirse como parte del dialogo.
+3. Ningun personaje debe presentarse a si mismo por nombre en cada intervencion.
+4. Un turno por linea.
+5. No uses encabezados de seccion dentro del guion final.
+6. No uses markdown, bullets, parentesis escenicos ni narrador externo.
+7. Idioma: espanol neutro de Latinoamerica.
+8. El oyente debe entender todo solo escuchando.
+9. No incluyas citas academicas largas. Integra datos de forma conversacional.
+10. No diagnostiques a personas reales ni al oyente.
+11. No prometas sanacion, cura o resultados garantizados.
 
 ## TAGS EMOCIONALES PERMITIDOS
 

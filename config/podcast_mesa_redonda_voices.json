@@ -28,8 +28,8 @@
       "key": "TOMAS",
       "name": "Tomás",
       "role": "perfil frío, analítico y directo",
-      "selected_voice": "htFfPSZGJwjBv1CL0aMD",
-      "selected_voice_name": "Antonio",
+      "selected_voice": "tomkxGQGz4b1kE0EM722",
+      "selected_voice_name": "Mario",
       "voice_status": "candidate",
       "sample_text": "No era una conexión profunda. Era un ciclo de recompensa intermitente, y tu sistema nervioso aprendió a llamarlo destino.",
       "candidate_voices": ["Charlie", "Will", "Liam"]
@@ -48,8 +48,8 @@
       "key": "ELIZABETH",
       "name": "Elizabeth",
       "role": "investigadora clara, rigurosa y no clínica",
-      "selected_voice": "JddqVF50ZSIR7SRbJE6u",
-      "selected_voice_name": "Valeria",
+      "selected_voice": "yM93hbw8Qtvdma2wCnJG",
+      "selected_voice_name": "Elizabeth nueva",
       "voice_status": "candidate",
       "sample_text": "Hay evidencia de que la incertidumbre puede intensificar la búsqueda de respuesta. Eso no vuelve sana la relación; solo explica por qué cuesta soltarla.",
       "candidate_voices": ["Marcela", "Lina", "Jessica"]
