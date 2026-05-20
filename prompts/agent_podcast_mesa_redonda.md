@@ -25,6 +25,41 @@ La mesa redonda NO debe sonar a teatro, debate escolar ni personajes caricaturiz
 
 Si una linea suena actuada, exagerada o como autoayuda generica, reescribela.
 
+## DINAMICA CONVERSACIONAL
+
+Esto NO es una ronda fija de opiniones. No hagas que hablen en el mismo orden ni que todos comenten cada punto.
+
+Reglas de ritmo:
+
+- Nunca uses una secuencia completa repetida como MATEO, LUCIA, TOMAS, ELIZABETH, DAVID, AMARA.
+- En cada microseccion deben participar solo 2 a 4 personajes, salvo momentos excepcionales.
+- Cada personaje debe entrar porque tiene una funcion clara: abrir tension, contradecir, matizar, aterrizar evidencia, cortar una fantasia o cerrar con una imagen.
+- Al menos 60% de las lineas deben responder directamente a la linea anterior, no solo aportar una opinion nueva.
+- Usa replicas naturales: "No estoy de acuerdo", "Espera", "Si, pero", "Ahi hay una trampa", "Lo diria distinto", "Eso suena duro, pero...", "Falta una parte".
+- Permite mini-duelos de 2 o 3 turnos entre dos voces antes de que entre una tercera.
+- MATEO no debe dominar. Interviene para abrir, reencuadrar, pedir claridad o cerrar un bloque.
+- DAVID habla poco. Sus intervenciones deben ser breves, incomodas y memorables. No lo uses como comentarista regular.
+- AMARA habla poco. No explica; cristaliza. Debe aparecer cuando una idea ya maduro y necesita volverse frase.
+- ELIZABETH no debe sonar a exposicion academica. Corrige, matiza o trae evidencia cuando la conversacion la necesita.
+- LUCIA no es "la emocional" en automatico. Tambien puede contradecir si algo suena frio o injusto.
+- TOMAS no gana todas las discusiones. A veces Elizabeth o Lucia deben obligarlo a matizar.
+
+Patrones permitidos:
+
+- LUCIA -> TOMAS -> LUCIA -> ELIZABETH
+- DAVID -> MATEO -> ELIZABETH
+- AMARA -> silencio implicito -> LUCIA
+- TOMAS -> DAVID -> MATEO
+- ELIZABETH -> TOMAS -> MATEO -> AMARA
+
+Patrones prohibidos:
+
+- Que todos respondan a la misma pregunta uno por uno.
+- Que cada personaje inicie su turno resumiendo el tema.
+- Que Mateo diga constantemente "ahora escuchemos a...".
+- Que David y Amara aparezcan en todos los bloques.
+- Que las voces suenen intercambiables.
+
 ## REGLAS DE FORMATO
 
 1. Cada turno comienza con uno de estos nombres en mayusculas seguido de dos puntos:
@@ -39,6 +74,7 @@ Si una linea suena actuada, exagerada o como autoayuda generica, reescribela.
 9. No incluyas citas academicas largas. Integra datos de forma conversacional.
 10. No diagnostiques a personas reales ni al oyente.
 11. No prometas sanacion, cura o resultados garantizados.
+12. Evita palabras que suelan sonar raras en TTS si hay una alternativa natural. Por ejemplo, prefiere "todavia esperaba" sobre "seguia esperando" cuando la pronunciacion pueda ensuciarse.
 
 ## TAGS EMOCIONALES PERMITIDOS
 
@@ -92,6 +128,19 @@ Cada episodio debe contener al menos tres tensiones reales:
 
 La mesa no debe estar de acuerdo demasiado pronto. Si todos coinciden, el episodio pierde valor.
 
+## MAPA DE PRESENCIA
+
+Distribucion aproximada:
+
+- LUCIA: 22% a 28% de los turnos.
+- TOMAS: 18% a 24% de los turnos.
+- ELIZABETH: 14% a 20% de los turnos.
+- MATEO: 14% a 18% de los turnos.
+- DAVID: 6% a 10% de los turnos.
+- AMARA: 6% a 10% de los turnos.
+
+No fuerces estos porcentajes de forma mecanica. Usalos para evitar que la mesa se vuelva una ronda plana.
+
 ## ESTILO DE MARCA
 
 - Honesto, directo, humano.
@@ -105,12 +154,13 @@ La mesa no debe estar de acuerdo demasiado pronto. Si todos coinciden, el episod
 
 ## EJEMPLO DE TONO
 
-LUCIA: Lo dificil es que no siempre se siente como ansiedad. A veces se siente como fe.
-TOMAS: No. A veces se siente como abstinencia y le ponemos un nombre mas bonito.
-ELIZABETH: Hay una diferencia importante ahi. El cuerpo puede registrar una ausencia como amenaza, aunque racionalmente sepas que alejarte era necesario.
-AMARA: [exhales] Entonces no extranabas a la persona. Extranabas el sistema que te hacia sentir elegida por un minuto.
-DAVID: Eso no es amor. Es regulacion emocional alquilada.
-MATEO: Y creo que ahi esta el episodio de hoy: que parte de ti se queda esperando cuando alguien ya se fue.
+DAVID: Lo mas incomodo es que a veces no extrañas a la persona. Extrañas la dosis.
+LUCIA: Eso suena cruel.
+TOMAS: Suena cruel porque le quita poesia a algo que el cuerpo vivio como salvacion.
+LUCIA: No, espera. Tambien puede haber cariño real ahi. No todo lo intenso es mentira.
+ELIZABETH: Si, pero el cariño real no elimina el patron. Puedes querer a alguien y aun asi estar atrapado en una dinamica que te desregula.
+MATEO: Entonces la pregunta no es si hubo amor. La pregunta es que parte de eso te estaba costando paz.
+AMARA: [whispers] A veces llamamos amor a la unica forma de calma que conocimos.
 
 ## OUTPUT REQUIREMENTS
 
