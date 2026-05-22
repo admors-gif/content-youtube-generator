@@ -1799,6 +1799,8 @@ def _generate_tiktok_script_common(
     tiktok_format = _vertical_format_from_agent_file(agent_file)
     platform_label = _vertical_platform_for_format(tiktok_format)
     profile = _tiktok_duration_profile(duration_profile)
+    display_platform = "YouTube Shorts" if platform_label == "youtube" else "TikTok"
+    profile_label = "90s" if profile["id"] == "shorts90" else profile["id"]
     genre_label = TIKTOK_SOURCE_GENRE_LABELS.get(source_genre, "psicologia")
     system_prompt = _tiktok_base_system_prompt(agent_file, agent_prompt_override=agent_prompt_override)
     personalization = personalization or {}
@@ -1818,7 +1820,7 @@ def _generate_tiktok_script_common(
         } if _is_relationship_short_format(tiktok_format) else {},
     }
     user_prompt = (
-        f"Crea un guion nativo para {('YouTube Shorts' if platform_label == 'youtube' else 'TikTok')} con este contrato.\n"
+        f"Crea un guion nativo para {display_platform} con este contrato.\n"
         "Responde SOLO JSON valido con las claves: script, beats, caption, hashtags, scores.\n"
         "beats debe ser una lista de objetos con label, purpose y timeRange aproximado.\n"
         "scores debe incluir hookScore, retentionScore, clarityScore y platformFitScore.\n"
@@ -1829,9 +1831,9 @@ def _generate_tiktok_script_common(
         f"CONTRATO:\n{json.dumps(prompt_payload, ensure_ascii=False, indent=2)}"
     )
 
-    print(f"\n⚡ MOTOR 1: Generando guion TikTok ({tiktok_format}, {profile['id']})...")
+    print(f"\n[shorts] MOTOR 1: Generando guion {display_platform} ({tiktok_format}, {profile['id']})...")
     if project_id:
-        update_progress(project_id, f"⚡ Escribiendo TikTok {profile['id']}...", 15, {"status": "scripting"})
+        update_progress(project_id, f"Escribiendo {display_platform} {profile_label}...", 15, {"status": "scripting"})
 
     data = None
     try:
@@ -3215,6 +3217,8 @@ def run_full_pipeline(
         print("🌌 Modo MEDITACION LARGA detectado — duracion extendida con bajo costo")
     if is_tiktok:
         print(f"⚡ Modo TIKTOK detectado — {tiktok_format} vertical {tiktok_profile['id']}")
+    elif is_youtube_shorts:
+        print(f"[shorts] Modo YOUTUBE SHORTS detectado - {tiktok_format} vertical {tiktok_profile['id']}")
     public_figure_visuals = {"enabled": False, "detected": False}
     public_figure_visual_context = ""
 

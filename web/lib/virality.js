@@ -116,14 +116,14 @@ function countMatches(text, words) {
 }
 
 /**
- * TikTok Score Engine.
+ * Vertical Short Score Engine.
  *
  * Separado del score de YouTube/documental: aquí un guion corto no debe ser
  * castigado por no tener listas, capítulos largos o estructura SEO. Mide lo
  * que importa para una pieza vertical: hook inmediato, tensión emocional,
  * ritmo conversacional, claridad de beats y cierre social.
  */
-export function computeTikTokScore(text, format = "") {
+export function computeVerticalShortScore(text, format = "") {
   if (!text || text.length < 50) return null;
 
   const clean = String(text || "").trim();
@@ -135,7 +135,7 @@ export function computeTikTokScore(text, format = "") {
   const firstLine = lines[0] || "";
   const firstLineWords = firstLine.split(/\s+/).filter(Boolean).length;
   const avgSentenceWords = wordCount / Math.max(sentences.length, 1);
-  const isPodcast = format === "tiktok_podcast";
+  const isPodcast = format === "tiktok_podcast" || format === "youtube_shorts_podcast";
 
   const hookTerms = [
     "no es amor",
@@ -186,7 +186,19 @@ export function computeTikTokScore(text, format = "") {
     "hasta que",
     "porque",
   ];
-  const ctaTerms = ["comenta", "guarda", "sígueme", "sigueme", "parte 2", "episodio completo"];
+  const ctaTerms = [
+    "comenta",
+    "guarda",
+    "sígueme",
+    "sigueme",
+    "suscríbete",
+    "suscribete",
+    "canal",
+    "quédate",
+    "quedate",
+    "parte 2",
+    "episodio completo",
+  ];
   const speakerTurns = (clean.match(/^[A-ZÁÉÍÓÚÑ]{3,12}:/gm) || []).length;
   const questionCount = (clean.match(/\?/g) || []).length;
   const hookTermCount = countMatches(clean, hookTerms);
@@ -250,4 +262,8 @@ export function computeTikTokScore(text, format = "") {
     avgWordsPerSentence: Math.round(avgSentenceWords),
     wordCount,
   };
+}
+
+export function computeTikTokScore(text, format = "") {
+  return computeVerticalShortScore(text, format);
 }
