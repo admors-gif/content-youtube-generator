@@ -4,8 +4,11 @@ from scripts.generate_content import (
     YOUTUBE_SHORTS_PODCAST_FORMAT,
     _build_podcast_visual_scenes,
     _build_tiktok_visual_scenes,
+    _emotion_prompt_file_for_format,
     _group_blocks_into_scenes,
     _normalize_vertical_script_text,
+    _parse_podcast_script,
+    _strip_podcast_model_preamble,
     _tiktok_duration_profile,
 )
 
@@ -226,3 +229,24 @@ def test_youtube_shorts_normalizes_list_script_and_keeps_six_scenes():
     assert "['" not in normalized
     assert len(scenes) == 6
     assert all(scene.get("dialogue_blocks") for scene in scenes)
+
+
+def test_youtube_shorts_uses_podcast_emotion_tagger():
+    assert _emotion_prompt_file_for_format(False, YOUTUBE_SHORTS_PODCAST_FORMAT) == "emotion_tagger_podcast.md"
+    assert _emotion_prompt_file_for_format(False, "tiktok_documentary") == "emotion_tagger.md"
+
+
+def test_podcast_parser_ignores_model_preamble_and_leading_tags():
+    tagged = (
+        "Here is the complete script with the emotion tags inserted:\n\n"
+        "[serious, authoritative] LUCIA: Te obsesionas con quien no te elige.\n"
+        "MATEO: Exacto. No es sobre esa persona."
+    )
+
+    clean = _strip_podcast_model_preamble(tagged)
+    blocks = _parse_podcast_script(clean)
+
+    assert clean.startswith("[serious")
+    assert len(blocks) == 2
+    assert blocks[0]["name"] == "LUCIA"
+    assert "Te obsesionas" in blocks[0]["text"]

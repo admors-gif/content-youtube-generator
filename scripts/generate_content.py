@@ -578,6 +578,35 @@ def add_emotion_tags(script_text: str, prompt_file: str = "emotion_tagger.md") -
     return tagged_script
 
 
+def _strip_podcast_model_preamble(text: str) -> str:
+    lines = [
+        line
+        for line in str(text or "").replace("```", "").splitlines()
+        if line.strip().lower() not in {"text", "plaintext", "output", "salida"}
+    ]
+    for idx, line in enumerate(lines):
+        if PODCAST_SPEAKER_LINE_RE.match(line.strip()):
+            return "\n".join(lines[idx:]).strip()
+    return "\n".join(lines).strip()
+
+
+def _emotion_prompt_file_for_format(is_podcast: bool, vertical_format: str) -> str:
+    if is_podcast or _is_relationship_short_format(vertical_format):
+        return "emotion_tagger_podcast.md"
+    return "emotion_tagger.md"
+
+
+def _add_podcast_emotion_tags_safely(script_text: str, prompt_file: str = "emotion_tagger_podcast.md") -> str:
+    original_blocks = _parse_podcast_script(script_text)
+    tagged = _strip_podcast_model_preamble(add_emotion_tags(script_text, prompt_file=prompt_file))
+    tagged_blocks = _parse_podcast_script(tagged)
+    min_expected = max(1, int(len(original_blocks) * 0.8)) if original_blocks else 0
+    if original_blocks and len(tagged_blocks) < min_expected:
+        print("   [voice] Emotion tagger rompio el formato de dialogo; usando guion limpio.")
+        return script_text
+    return tagged or script_text
+
+
 # ============================================================
 # MOTOR 2: PROMPTS VISUALES
 # ============================================================
@@ -944,6 +973,7 @@ PODCAST_SPEAKER_NAMES = {
     "NORA": "B",
     "VEGA": "B",
 }
+PODCAST_SPEAKER_LINE_RE = _re.compile(r"^\s*(?:\[[^\]]+\]\s*)*([^\s:]+)\s*:\s*(.+)$")
 PODCAST_SHOW_NAME = "Esto no es amor"
 PODCAST_ROUNDTABLE_AGENT_FILE = "agent_podcast_mesa_redonda.md"
 PODCAST_ROUNDTABLE_VOICE_CONFIG_PATH = BASE_DIR / "config" / "podcast_mesa_redonda_voices.json"
@@ -1324,7 +1354,7 @@ def _parse_podcast_script(text: str) -> list:
     inicial, se descarta. Si ya hay speaker activo, la línea se concatena
     al último bloque (caso: línea cortada por wrap).
     """
-    pattern = _re.compile(r"^\s*([A-ZÁÉÍÓÚÑ_]+)\s*:\s*(.+)$")
+    pattern = PODCAST_SPEAKER_LINE_RE
     blocks = []
     last_speaker_code = None
     last_name = None
@@ -3472,8 +3502,11 @@ def run_full_pipeline(
         elif is_autohypnosis or is_long_meditation:
             tagged_script = _normalize_autohypnosis_delivery(script)
         else:
-            emotion_prompt_file = "emotion_tagger_podcast.md" if (is_podcast or tiktok_format == "tiktok_podcast") else "emotion_tagger.md"
-            tagged_script = add_emotion_tags(script, prompt_file=emotion_prompt_file)
+            emotion_prompt_file = _emotion_prompt_file_for_format(is_podcast, tiktok_format)
+            if emotion_prompt_file == "emotion_tagger_podcast.md":
+                tagged_script = _add_podcast_emotion_tags_safely(script, prompt_file=emotion_prompt_file)
+            else:
+                tagged_script = add_emotion_tags(script, prompt_file=emotion_prompt_file)
 
         # Para podcast, parseamos el guión en bloques de diálogo y agrupamos
         # en escenas visuales antes del PASO 3.
