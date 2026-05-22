@@ -21,6 +21,7 @@
 ═══════════════════════════════════════════════════════════════
 """
 import os, json, time, random, subprocess, copy, re, sys
+import shutil
 from pathlib import Path
 import httpx
 from dotenv import load_dotenv
@@ -65,6 +66,9 @@ TIKTOK_FORMATS = {
     "tiktok_autohypnosis",
     "tiktok_meditation",
 }
+YOUTUBE_SHORTS_PODCAST_FORMAT = "youtube_shorts_podcast"
+YOUTUBE_SHORTS_FORMATS = {YOUTUBE_SHORTS_PODCAST_FORMAT}
+VERTICAL_SHORTS_FORMATS = {*TIKTOK_FORMATS, *YOUTUBE_SHORTS_FORMATS}
 LONG_MEDITATION_DEFAULT_MUSIC_VOLUME_DB = -24.0
 LONG_MEDITATION_STATIC_FPS = 6
 
@@ -148,9 +152,9 @@ def _save_image_jobs(images_dir: Path, jobs: dict) -> None:
 
 def _build_image_prompt(prompt: str, pipeline_format: str = "narrativa", provider: str = "flux") -> str:
     prompt = (prompt or "").strip()
-    if pipeline_format in TIKTOK_FORMATS:
+    if pipeline_format in VERTICAL_SHORTS_FORMATS:
         return (
-            f"{GENERAL_IMAGE_PROMPT_PREFIX} vertical 9:16 TikTok-native frame, "
+            f"{GENERAL_IMAGE_PROMPT_PREFIX} vertical 9:16 short-form frame, "
             f"natural proportions, no stretched subjects, clean caption-safe composition. {prompt}"
         ).strip()
     if pipeline_format == "podcast":
@@ -167,10 +171,10 @@ def _select_image_workflow(pipeline_format: str) -> dict:
     template nodes that require per-request authorization, such as Seedream, are
     kept out of production routes so a missing Cloud approval cannot stall jobs.
     """
-    is_tiktok = pipeline_format in TIKTOK_FORMATS
-    width = 768 if is_tiktok else 1344
-    height = 1344 if is_tiktok else 768
-    if pipeline_format in TIKTOK_FORMATS:
+    is_vertical_short = pipeline_format in VERTICAL_SHORTS_FORMATS
+    width = 768 if is_vertical_short else 1344
+    height = 1344 if is_vertical_short else 768
+    if is_vertical_short:
         return {
             "provider": "flux",
             "label": "FLUX/Krea vertical",
@@ -758,6 +762,101 @@ def get_audio_duration(audio_path):
         return float(probe.stdout.strip())
     except:
         return 5.0  # fallback
+
+
+def _audio_playback_speed_from_payload(data: dict) -> float:
+    candidates = [
+        data.get("audio_playback_speed"),
+        data.get("audioPlaybackSpeed"),
+    ]
+    for key in ("podcast", "tiktok", "youtubeShorts", "generationOptions"):
+        value = data.get(key)
+        if isinstance(value, dict):
+            candidates.extend([
+                value.get("audio_playback_speed"),
+                value.get("audioPlaybackSpeed"),
+            ])
+    for value in candidates:
+        try:
+            speed = float(value)
+        except Exception:
+            continue
+        if 0.75 <= speed <= 1.5 and abs(speed - 1.0) >= 0.01:
+            return speed
+    return 1.0
+
+
+def _atempo_filter(speed: float) -> str:
+    parts = []
+    remaining = float(speed)
+    while remaining > 2.0:
+        parts.append("atempo=2.0")
+        remaining /= 2.0
+    while remaining < 0.5:
+        parts.append("atempo=0.5")
+        remaining /= 0.5
+    parts.append(f"atempo={remaining:.6f}")
+    return ",".join(parts)
+
+
+def _apply_audio_playback_speed(scenes: list, audio_dir: Path, speed: float) -> dict:
+    speed = float(speed or 1.0)
+    stats = {"speed": speed, "processed": 0, "skipped": 0, "missing": [], "failed": []}
+    if abs(speed - 1.0) < 0.01:
+        return stats
+
+    marker = audio_dir / f"_playback_speed_{speed:.3f}.json"
+    if marker.exists():
+        stats["skipped"] = len(scenes or [])
+        print(f"   Audio playback speed {speed:.2f}x ya aplicado; usando cache")
+        return stats
+
+    print("\n" + "=" * 60)
+    print(f"   PASO 2C: Acelerando audio a {speed:.2f}x")
+    print("=" * 60)
+    filter_expr = _atempo_filter(speed)
+
+    for scene in scenes or []:
+        num = _scene_number(scene)
+        if not num:
+            continue
+        audio_path = audio_dir / f"narration_{num:04d}.mp3"
+        if not audio_path.exists() or audio_path.stat().st_size <= 0:
+            stats["missing"].append(num)
+            continue
+
+        original_path = audio_dir / f"narration_{num:04d}.original.mp3"
+        if not original_path.exists():
+            shutil.copy2(audio_path, original_path)
+        source_path = original_path if original_path.exists() else audio_path
+        tmp_path = audio_dir / f"narration_{num:04d}.speed.tmp.mp3"
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(source_path),
+            "-filter:a", filter_expr,
+            "-vn",
+            "-c:a", "libmp3lame",
+            "-b:a", "192k",
+            str(tmp_path),
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            if result.returncode == 0 and tmp_path.exists() and tmp_path.stat().st_size > 1000:
+                tmp_path.replace(audio_path)
+                stats["processed"] += 1
+            else:
+                stats["failed"].append(num)
+                if tmp_path.exists():
+                    tmp_path.unlink(missing_ok=True)
+                print(f"   [!] speed {num:04d} fallo: {result.stderr[-180:]}")
+        except Exception as exc:
+            stats["failed"].append(num)
+            print(f"   [!] speed {num:04d} exception: {exc}")
+
+    with open(marker, "w", encoding="utf-8") as f:
+        json.dump(stats, f, ensure_ascii=False, indent=2)
+    print(f"   Audio speed aplicado: {stats['processed']} procesados | missing={stats['missing']} failed={stats['failed']}")
+    return stats
 
 
 def _generate_silence_audio(duration_seconds: float, output_path: Path) -> bool:
@@ -1588,15 +1687,17 @@ if __name__ == "__main__":
     pipeline_format = data.get("format", "narrativa")
     is_long_meditation_format = pipeline_format == LONG_MEDITATION_FORMAT
     is_tiktok_format = pipeline_format in TIKTOK_FORMATS
+    is_youtube_shorts_format = pipeline_format in YOUTUBE_SHORTS_FORMATS
+    is_vertical_short_format = pipeline_format in VERTICAL_SHORTS_FORMATS
 
     # Algunos formatos usan visuales atmosféricos y largos; Luma no aporta
     # suficiente valor frente a visuales lentos y encarece el resultado.
-    if pipeline_format in {"podcast", *WELLNESS_FORMATS, *TIKTOK_FORMATS} and mode == "cinematico":
+    if pipeline_format in {"podcast", *WELLNESS_FORMATS, *VERTICAL_SHORTS_FORMATS} and mode == "cinematico":
         print(f"⚠️  Format={data.get('format')} detectado — overrideando mode 'cinematico' a 'narrativa'")
         mode = "narrativa"
 
     # Label visible en filename: refleja el formato real, no el modo interno del pipeline.
-    format_label = "tiktok" if is_tiktok_format else pipeline_format if pipeline_format in {"podcast", *WELLNESS_FORMATS} else mode
+    format_label = "youtube_shorts" if is_youtube_shorts_format else "tiktok" if is_tiktok_format else pipeline_format if pipeline_format in {"podcast", *WELLNESS_FORMATS} else mode
 
     # Determinar título y agente
     # Usar topic para nombre de carpeta (consistente con VPS)
@@ -1682,7 +1783,7 @@ if __name__ == "__main__":
     # ════════════════════════════════════════════════════════
     # Bifurcación por formato: podcast usa dual narration (2 voces alternando
     # por dialogue_block), narrativa/cinematico usa single voice.
-    is_podcast_format = data.get("format") in {"podcast", "tiktok_podcast"}
+    is_podcast_format = data.get("format") in {"podcast", "tiktok_podcast", YOUTUBE_SHORTS_PODCAST_FORMAT}
     if is_podcast_format:
         podcast_cfg = data.get("podcast") or {}
         voice_a = (podcast_cfg.get("host_a") or {}).get("voice") or "Will"
@@ -1701,6 +1802,13 @@ if __name__ == "__main__":
     else:
         tts_stats = generate_narration(scenes, audio_dir, agent_name)
 
+    playback_speed = _audio_playback_speed_from_payload(data)
+    if playback_speed != 1.0:
+        speed_stats = _apply_audio_playback_speed(scenes, audio_dir, playback_speed)
+        if speed_stats.get("missing") or speed_stats.get("failed"):
+            print(f"   [!] Audio speed incompleto: missing={speed_stats.get('missing')} failed={speed_stats.get('failed')}")
+            sys.exit(2)
+
     if is_long_meditation_format:
         pad_stats = _pad_long_meditation_audio_segments(scenes, audio_dir)
         if pad_stats.get("missing") or pad_stats.get("failed"):
@@ -1715,7 +1823,7 @@ if __name__ == "__main__":
     # Ken Burns para formatos narrativos; visuales estáticos para meditación larga.
     if is_long_meditation_format:
         kb_stats = apply_static_meditation_visuals_all(scenes, images_dir, kenburns_dir, audio_dir)
-    elif is_tiktok_format:
+    elif is_vertical_short_format:
         kb_stats = apply_ken_burns_all(
             scenes,
             images_dir,
@@ -1723,7 +1831,7 @@ if __name__ == "__main__":
             audio_dir,
             output_width=1080,
             output_height=1920,
-            label="Ken Burns vertical TikTok 9:16",
+            label="Ken Burns vertical 9:16",
         )
     else:
         kb_stats = apply_ken_burns_all(scenes, images_dir, kenburns_dir, audio_dir)
@@ -1750,10 +1858,10 @@ if __name__ == "__main__":
             format_label=format_label,
             music_config=_get_autohypnosis_music_config(data),
             low_motion=is_long_meditation_format,
-            output_width=1080 if is_tiktok_format else 1920,
-            output_height=1920 if is_tiktok_format else 1080,
-            final_filename="FINAL_TIKTOK.mp4" if is_tiktok_format else None,
-            min_duration_seconds=10 if is_tiktok_format else 30,
+            output_width=1080 if is_vertical_short_format else 1920,
+            output_height=1920 if is_vertical_short_format else 1080,
+            final_filename="FINAL_YOUTUBE_SHORTS.mp4" if is_youtube_shorts_format else "FINAL_TIKTOK.mp4" if is_tiktok_format else None,
+            min_duration_seconds=10 if is_vertical_short_format else 30,
         )
     
     # ════════════════════════════════════════════════════════
@@ -1765,7 +1873,7 @@ if __name__ == "__main__":
     if final_video and not skip_subs:
         try:
             master_audio = project_dir / "master_audio.mp3"
-            subtitle_fn = add_tiktok_subtitles_to_video if is_tiktok_format else add_subtitles_to_video
+            subtitle_fn = add_tiktok_subtitles_to_video if is_vertical_short_format else add_subtitles_to_video
             subtitled_video = subtitle_fn(
                 video_path=final_video,
                 audio_path=master_audio if master_audio.exists() else None

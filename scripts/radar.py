@@ -57,7 +57,12 @@ NEWS_QUERIES = [
     "historia detras de noticia viral",
 ]
 
-PODCAST_AGENT_IDS = {"agent_podcast_general", "agent_podcast_mesa_redonda", "agent_tiktok_podcast"}
+PODCAST_AGENT_IDS = {
+    "agent_podcast_general",
+    "agent_podcast_mesa_redonda",
+    "agent_tiktok_podcast",
+    "agent_youtube_shorts_esto_no_es_amor",
+}
 PODCAST_TOPIC_CORE = (
     "apego emocional ruptura contacto cero limites amor propio ghosting "
     "breadcrumbing ansiedad en relaciones dependencia emocional duelo amoroso"

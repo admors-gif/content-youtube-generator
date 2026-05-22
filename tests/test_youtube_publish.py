@@ -116,6 +116,34 @@ def test_youtube_short_resource_sets_safe_upload_metadata():
     assert resource["paidProductPlacementDetails"]["hasPaidProductPlacement"] is False
 
 
+def test_youtube_shorts_native_agent_payload_uses_youtube_platform():
+    payload = api._validate_project_payload({
+        "title": "Por que confundes ansiedad con amor",
+        "agentId": "agent_youtube_shorts_esto_no_es_amor",
+        "agentFile": "agent_youtube_shorts_esto_no_es_amor.md",
+        "platform": "youtube",
+        "durationProfile": "shorts90",
+    })
+
+    assert payload["platform"] == "youtube"
+    assert payload["format"] == api.YOUTUBE_SHORTS_PODCAST_FORMAT
+    assert payload["youtube_shorts"]["targetSeconds"] == 90
+    assert payload["generation_options"]["audio_playback_speed"] == 1.2
+
+
+def test_youtube_publish_pack_has_native_shorts_cta():
+    data = {
+        "title": "Por que confundes ansiedad con amor",
+        "format": api.YOUTUBE_SHORTS_PODCAST_FORMAT,
+        "agentId": "agent_youtube_shorts_esto_no_es_amor",
+    }
+
+    pack = api._build_youtube_publish_pack("project-1", data)
+
+    assert "quedate en el canal" in pack["description"]
+    assert "siguiente Short" in pack["pinned_comment"]
+
+
 def test_youtube_shorts_pack_includes_seo_hashtags_and_offsets():
     data = {
         "title": "Por qué te obsesionas con quien no te elige.",

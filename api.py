@@ -115,6 +115,7 @@ FIREBASE_STORAGE_BUCKET = os.environ.get(
     "content-factory-5cbcb.firebasestorage.app",
 )
 BASE_DIR = Path(__file__).resolve().parent
+PROMPTS_DIR = BASE_DIR / "prompts"
 
 # ── Observabilidad ────────────────────────────────────────────────────────────
 # 1) Sentry: captura errores no-handleados con stack trace.
@@ -718,12 +719,21 @@ _TIKTOK_FORMAT_BY_AGENT = {
     "agent_tiktok_autohipnosis": "tiktok_autohypnosis",
     "agent_tiktok_meditation": "tiktok_meditation",
 }
+YOUTUBE_SHORTS_PODCAST_FORMAT = "youtube_shorts_podcast"
+_YOUTUBE_SHORTS_AGENT_IDS = {
+    "agent_youtube_shorts_esto_no_es_amor",
+}
+_YOUTUBE_SHORTS_FORMAT_BY_AGENT = {
+    "agent_youtube_shorts_esto_no_es_amor": YOUTUBE_SHORTS_PODCAST_FORMAT,
+}
 _TIKTOK_DURATION_ALIASES = {
     "60": "60s",
     "60s": "60s",
     "1m": "60s",
     "90": "90s",
     "90s": "90s",
+    "shorts90": "shorts90",
+    "90shorts": "shorts90",
     "3": "3m",
     "3m": "3m",
     "180": "3m",
@@ -740,6 +750,7 @@ _TIKTOK_DURATION_ALIASES = {
 _TIKTOK_DURATION_SECONDS = {
     "60s": 60,
     "90s": 90,
+    "shorts90": 90,
     "3m": 180,
     "5m": 300,
     "10m": 600,
@@ -889,7 +900,12 @@ def _brand_profile_for_project(agent_id: str, data: dict) -> tuple[str, dict]:
     YouTube/documentary behavior.
     """
     requested = str(data.get("brandProfileId") or data.get("brand_profile_id") or "").strip()
-    should_use_default = agent_id in {"agent_podcast_general", "agent_podcast_mesa_redonda", "agent_tiktok_podcast"}
+    should_use_default = agent_id in {
+        "agent_podcast_general",
+        "agent_podcast_mesa_redonda",
+        "agent_tiktok_podcast",
+        "agent_youtube_shorts_esto_no_es_amor",
+    }
     if not requested and not should_use_default:
         return "", {}
     profile_id = requested or DEFAULT_BRAND_PROFILE_ID
@@ -936,7 +952,7 @@ def _custom_agent_project_payload(data: dict, principal: dict | None) -> dict | 
         or "/" in agent_file
         or "\\" in agent_file
         or ".." in agent_file
-        or not (Path("prompts") / agent_file).is_file()
+        or not (PROMPTS_DIR / agent_file).is_file()
     ):
         raise HTTPException(status_code=400, detail="custom agent base prompt not found")
 
@@ -1058,7 +1074,7 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
         or ".." in agent_file
     ):
         raise HTTPException(status_code=400, detail="invalid agentFile")
-    prompt_path = Path("prompts") / agent_file
+    prompt_path = PROMPTS_DIR / agent_file
     if not prompt_path.is_file():
         raise HTTPException(status_code=400, detail="agent prompt not found")
     if agent_file[:-3] != agent_id:
@@ -1076,6 +1092,8 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
             raise HTTPException(status_code=400, detail="invalid TikTok agent")
     elif agent_id in _TIKTOK_AGENT_IDS:
         raise HTTPException(status_code=400, detail="TikTok agent requires TikTok platform")
+    elif agent_id in _YOUTUBE_SHORTS_AGENT_IDS and platform != "youtube":
+        raise HTTPException(status_code=400, detail="YouTube Shorts agent requires YouTube platform")
 
     duration_profile = (data.get("durationProfile") or data.get("duration_profile") or "").strip().lower()
     allowed_duration_profiles = {"30m", "60m", "180m"}
@@ -1090,10 +1108,11 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
     if brand_profile_id:
         generation_options["brand_profile_id"] = brand_profile_id
         generation_options["brand_profile_snapshot"] = brand_profile
-    project_format = _TIKTOK_FORMAT_BY_AGENT.get(agent_id, "")
+    project_format = _YOUTUBE_SHORTS_FORMAT_BY_AGENT.get(agent_id) or _TIKTOK_FORMAT_BY_AGENT.get(agent_id, "")
     if agent_id.startswith("agent_podcast_"):
         project_format = "podcast"
     tiktok_payload = {}
+    youtube_shorts_payload = {}
     if platform == "tiktok":
         duration_key = duration_profile.replace(" ", "") or "90s"
         duration_profile = _TIKTOK_DURATION_ALIASES.get(duration_key, duration_key)
@@ -1121,6 +1140,51 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
             "source_genre": source_genre,
             "target_seconds": _TIKTOK_DURATION_SECONDS[duration_profile],
         })
+    elif agent_id in _YOUTUBE_SHORTS_AGENT_IDS:
+        duration_key = duration_profile.replace(" ", "") or "shorts90"
+        duration_profile = _TIKTOK_DURATION_ALIASES.get(duration_key, duration_key)
+        if duration_profile != "shorts90":
+            raise HTTPException(status_code=400, detail="invalid durationProfile")
+        source_genre = (
+            data.get("sourceGenre")
+            or data.get("source_genre")
+            or data.get("genre")
+            or "psychology"
+        )
+        source_genre = str(source_genre).strip().lower().replace("-", "_")
+        if source_genre not in _TIKTOK_SOURCE_GENRES:
+            source_genre = "psychology"
+        youtube_shorts_payload = {
+            "format": project_format,
+            "durationProfile": duration_profile,
+            "targetSeconds": _TIKTOK_DURATION_SECONDS[duration_profile],
+            "sourceGenre": source_genre,
+            "audioPlaybackSpeed": 1.2,
+        }
+        generation_options.update({
+            "platform": "youtube",
+            "format": project_format,
+            "duration_profile": duration_profile,
+            "source_genre": source_genre,
+            "target_seconds": _TIKTOK_DURATION_SECONDS[duration_profile],
+            "audio_playback_speed": 1.2,
+        })
+    elif agent_id == "agent_podcast_mesa_redonda":
+        raw_duration_profile = duration_profile.replace(" ", "") or "extended"
+        aliases = {
+            "normal": "standard",
+            "std": "standard",
+            "estandar": "standard",
+            "standard": "standard",
+            "viernes": "extended",
+            "largo": "extended",
+            "long": "extended",
+            "extended": "extended",
+        }
+        duration_profile = aliases.get(raw_duration_profile, raw_duration_profile)
+        if duration_profile not in {"standard", "extended"}:
+            raise HTTPException(status_code=400, detail="invalid durationProfile")
+        generation_options["duration_profile"] = duration_profile
     elif agent_id in {"agent_meditacion_larga", "agent_meditacion_larga_v2"}:
         v2_profiles = {"30m-guided", "60m-guided", "60m-immersive", "180m-deep"}
         aliases = {
@@ -1172,6 +1236,7 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
         "platform": platform,
         "format": project_format,
         "tiktok": tiktok_payload,
+        "youtube_shorts": youtube_shorts_payload,
         "personalization": personalization,
         "brand_profile_id": brand_profile_id,
         "brand_profile_snapshot": brand_profile,
@@ -3114,6 +3179,7 @@ _AGENT_CATALOG = """
 [agent_viajes] Viajes y Exploraciones — Shackleton, Everest, lugares peligrosos del mundo
 [agent_noticias_virales] Noticias Virales — eventos actuales que están en tendencia esta semana
 [agent_podcast_general] Esto no es amor — conversación entre dos hosts (Mateo y Lucía) sobre cualquier tema, formato podcast multitema con dos voces alternando
+[agent_youtube_shorts_esto_no_es_amor] Esto no es amor Shorts — shorts verticales nativos para YouTube con Mateo y Lucia, hook fuerte, ritmo rapido y CTA de suscripcion
 [agent_autohipnosis] Autohipnosis Guiada — wellness, relajación, visualización, afirmaciones positivas, desarrollo personal seguro
 [agent_meditacion_larga] Meditación Larga — sesiones de 30 min, 1 h y 3 h para sueño, calma, afirmaciones espaciadas y visuales lentos
 [agent_meditacion_larga_v2] Meditación Inmersiva — sesiones largas con respiración acompañada, visualización profunda e integración emocional segura
@@ -3128,6 +3194,15 @@ _RADAR_EXTRA_AGENTS = [
         "platform": "youtube",
         "format": "podcast",
         "promptFile": "agent_podcast_mesa_redonda.md",
+    },
+    {
+        "agentId": "agent_youtube_shorts_esto_no_es_amor",
+        "name": "Esto no es amor: YouTube Shorts",
+        "description": "Shorts verticales nativos con Mateo y Lucia, hook fuerte, ritmo rapido y CTA de suscripcion",
+        "category": "podcast",
+        "platform": "youtube",
+        "format": YOUTUBE_SHORTS_PODCAST_FORMAT,
+        "promptFile": "agent_youtube_shorts_esto_no_es_amor.md",
     },
     {
         "agentId": "agent_tiktok_documentary",
@@ -3171,6 +3246,7 @@ _RADAR_PRIORITY_AGENT_IDS = [
     RADAR_NEWS_AGENT_ID,
     "agent_podcast_general",
     "agent_podcast_mesa_redonda",
+    "agent_youtube_shorts_esto_no_es_amor",
     "agent_tiktok_podcast",
     "agent_tiktok_documentary",
     "agent_meditacion_larga",
@@ -3223,6 +3299,7 @@ def _radar_agent_catalog() -> list[dict]:
         "agent_viajes": "travel",
         "agent_noticias_virales": "news",
         "agent_podcast_general": "podcast",
+        "agent_youtube_shorts_esto_no_es_amor": "podcast",
         "agent_autohipnosis": "wellness",
         "agent_meditacion_larga": "wellness",
         "agent_meditacion_larga_v2": "wellness",
@@ -3234,7 +3311,7 @@ def _radar_agent_catalog() -> list[dict]:
             continue
         aid = match.group("id").strip()
         platform = "tiktok" if aid in _TIKTOK_AGENT_IDS else "youtube"
-        project_format = _TIKTOK_FORMAT_BY_AGENT.get(aid) or ""
+        project_format = _YOUTUBE_SHORTS_FORMAT_BY_AGENT.get(aid) or _TIKTOK_FORMAT_BY_AGENT.get(aid) or ""
         if aid == "agent_podcast_general":
             project_format = "podcast"
         elif aid == "agent_autohipnosis":
@@ -4550,6 +4627,9 @@ def _radar_project_payload_from_candidate(candidate: dict) -> dict:
         payload.setdefault("durationProfile", "90s")
         category = str(candidate.get("category") or "").lower()
         payload["sourceGenre"] = category if category in _TIKTOK_SOURCE_GENRES else "psychology"
+    if agent_id in _YOUTUBE_SHORTS_AGENT_IDS:
+        payload.setdefault("durationProfile", "shorts90")
+        payload["sourceGenre"] = "psychology"
     if agent_id == "agent_meditacion_larga":
         payload.setdefault("durationProfile", "60m")
     if agent_id == "agent_meditacion_larga_v2":
@@ -7978,7 +8058,19 @@ def _chapter_lines_from_scenes(scenes: list) -> list[str]:
 
 
 def _is_podcast_project(data: dict) -> bool:
-    return (data.get("agentId") or data.get("agent")) == "agent_podcast_general" or data.get("format") == "podcast"
+    return (
+        (data.get("agentId") or data.get("agent")) in {
+            "agent_podcast_general",
+            "agent_podcast_mesa_redonda",
+        }
+        or data.get("format") == "podcast"
+    )
+
+
+def _is_youtube_shorts_project(data: dict) -> bool:
+    fmt = data.get("format") or ""
+    agent = data.get("agentId") or data.get("agent") or ""
+    return fmt == YOUTUBE_SHORTS_PODCAST_FORMAT or agent in _YOUTUBE_SHORTS_AGENT_IDS
 
 
 def _is_tiktok_project(data: dict) -> bool:
@@ -7987,11 +8079,20 @@ def _is_tiktok_project(data: dict) -> bool:
     return data.get("platform") == "tiktok" or fmt in set(_TIKTOK_FORMAT_BY_AGENT.values()) or agent in _TIKTOK_AGENT_IDS
 
 
+def _is_vertical_short_project(data: dict) -> bool:
+    return _is_tiktok_project(data) or _is_youtube_shorts_project(data)
+
+
 def _youtube_base_description(data: dict, title: str) -> str:
     seo = data.get("seo_metadata") or {}
     description = " ".join(str(seo.get("description") or "").split())
     if description:
         return description
+    if _is_youtube_shorts_project(data):
+        return (
+            f"Un Short de Esto no es amor sobre {title}: apego emocional, "
+            "ansiedad en relaciones y las heridas que confundimos con amor."
+        )
     if _is_podcast_project(data):
         return (
             f"Un episodio de Esto no es amor sobre {title}, apego emocional, "
@@ -8008,6 +8109,20 @@ def _youtube_description_for_project(
     chapters: list[str],
 ) -> str:
     hashtag_line = " ".join(hashtags)
+    if _is_youtube_shorts_project(data):
+        parts = [
+            base_description,
+            (
+                "Una conversacion breve de Esto no es amor para distinguir intensidad, apego, "
+                "ansiedad y amor propio sin romantizar lo que te rompe."
+            ),
+            (
+                "Si esto te movio algo, quedate en el canal. Aqui hablamos de lo que casi nadie sabe nombrar."
+            ),
+        ]
+        if hashtag_line:
+            parts.append(hashtag_line)
+        return "\n\n".join(part for part in parts if part).strip()[:5000]
     if _is_podcast_project(data):
         parts = [
             base_description,
@@ -8059,6 +8174,9 @@ def _build_youtube_publish_pack(project_id: str, data: dict) -> dict:
         if data.get("format") != "podcast"
         else "¿Esto te sonó a amor o a apego? Cuéntame en comentarios qué parte te pegó más."
     )
+    if _is_youtube_shorts_project(data):
+        pinned_comment = "Si esto te hizo pensar en alguien, mandaselo. Y cuentame que tema deberia ser el siguiente Short."
+
     checklist = "\n".join([
         "# Checklist de publicación",
         "",
@@ -11265,6 +11383,7 @@ def _create_project_with_credit(
             "platform": payload.get("platform") or "youtube",
             "format": payload.get("format") or "",
             "tiktok": payload.get("tiktok") or {},
+            "youtubeShorts": payload.get("youtube_shorts") or {},
             "brandProfileId": payload.get("brand_profile_id") or "",
             "brandProfile": payload.get("brand_profile_snapshot") or {},
             "personalization": payload.get("personalization") or {},
@@ -11351,6 +11470,7 @@ def _create_project_with_credit(
             "output": {},
             "seo": {},
             "tiktok": payload.get("tiktok") or {},
+            "youtubeShorts": payload.get("youtube_shorts") or {},
             "brandProfileId": payload.get("brand_profile_id") or "",
             "brandProfile": payload.get("brand_profile_snapshot") or {},
             "costs": {"creditCost": 1},
@@ -12250,6 +12370,8 @@ def run_production(project_id):
         agent_id = project.get("agentId", "")
         project_format = project.get("format") or ""
         is_tiktok_project = _is_tiktok_project(project)
+        is_youtube_shorts_project = _is_youtube_shorts_project(project)
+        is_vertical_short_project = is_tiktok_project or is_youtube_shorts_project
 
         if not scenes:
             update_progress(0, "Error: No hay escenas visuales", "error")
@@ -12265,8 +12387,9 @@ def run_production(project_id):
         # dual TTS; autohipnosis necesita preservar su etiqueta de formato para
         # visuales y filename.
         is_podcast_project = (
-            project_format in {"podcast", "tiktok_podcast"}
+            project_format in {"podcast", "tiktok_podcast", YOUTUBE_SHORTS_PODCAST_FORMAT}
             or (agent_id or "").startswith("agent_podcast_")
+            or agent_id in _YOUTUBE_SHORTS_AGENT_IDS
         )
         is_autohypnosis_project = (
             project_format == "autohipnosis"
@@ -12317,7 +12440,11 @@ def run_production(project_id):
             "brandProfileId": project.get("brandProfileId") or "",
             "brandProfile": project.get("brandProfile") or {},
             "publicFigureVisuals": project.get("publicFigureVisuals") or {},
+            "generationOptions": project.get("generationOptions") or {},
         }
+        audio_playback_speed = (project.get("generationOptions") or {}).get("audio_playback_speed")
+        if audio_playback_speed:
+            temp_json["audio_playback_speed"] = audio_playback_speed
         if is_tiktok_project:
             temp_json["format"] = project_format
             temp_json["tiktok"] = project.get("tiktok") or {}
@@ -12331,7 +12458,7 @@ def run_production(project_id):
             elif project_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
                 temp_json["autohipnosis"] = project.get("autohipnosis") or {}
         elif is_podcast_project:
-            temp_json["format"] = "podcast"
+            temp_json["format"] = project_format if is_youtube_shorts_project else "podcast"
             # Reusa la podcast config persistida en Firestore (host_a/host_b voices, etc.)
             # Defaults actualizados 2026-05-03: Will + Lina (eleven_v3 con audio
             # tags). Salvatore + Serafina quedan para documentales (eleven v2).
@@ -12340,6 +12467,9 @@ def run_production(project_id):
                 "host_a": {"name": "Mateo", "voice": "Will"},
                 "host_b": {"name": "Lucía", "voice": "Lina"},
             })
+            if is_youtube_shorts_project:
+                temp_json["youtubeShorts"] = project.get("youtubeShorts") or {}
+                temp_json["podcast"]["platform"] = "youtube_shorts"
         elif is_autohypnosis_project:
             temp_json["format"] = "autohipnosis"
             temp_json["autohipnosis"] = project.get("autohipnosis") or {}
@@ -12506,9 +12636,9 @@ def run_production(project_id):
         # de 3600 → 7200 (cinematico con 99 escenas tarda hasta 1h25m).
         factory_cmd = [
             "python", "scripts/factory.py", temp_path,
-            "--mode", "narrativa" if is_tiktok_project else "cinematico", "--skip-images",
+            "--mode", "narrativa" if is_vertical_short_project else "cinematico", "--skip-images",
         ]
-        if not is_tiktok_project:
+        if not is_vertical_short_project:
             factory_cmd.extend(["--luma-scenes", "8"])
         if is_long_meditation_project:
             factory_cmd.append("--skip-subs")
@@ -12551,7 +12681,7 @@ def run_production(project_id):
             if final_candidate:
                 try:
                     sys.path.insert(0, "/app/scripts")
-                    if is_tiktok_project:
+                    if is_vertical_short_project:
                         from generate_subtitles import add_tiktok_subtitles_to_video as _add_subtitles
                     else:
                         from generate_subtitles import add_subtitles_to_video as _add_subtitles
@@ -12646,7 +12776,7 @@ def run_production(project_id):
         # Generar shorts vertical 9:16 (3 momentos del video final)
         # No bloqueante: si falla, el video largo ya está completado.
         shorts_results = []
-        if final_path and storage_info and not is_long_meditation_project and not is_tiktok_project:
+        if final_path and storage_info and not is_long_meditation_project and not is_vertical_short_project:
             try:
                 update_progress(97, "Creando versiones cortas...", "publishing")
                 shorts_results = build_shorts_for_project(video_dir, project_id)
@@ -12661,7 +12791,7 @@ def run_production(project_id):
 
         # Generar thumbnails (3 variantes a partir de imágenes existentes)
         thumbnails_results = []
-        if storage_info and not is_tiktok_project:
+        if storage_info and not is_vertical_short_project:
             try:
                 update_progress(99, "Diseñando miniaturas...", "publishing")
                 project_title = project.get("title", "")
@@ -12712,6 +12842,11 @@ def run_production(project_id):
             "productionCompletedAt": firestore.SERVER_TIMESTAMP,
             "productionDurationSeconds": round(time.time() - production_start, 1),
         }
+        if is_youtube_shorts_project:
+            update_payload["progress.stepName"] = (
+                "Tu Short esta listo" if not has_subs else "Tu Short con subtitulos esta listo"
+            )
+            status_msg = update_payload["progress.stepName"]
         if storage_info:
             update_payload["videoStoragePath"] = storage_info["gs_path"]
             update_payload["videoUrl"] = storage_info["signed_url"]
@@ -12732,6 +12867,11 @@ def run_production(project_id):
             if tiktok_cover_result:
                 update_payload["tiktok.delivery.coverStoragePath"] = tiktok_cover_result["gs_path"]
                 update_payload["tiktok.delivery.coverUrl"] = tiktok_cover_result["signed_url"]
+        if is_youtube_shorts_project:
+            update_payload["platform"] = "youtube"
+            update_payload["format"] = project_format
+            update_payload["youtubeShorts.status"] = "ready"
+            update_payload["youtubeShorts.delivery.finalFile"] = Path(final_path).name
 
         doc_ref.update(update_payload)
         _notify_project_event(

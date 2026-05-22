@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from scripts.generate_content import (
+    YOUTUBE_SHORTS_PODCAST_FORMAT,
     _build_podcast_visual_scenes,
     _build_tiktok_visual_scenes,
     _group_blocks_into_scenes,
@@ -168,5 +169,25 @@ def test_tiktok_visual_prompts_are_vertical_and_safe():
     assert all("no shoes" in prompt for prompt in prompts)
     assert all("no tabletop product photography" in prompt for prompt in prompts)
     assert not any("phone face down" in prompt for prompt in prompts)
+
+
+def test_youtube_shorts_profile_uses_six_vertical_scenes():
+    profile = _tiktok_duration_profile("shorts90")
+    scenes = _build_tiktok_visual_scenes(
+        "Por que confundes ansiedad con amor",
+        (
+            "LUCIA: No era amor, era ansiedad pidiendo una respuesta.\n"
+            "MATEO: Y si te quedas, te explico como se siente esa trampa por dentro."
+        ),
+        profile,
+        YOUTUBE_SHORTS_PODCAST_FORMAT,
+        source_genre="psychology",
+    )
+    prompts = [scene["prompt"].lower() for scene in scenes]
+
+    assert profile["target_seconds"] == 90
+    assert len(scenes) == 6
+    assert all(scene["platform"] == "youtube" for scene in scenes)
+    assert all(scene["aspect_ratio"] == "9:16" for scene in scenes)
     assert not any("ceramic cups" in prompt for prompt in prompts)
     assert not any("door left slightly open" in prompt for prompt in prompts)
