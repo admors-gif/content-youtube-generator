@@ -5,6 +5,7 @@ from scripts.generate_content import (
     _build_podcast_visual_scenes,
     _build_tiktok_visual_scenes,
     _group_blocks_into_scenes,
+    _normalize_vertical_script_text,
     _tiktok_duration_profile,
 )
 
@@ -189,5 +190,39 @@ def test_youtube_shorts_profile_uses_six_vertical_scenes():
     assert len(scenes) == 6
     assert all(scene["platform"] == "youtube" for scene in scenes)
     assert all(scene["aspect_ratio"] == "9:16" for scene in scenes)
+    assert all(scene.get("dialogue_blocks") for scene in scenes)
     assert not any("ceramic cups" in prompt for prompt in prompts)
     assert not any("door left slightly open" in prompt for prompt in prompts)
+    assert not any("tiktok safe zones" in prompt for prompt in prompts)
+    assert all("youtube shorts safe zones" in prompt for prompt in prompts)
+
+
+def test_youtube_shorts_normalizes_list_script_and_keeps_six_scenes():
+    profile = _tiktok_duration_profile("shorts90")
+    raw_script = str([
+        "LUCIA: Cuanto mas alguien te ignora, mas lo quieres. Por que pasa eso?",
+        "MATEO: Porque no es amor lo que sientes. Es tu sistema nervioso buscando cerrar algo abierto.",
+        "LUCIA: O sea, la obsesion no es por la persona.",
+        "MATEO: Es por la herida que esa persona activo.",
+        "LUCIA: Eso duele escucharlo.",
+        "MATEO: Duele porque es verdad, pero tambien te devuelve poder.",
+        "LUCIA: Entonces como sales de ese ciclo?",
+        "MATEO: Reconociendo que persigues una sensacion aprendida.",
+        "LUCIA: No estas persiguiendo a alguien.",
+        "MATEO: Estas persiguiendo sentirte suficiente.",
+        "LUCIA: Guarda esto para cuando confundas ansiedad con amor.",
+    ])
+
+    normalized = _normalize_vertical_script_text(raw_script)
+    scenes = _build_tiktok_visual_scenes(
+        "Por que te obsesionas con quien no te elige",
+        raw_script,
+        profile,
+        YOUTUBE_SHORTS_PODCAST_FORMAT,
+        source_genre="psychology",
+    )
+
+    assert normalized.startswith("LUCIA:")
+    assert "['" not in normalized
+    assert len(scenes) == 6
+    assert all(scene.get("dialogue_blocks") for scene in scenes)

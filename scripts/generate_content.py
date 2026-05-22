@@ -18,6 +18,7 @@ if sys.platform == "win32":
         pass
 import json
 import argparse
+import ast
 import unicodedata
 import hashlib
 from datetime import datetime
@@ -1594,6 +1595,15 @@ def _vertical_platform_for_format(vertical_format: str) -> str:
     return "youtube" if vertical_format in YOUTUBE_SHORTS_FORMATS else "tiktok"
 
 
+def _vertical_display_platform(vertical_format: str) -> str:
+    return "YouTube Shorts" if _vertical_platform_for_format(vertical_format) == "youtube" else "TikTok"
+
+
+def _vertical_visual_safety_suffix(vertical_format: str) -> str:
+    safe_label = "YouTube Shorts safe zones" if _vertical_platform_for_format(vertical_format) == "youtube" else "TikTok safe zones"
+    return TIKTOK_VISUAL_SAFETY_SUFFIX.replace("TikTok safe zones", safe_label)
+
+
 def _is_relationship_short_format(vertical_format: str) -> bool:
     return vertical_format in {"tiktok_podcast", YOUTUBE_SHORTS_PODCAST_FORMAT}
 
@@ -1634,6 +1644,58 @@ def _extract_json_object(content: str) -> dict:
         if start >= 0 and end > start:
             return json.loads(clean[start:end + 1])
         raise
+
+
+def _script_turn_to_line(item) -> str:
+    if isinstance(item, str):
+        return item.strip()
+    if isinstance(item, dict):
+        speaker = (
+            item.get("speaker")
+            or item.get("name")
+            or item.get("personaje")
+            or item.get("character")
+            or item.get("host")
+        )
+        text = (
+            item.get("text")
+            or item.get("line")
+            or item.get("dialogue")
+            or item.get("dialogo")
+            or item.get("content")
+        )
+        if speaker and text:
+            return f"{str(speaker).strip().upper()}: {str(text).strip()}"
+        if text:
+            return str(text).strip()
+    return str(item or "").strip()
+
+
+def _normalize_vertical_script_text(value) -> str:
+    """Normalize LLM script payloads before scene parsing and TTS."""
+    if isinstance(value, list):
+        return "\n".join(line for line in (_script_turn_to_line(item) for item in value) if line).strip()
+
+    if isinstance(value, dict):
+        for key in ("turns", "lines", "dialogue", "dialogo", "script"):
+            nested = value.get(key)
+            if nested is not None and nested is not value:
+                normalized = _normalize_vertical_script_text(nested)
+                if normalized:
+                    return normalized
+        return _script_turn_to_line(value)
+
+    text = str(value or "").strip()
+    if text.startswith("[") and text.endswith("]"):
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                parsed = parser(text)
+            except Exception:
+                continue
+            normalized = _normalize_vertical_script_text(parsed)
+            if normalized:
+                return normalized
+    return text
 
 
 def _tiktok_base_system_prompt(agent_file: str, agent_prompt_override: str | None = None) -> str:
@@ -1733,15 +1795,18 @@ def _profile_cta_examples(brand_profile: dict | None) -> list[str]:
     return [str(item).strip() for item in ctas if str(item).strip()][:7]
 
 
-def _brand_visual_prompt_block(brand_profile: dict | None, *, aspect_ratio: str) -> str:
+def _brand_visual_prompt_block(brand_profile: dict | None, *, aspect_ratio: str, platform: str = "tiktok") -> str:
     profile = brand_profile if isinstance(brand_profile, dict) else get_brand_profile(DEFAULT_BRAND_PROFILE_ID)
     template = str(profile.get("visualTemplate") or "").strip()
     negative = str(profile.get("negativePrompt") or "").strip()
     rules = (profile.get("platformRules") or {}).get("tiktok" if aspect_ratio == "9:16" else "youtube") or {}
     mode = str(rules.get("visualMode") or "").strip()
+    if platform == "youtube":
+        mode = mode.replace("TikTok safe zones", "YouTube Shorts safe zones").replace("TikTok-safe", "YouTube Shorts-safe")
     parts = ["Esto No Es Amor visual identity.", template, mode]
     if aspect_ratio == "9:16":
-        parts.append("Use a vertical 9:16 frame with natural proportions and TikTok-safe negative space.")
+        safe_label = "YouTube Shorts-safe" if platform == "youtube" else "TikTok-safe"
+        parts.append(f"Use a vertical 9:16 frame with natural proportions and {safe_label} negative space.")
     else:
         parts.append("Use a horizontal 16:9 thumbnail-friendly frame with space for later text overlay.")
     if negative:
@@ -1799,7 +1864,7 @@ def _generate_tiktok_script_common(
     tiktok_format = _vertical_format_from_agent_file(agent_file)
     platform_label = _vertical_platform_for_format(tiktok_format)
     profile = _tiktok_duration_profile(duration_profile)
-    display_platform = "YouTube Shorts" if platform_label == "youtube" else "TikTok"
+    display_platform = _vertical_display_platform(tiktok_format)
     profile_label = "90s" if profile["id"] == "shorts90" else profile["id"]
     genre_label = TIKTOK_SOURCE_GENRE_LABELS.get(source_genre, "psicologia")
     system_prompt = _tiktok_base_system_prompt(agent_file, agent_prompt_override=agent_prompt_override)
@@ -1859,10 +1924,13 @@ def _generate_tiktok_script_common(
     except Exception as e:
         print(f"   ⚠️  TikTok script fallback por error: {e}")
 
-    if not isinstance(data, dict) or not str(data.get("script") or "").strip():
+    script = _normalize_vertical_script_text(data.get("script")) if isinstance(data, dict) else ""
+    if not isinstance(data, dict) or not script:
         data = _fallback_tiktok_script(topic, tiktok_format, profile, source_genre)
+        script = _normalize_vertical_script_text(data.get("script"))
 
-    script = str(data.get("script") or "").strip()
+    data["script"] = script
+    beats = data.get("beats") if isinstance(data.get("beats"), list) else []
     hashtags = data.get("hashtags") or _tiktok_hashtags(topic, tiktok_format)
     if isinstance(hashtags, str):
         hashtags = [h for h in hashtags.split() if h.startswith("#")]
@@ -1877,11 +1945,12 @@ def _generate_tiktok_script_common(
         "source_genre": source_genre,
         "caption": str(data.get("caption") or f"{topic}. Comenta si quieres parte 2.").strip(),
         "hashtags": hashtags[:10],
+        "beats": beats[:12],
         "scores": scores,
         "personalization": {"enabled": bool(personalization), "fields": sorted(personalization.keys())},
     }
-    print(f"   ✅ TikTok guion: {len(script.split())} palabras | scores {scores}")
-    return {"script": script, "metadata": metadata}
+    print(f"   ✅ {display_platform} guion: {len(script.split())} palabras | scores {scores}")
+    return {"script": script, "metadata": metadata, "beats": beats[:12]}
 
 
 def generate_tiktok_script(topic: str, agent_file: str = "agent_tiktok_documentary.md", project_id: str = None, **kwargs) -> dict:
@@ -1896,6 +1965,87 @@ def generate_tiktok_wellness_script(topic: str, agent_file: str, project_id: str
     return _generate_tiktok_script_common(topic, agent_file, project_id, **kwargs)
 
 
+def _split_text_into_fixed_segments(text: str, target_segments: int) -> list:
+    clean = " ".join(str(text or "").split()).strip()
+    target_segments = max(1, int(target_segments or 1))
+    if not clean:
+        return []
+
+    raw_lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    sentences = [
+        sentence.strip()
+        for sentence in _re.split(r"(?<=[.!?…])\s+", clean)
+        if sentence.strip()
+    ]
+    units = raw_lines if len(raw_lines) >= target_segments else sentences if len(sentences) >= target_segments else []
+
+    if units:
+        segments = []
+        for i in range(target_segments):
+            start = round(i * len(units) / target_segments)
+            end = round((i + 1) * len(units) / target_segments)
+            chunk_units = units[start:end] or [units[min(i, len(units) - 1)]]
+            segments.append(" ".join(chunk_units).strip())
+        return segments[:target_segments]
+
+    words = clean.split()
+    if not words:
+        return []
+    segments = []
+    for i in range(target_segments):
+        start = round(i * len(words) / target_segments)
+        end = round((i + 1) * len(words) / target_segments)
+        chunk_words = words[start:end] or [words[min(i, len(words) - 1)]]
+        segments.append(" ".join(chunk_words).strip())
+    return segments[:target_segments]
+
+
+def _scene_from_dialogue_blocks(scene_number: int, blocks: list) -> dict:
+    return {
+        "scene_number": scene_number,
+        "narration_text": "\n".join(f"{b['name']}: {b['text']}" for b in blocks),
+        "narration": " ".join(b["text"] for b in blocks),
+        "dialogue_blocks": blocks,
+    }
+
+
+def _group_dialogue_blocks_fixed(blocks: list, target_count: int) -> list:
+    target_count = max(1, int(target_count or 1))
+    clean_blocks = [
+        {**block, "text": str(block.get("text") or "").strip()}
+        for block in (blocks or [])
+        if str(block.get("text") or "").strip()
+    ]
+    if not clean_blocks:
+        return []
+
+    if len(clean_blocks) >= target_count:
+        source_blocks = clean_blocks
+    else:
+        total_words = sum(max(1, len(block["text"].split())) for block in clean_blocks)
+        remaining = target_count
+        expanded = []
+        for idx, block in enumerate(clean_blocks):
+            blocks_left = len(clean_blocks) - idx - 1
+            if blocks_left <= 0:
+                share = remaining
+            else:
+                weighted = round(target_count * max(1, len(block["text"].split())) / max(1, total_words))
+                share = max(1, min(max(1, remaining - blocks_left), weighted))
+            for chunk in _split_text_into_fixed_segments(block["text"], share):
+                expanded.append({**block, "text": chunk})
+            remaining -= share
+        source_blocks = expanded or clean_blocks
+
+    scenes = []
+    for i in range(target_count):
+        start = round(i * len(source_blocks) / target_count)
+        end = round((i + 1) * len(source_blocks) / target_count)
+        chunk = source_blocks[start:end] or [source_blocks[min(i, len(source_blocks) - 1)]]
+        scenes.append(_scene_from_dialogue_blocks(i + 1, chunk))
+    return scenes
+
+
 def _build_tiktok_visual_scenes(
     topic: str,
     script_text: str,
@@ -1904,17 +2054,27 @@ def _build_tiktok_visual_scenes(
     source_genre: str = "psychology",
     brand_profile: dict | None = None,
 ) -> list:
+    script_text = _normalize_vertical_script_text(script_text)
     target_count = profile["visual_max"]
+    platform_label = _vertical_platform_for_format(tiktok_format)
+    safety_suffix = _vertical_visual_safety_suffix(tiktok_format)
     if _is_relationship_short_format(tiktok_format):
         blocks = _parse_podcast_script(script_text)
-        grouped = _group_blocks_into_scenes(
-            blocks,
-            target_scene_count=profile["visual_max"],
-            max_scene_count=profile["visual_max"],
-        )
-        segments = grouped or [{"narration": script_text, "narration_text": script_text, "dialogue_blocks": blocks}]
+        if profile["visual_min"] == profile["visual_max"]:
+            segments = _group_dialogue_blocks_fixed(blocks, target_count)
+        else:
+            segments = _group_blocks_into_scenes(
+                blocks,
+                target_scene_count=target_count,
+                max_scene_count=target_count,
+            )
+        if len(segments) < profile["visual_min"]:
+            segments = [
+                {"narration": seg, "narration_text": seg}
+                for seg in _split_text_into_fixed_segments(script_text, target_count)
+            ]
         visual_bank = TIKTOK_RELATIONSHIP_VISUALS
-        identity = _brand_visual_prompt_block(brand_profile, aspect_ratio="9:16")
+        identity = _brand_visual_prompt_block(brand_profile, aspect_ratio="9:16", platform=platform_label)
         relationship_context = _relationship_visual_context(topic)
     elif tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
         segments = [
@@ -1933,6 +2093,11 @@ def _build_tiktok_visual_scenes(
 
     if not segments:
         segments = [{"narration": script_text, "narration_text": script_text}]
+    if len(segments) < profile["visual_min"]:
+        segments = [
+            {"narration": seg, "narration_text": seg}
+            for seg in _split_text_into_fixed_segments(script_text, target_count)
+        ] or segments
     max_count = min(profile["visual_max"], max(profile["visual_min"], len(segments)))
     scenes = []
     for i, segment in enumerate(segments[:max_count]):
@@ -1947,24 +2112,24 @@ def _build_tiktok_visual_scenes(
                 f"Visual variation for this beat: {subject}. "
                 f"Use silhouettes, side profiles, shadow figures, cracked heart symbolism, crimson threads, smoke, "
                 f"fractures and negative space. Make the image readable in one second, emotionally intense, "
-                f"minimal, elegant and psychologically clear. {TIKTOK_VISUAL_SAFETY_SUFFIX}"
+                f"minimal, elegant and psychologically clear. {safety_suffix}"
             )
         else:
             prompt = (
                 f"{identity}. Photorealistic cinematic vertical frame of {subject}, "
                 f"theme focus: {topic}, varied premium composition, shallow depth of field, 8k."
-                f"{TIKTOK_VISUAL_SAFETY_SUFFIX}"
+                f"{safety_suffix}"
             )
         scene = {
             "scene_number": i + 1,
             "narration_text": segment.get("narration_text") or segment.get("narration") or "",
             "narration": segment.get("narration") or segment.get("narration_text") or "",
             "prompt": prompt,
-            "tags": [category, "vertical", _vertical_platform_for_format(tiktok_format)] + _topic_tags(topic),
+            "tags": [category, "vertical", platform_label] + _topic_tags(topic),
             "visual_category": category,
-            "platform": _vertical_platform_for_format(tiktok_format),
+            "platform": platform_label,
             "aspect_ratio": "9:16",
-            "safe_zone": "center subject above lower TikTok UI; leave clean caption space",
+            "safe_zone": f"center subject above lower {_vertical_display_platform(tiktok_format)} UI; leave clean caption space",
         }
         if segment.get("dialogue_blocks"):
             scene["dialogue_blocks"] = segment["dialogue_blocks"]
