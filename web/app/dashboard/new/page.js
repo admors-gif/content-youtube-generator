@@ -590,10 +590,13 @@ export default function NewProjectPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.projectId) {
+        const rawMessage = data.detail || data.error || "";
         const message =
           res.status === 402
             ? "Tu cuenta aún no tiene créditos activos. Solicita activación antes de producir."
-            : data.detail || data.error || "No se pudo crear el proyecto.";
+            : rawMessage === "agent prompt not found"
+              ? "El backend conectado todavía no tiene instalado el prompt de este agente. Hay que actualizar el backend antes de crear proyectos con este formato."
+              : rawMessage || "No se pudo crear el proyecto.";
         alert(message);
         return;
       }
@@ -624,6 +627,8 @@ export default function NewProjectPage() {
   const durationProfiles = selectedAgent?.durationProfiles || [];
   const selectedDurationProfile = durationProfiles.find((p) => p.id === durationProfile)
     || durationProfiles[0];
+  const isYoutubeShortsSelected = selectedAgent?.format === "youtube_shorts_podcast";
+  const isPodcastSelected = selectedAgent?.format === "podcast";
 
   return (
     <div>
@@ -1221,7 +1226,7 @@ export default function NewProjectPage() {
                     textTransform: "uppercase",
                   }}
                 >
-                  DURACIÓN DE SESIÓN
+                  PERFIL DE DURACIÓN
                 </div>
                 <div
                   style={{
@@ -1283,9 +1288,11 @@ export default function NewProjectPage() {
                       color: "var(--paper-dim)",
                     }}
                   >
-                    {platform === "tiktok"
+                    {platform === "tiktok" || isYoutubeShortsSelected
                       ? `Formato vertical nativo con hook, beats cortos y render 9:16 de ${selectedDurationProfile.label}.`
-                      : `Voz espaciada, ambiente continuo y visuales lentos durante ${selectedDurationProfile.label}.`}
+                      : isPodcastSelected
+                        ? `Estructura conversacional de ${selectedDurationProfile.label}, con ritmo y densidad ajustados al formato.`
+                        : `Voz espaciada, ambiente continuo y visuales lentos durante ${selectedDurationProfile.label}.`}
                   </div>
                 )}
               </div>

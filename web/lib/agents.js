@@ -438,19 +438,45 @@ export const SYSTEM_AGENTS = [
     characterVoices: {
       mateo: "Will",
       lucia: "Lina",
-      tomas: "Charlie",
-      david: "Liam",
-      elizabeth: "Marcela",
-      amara: "Jessica",
+      tomas: "Mario",
+      david: "Juan Carlos",
+      elizabeth: "Elizabeth",
+      amara: "lIZ",
     },
     ttsEngine: "elevenlabs_dialogue_v3",
-    voiceCastingStatus: "auditioning",
+    voiceCastingStatus: "locked",
+    durationProfiles: [
+      { id: "extended", label: "Viernes extendido", description: "Especial largo: mas aire entre voces y menos rotacion por bloque.", targetMinutes: 22 },
+      { id: "standard", label: "Estandar", description: "Formato actual de mesa redonda para pruebas mas cortas.", targetMinutes: 12 },
+    ],
     exampleTopics: [
       "No extraÃ±as a esa persona: extraÃ±as quiÃ©n eras cuando te miraba",
       "Cuando el contacto cero todavÃ­a es una forma de esperar",
       "La diferencia entre quÃ­mica y compatibilidad"
     ],
     color: "#B6423A",
+  },
+  {
+    agentId: "agent_youtube_shorts_esto_no_es_amor",
+    name: "Esto no es amor: YouTube Shorts",
+    emoji: "▶",
+    description: "Shorts verticales nativos con Mateo y Lucia: hook fuerte, ritmo rapido, seis escenas y CTA para convertir espectadores en suscriptores.",
+    category: "podcast",
+    promptFile: "agent_youtube_shorts_esto_no_es_amor.md",
+    tier: "creator",
+    platform: "youtube",
+    format: "youtube_shorts_podcast",
+    defaultVoices: { host_a: "Will", host_b: "Lina" },
+    audioPlaybackSpeed: 1.2,
+    durationProfiles: [
+      { id: "shorts90", label: "90 s", description: "Short nativo: 6 escenas de 15 segundos, voz 1.2x y cierre de suscripcion.", targetSeconds: 90 },
+    ],
+    exampleTopics: [
+      "Por que confundes ansiedad con amor",
+      "La senal de que no era amor, era apego",
+      "No extranas a esa persona: extranas como te hacia sentir"
+    ],
+    color: "#E0533D",
   },
   {
     agentId: "agent_autohipnosis",
