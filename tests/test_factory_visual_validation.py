@@ -49,6 +49,24 @@ def test_validate_image_assets_rejects_tiny_scene_file(tmp_path):
     assert result["invalid"] == [1]
 
 
+def test_scene_narration_files_excludes_speed_backups(tmp_path):
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    for name in [
+        "narration_0001.mp3",
+        "narration_0001.original.mp3",
+        "narration_0001.speed.tmp.mp3",
+        "narration_0002.mp3",
+        "narration_bad.mp3",
+    ]:
+        (audio_dir / name).write_bytes(b"fake")
+
+    assert [path.name for path in factory._scene_narration_files(audio_dir)] == [
+        "narration_0001.mp3",
+        "narration_0002.mp3",
+    ]
+
+
 def test_autohypnosis_music_is_disabled_without_explicit_asset():
     result = factory._get_autohypnosis_music_config({
         "format": "autohipnosis",

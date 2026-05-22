@@ -861,6 +861,15 @@ def get_audio_duration(audio_path):
         return 5.0  # fallback
 
 
+def _scene_narration_files(audio_dir: Path) -> list[Path]:
+    """Return only final per-scene narration files, excluding speed backups."""
+    pattern = re.compile(r"^narration_\d{4}\.mp3$")
+    return sorted(
+        (path for path in audio_dir.glob("narration_*.mp3") if pattern.match(path.name)),
+        key=lambda path: path.name,
+    )
+
+
 def _audio_playback_speed_from_payload(data: dict) -> float:
     candidates = [
         data.get("audio_playback_speed"),
@@ -1280,7 +1289,7 @@ def assemble_final_video(
     # ── STEP 1: Crear master audio ──
     print("   4.1 Creando master audio...")
     master_audio = project_dir / "master_audio.mp3"
-    narration_files = sorted(audio_dir.glob("narration_*.mp3"))
+    narration_files = _scene_narration_files(audio_dir)
     
     if not narration_files:
         print("   [!] No hay narraciones")
