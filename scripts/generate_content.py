@@ -3394,6 +3394,14 @@ def run_full_pipeline(
     is_tiktok = _is_tiktok_agent_file(agent_file) or custom_format.startswith("tiktok_")
     is_youtube_shorts = _is_youtube_shorts_agent_file(agent_file) or custom_format in YOUTUBE_SHORTS_FORMATS
     is_vertical_short = is_tiktok or is_youtube_shorts
+    audio_playback_speed = None
+    raw_audio_playback_speed = generation_options.get("audio_playback_speed") or generation_options.get("audioPlaybackSpeed")
+    try:
+        parsed_audio_playback_speed = float(raw_audio_playback_speed)
+        if 0.75 <= parsed_audio_playback_speed <= 1.5 and abs(parsed_audio_playback_speed - 1.0) >= 0.01:
+            audio_playback_speed = parsed_audio_playback_speed
+    except Exception:
+        audio_playback_speed = None
     tiktok_format = (
         custom_format
         if custom_format in VERTICAL_SHORTS_FORMATS
@@ -3708,6 +3716,9 @@ def run_full_pipeline(
                 "host_b": {"name": "Lucía", "voice": "Lina"},
                 "total_blocks": len(podcast_blocks),
             }
+        if is_podcast and audio_playback_speed:
+            full_result["audio_playback_speed"] = audio_playback_speed
+            full_result["podcast"]["audio_playback_speed"] = audio_playback_speed
         if is_vertical_short:
             vertical_delivery_key = "youtubeShorts" if is_youtube_shorts else "tiktok"
             full_result[vertical_delivery_key] = {
@@ -3738,7 +3749,7 @@ def run_full_pipeline(
                     "platform": "youtube_shorts" if is_youtube_shorts else "tiktok",
                 }
                 if is_youtube_shorts:
-                    speed = float(generation_options.get("audio_playback_speed") or 1.2)
+                    speed = audio_playback_speed or 1.2
                     full_result["audio_playback_speed"] = speed
                     full_result["podcast"]["audio_playback_speed"] = speed
         if is_autohypnosis:
@@ -3841,6 +3852,9 @@ def run_full_pipeline(
                 if is_podcast:
                     firestore_payload["format"] = "podcast"
                     firestore_payload["podcast"] = full_result["podcast"]
+                    if audio_playback_speed:
+                        firestore_payload["audioPlaybackSpeed"] = audio_playback_speed
+                        firestore_payload["generationOptions.audio_playback_speed"] = audio_playback_speed
                     if podcast_profile:
                         firestore_payload["script.durationProfile"] = podcast_profile["key"]
                         firestore_payload["podcast.duration_profile"] = podcast_profile["key"]
@@ -3854,7 +3868,7 @@ def run_full_pipeline(
                     firestore_payload["script.targetSeconds"] = result["metadata"].get("target_seconds")
                     firestore_payload["script.durationProfile"] = result["metadata"].get("duration_profile")
                     if is_youtube_shorts:
-                        speed = float(generation_options.get("audio_playback_speed") or 1.2)
+                        speed = audio_playback_speed or 1.2
                         firestore_payload["audioPlaybackSpeed"] = speed
                         firestore_payload["generationOptions.audio_playback_speed"] = speed
                     if tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:

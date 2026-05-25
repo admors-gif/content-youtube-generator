@@ -131,6 +131,27 @@ def test_youtube_shorts_native_agent_payload_uses_youtube_platform():
     assert payload["generation_options"]["audio_playback_speed"] == 1.2
 
 
+def test_podcast_v2_payload_adds_speed_without_touching_original():
+    original = api._validate_project_payload({
+        "title": "Por que confundimos intensidad con amor",
+        "agentId": "agent_podcast_general",
+        "agentFile": "agent_podcast_general.md",
+        "platform": "youtube",
+    })
+    v2 = api._validate_project_payload({
+        "title": "Por que confundimos intensidad con amor",
+        "agentId": "agent_podcast_general_v2",
+        "agentFile": "agent_podcast_general_v2.md",
+        "platform": "youtube",
+    })
+
+    assert original["format"] == "podcast"
+    assert "audio_playback_speed" not in original["generation_options"]
+    assert v2["format"] == "podcast"
+    assert v2["agent_file"] == "agent_podcast_general_v2.md"
+    assert v2["generation_options"]["audio_playback_speed"] == 1.2
+
+
 def test_youtube_publish_pack_has_native_shorts_cta():
     data = {
         "title": "Por que confundes ansiedad con amor",

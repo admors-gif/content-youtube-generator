@@ -726,6 +726,9 @@ _YOUTUBE_SHORTS_AGENT_IDS = {
 _YOUTUBE_SHORTS_FORMAT_BY_AGENT = {
     "agent_youtube_shorts_esto_no_es_amor": YOUTUBE_SHORTS_PODCAST_FORMAT,
 }
+_PODCAST_AUDIO_PLAYBACK_SPEED_BY_AGENT = {
+    "agent_podcast_general_v2": 1.2,
+}
 _TIKTOK_DURATION_ALIASES = {
     "60": "60s",
     "60s": "60s",
@@ -902,6 +905,7 @@ def _brand_profile_for_project(agent_id: str, data: dict) -> tuple[str, dict]:
     requested = str(data.get("brandProfileId") or data.get("brand_profile_id") or "").strip()
     should_use_default = agent_id in {
         "agent_podcast_general",
+        "agent_podcast_general_v2",
         "agent_podcast_mesa_redonda",
         "agent_tiktok_podcast",
         "agent_youtube_shorts_esto_no_es_amor",
@@ -1169,6 +1173,8 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
             "target_seconds": _TIKTOK_DURATION_SECONDS[duration_profile],
             "audio_playback_speed": 1.2,
         })
+    elif agent_id in _PODCAST_AUDIO_PLAYBACK_SPEED_BY_AGENT:
+        generation_options["audio_playback_speed"] = _PODCAST_AUDIO_PLAYBACK_SPEED_BY_AGENT[agent_id]
     elif agent_id == "agent_podcast_mesa_redonda":
         raw_duration_profile = duration_profile.replace(" ", "") or "extended"
         aliases = {
@@ -3179,6 +3185,7 @@ _AGENT_CATALOG = """
 [agent_viajes] Viajes y Exploraciones — Shackleton, Everest, lugares peligrosos del mundo
 [agent_noticias_virales] Noticias Virales — eventos actuales que están en tendencia esta semana
 [agent_podcast_general] Esto no es amor — conversación entre dos hosts (Mateo y Lucía) sobre cualquier tema, formato podcast multitema con dos voces alternando
+[agent_podcast_general_v2] Esto no es amor v2 — clon seguro del podcast original con Mateo y Lucia, mismo prompt y voces, audio final 1.2x
 [agent_youtube_shorts_esto_no_es_amor] Esto no es amor Shorts — shorts verticales nativos para YouTube con Mateo y Lucia, hook fuerte, ritmo rapido y CTA de suscripcion
 [agent_autohipnosis] Autohipnosis Guiada — wellness, relajación, visualización, afirmaciones positivas, desarrollo personal seguro
 [agent_meditacion_larga] Meditación Larga — sesiones de 30 min, 1 h y 3 h para sueño, calma, afirmaciones espaciadas y visuales lentos
@@ -3245,6 +3252,7 @@ _RADAR_EXTRA_AGENTS = [
 _RADAR_PRIORITY_AGENT_IDS = [
     RADAR_NEWS_AGENT_ID,
     "agent_podcast_general",
+    "agent_podcast_general_v2",
     "agent_podcast_mesa_redonda",
     "agent_youtube_shorts_esto_no_es_amor",
     "agent_tiktok_podcast",
@@ -3299,6 +3307,7 @@ def _radar_agent_catalog() -> list[dict]:
         "agent_viajes": "travel",
         "agent_noticias_virales": "news",
         "agent_podcast_general": "podcast",
+        "agent_podcast_general_v2": "podcast",
         "agent_youtube_shorts_esto_no_es_amor": "podcast",
         "agent_autohipnosis": "wellness",
         "agent_meditacion_larga": "wellness",
@@ -3312,7 +3321,7 @@ def _radar_agent_catalog() -> list[dict]:
         aid = match.group("id").strip()
         platform = "tiktok" if aid in _TIKTOK_AGENT_IDS else "youtube"
         project_format = _YOUTUBE_SHORTS_FORMAT_BY_AGENT.get(aid) or _TIKTOK_FORMAT_BY_AGENT.get(aid) or ""
-        if aid == "agent_podcast_general":
+        if aid.startswith("agent_podcast_"):
             project_format = "podcast"
         elif aid == "agent_autohipnosis":
             project_format = "autohipnosis"
@@ -8058,11 +8067,9 @@ def _chapter_lines_from_scenes(scenes: list) -> list[str]:
 
 
 def _is_podcast_project(data: dict) -> bool:
+    agent = data.get("agentId") or data.get("agent") or ""
     return (
-        (data.get("agentId") or data.get("agent")) in {
-            "agent_podcast_general",
-            "agent_podcast_mesa_redonda",
-        }
+        str(agent).startswith("agent_podcast_")
         or data.get("format") == "podcast"
     )
 

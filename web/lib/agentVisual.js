@@ -52,6 +52,7 @@ export const MONOGRAM_BY_AGENT_ID = {
   agent_viajes:           "Vj",
   agent_noticias_virales: "Nv",
   agent_podcast_general:  "Pc",
+  agent_podcast_general_v2: "V2",
   agent_podcast_mesa_redonda: "MR",
   agent_youtube_shorts_esto_no_es_amor: "YS",
   agent_autohipnosis:     "Ah",

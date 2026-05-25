@@ -426,6 +426,24 @@ export const SYSTEM_AGENTS = [
     color: "#14b8a6",
   },
   {
+    agentId: "agent_podcast_general_v2",
+    name: "Esto no es amor v2",
+    emoji: "🎙️",
+    description: "Clon seguro del podcast original con Mateo y Lucia. Mantiene prompt, voces y flujo; solo acelera el audio final a 1.2x.",
+    category: "podcast",
+    promptFile: "agent_podcast_general_v2.md",
+    tier: "creator",
+    format: "podcast",
+    defaultVoices: { host_a: "Will", host_b: "Lina" },
+    audioPlaybackSpeed: 1.2,
+    exampleTopics: [
+      "Por que confundimos intensidad con amor",
+      "La diferencia entre calma y aburrimiento emocional",
+      "Cuando alguien no te elige y aun asi no puedes soltar"
+    ],
+    color: "#0f766e",
+  },
+  {
     agentId: "agent_podcast_mesa_redonda",
     name: "Esto no es amor: Mesa redonda",
     emoji: "ðŸŽ™ï¸",
