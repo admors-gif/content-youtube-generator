@@ -444,6 +444,27 @@ export const SYSTEM_AGENTS = [
     color: "#0f766e",
   },
   {
+    agentId: "agent_podcast_general_v2_largo",
+    name: "Esto no es amor v2 largo",
+    emoji: "Podcast",
+    description: "Prueba aislada del v2 con guion mas largo, mismas voces y audio final 1.2x para validar si retiene mejor.",
+    category: "podcast",
+    promptFile: "agent_podcast_general_v2_largo.md",
+    tier: "creator",
+    format: "podcast",
+    defaultVoices: { host_a: "Will", host_b: "Lina" },
+    audioPlaybackSpeed: 1.2,
+    durationProfiles: [
+      { id: "long", label: "Largo", description: "Mas desarrollo emocional y ejemplos sin cambiar voces ni flujo.", targetMinutes: 26 },
+    ],
+    exampleTopics: [
+      "Alguna vez te enamoraste o solo te obsesionaste",
+      "Por que confundimos intensidad con amor",
+      "Cuando alguien no te elige y aun asi no puedes soltar"
+    ],
+    color: "#115e59",
+  },
+  {
     agentId: "agent_podcast_mesa_redonda",
     name: "Esto no es amor: Mesa redonda",
     emoji: "ðŸŽ™ï¸",

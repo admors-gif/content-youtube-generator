@@ -976,6 +976,7 @@ PODCAST_SPEAKER_NAMES = {
 PODCAST_SPEAKER_LINE_RE = _re.compile(r"^\s*(?:\[[^\]]+\]\s*)*([^\s:]+)\s*:\s*(.+)$")
 PODCAST_SHOW_NAME = "Esto no es amor"
 PODCAST_ROUNDTABLE_AGENT_FILE = "agent_podcast_mesa_redonda.md"
+PODCAST_V2_LONG_AGENT_FILE = "agent_podcast_general_v2_largo.md"
 PODCAST_ROUNDTABLE_VOICE_CONFIG_PATH = BASE_DIR / "config" / "podcast_mesa_redonda_voices.json"
 
 PODCAST_TARGET_VISUAL_SCENES = 12
@@ -989,6 +990,14 @@ PODCAST_DURATION_PROFILES = {
         "target_visual_scenes": PODCAST_TARGET_VISUAL_SCENES,
         "max_visual_scenes": PODCAST_MAX_VISUAL_SCENES,
     },
+    "long": {
+        "label": "long",
+        "characters_min": 22000,
+        "characters_max": 26000,
+        "max_tokens": 22000,
+        "target_visual_scenes": 16,
+        "max_visual_scenes": 18,
+    },
     "extended": {
         "label": "extended",
         "characters_min": 28000,
@@ -1001,22 +1010,39 @@ PODCAST_DURATION_PROFILES = {
 
 
 def _podcast_duration_profile(agent_file: str, requested_profile: str | None = None) -> dict:
+    default_key = (
+        "extended"
+        if agent_file == PODCAST_ROUNDTABLE_AGENT_FILE
+        else "long"
+        if agent_file == PODCAST_V2_LONG_AGENT_FILE
+        else "standard"
+    )
     raw = str(requested_profile or "").strip().lower().replace(" ", "")
     aliases = {
-        "": "extended" if agent_file == PODCAST_ROUNDTABLE_AGENT_FILE else "standard",
+        "": default_key,
         "normal": "standard",
         "std": "standard",
         "estandar": "standard",
         "standard": "standard",
-        "viernes": "extended",
-        "friday": "extended",
-        "largo": "extended",
-        "long": "extended",
-        "extended": "extended",
     }
+    if agent_file == PODCAST_ROUNDTABLE_AGENT_FILE:
+        aliases.update({
+            "viernes": "extended",
+            "friday": "extended",
+            "largo": "extended",
+            "long": "extended",
+            "extended": "extended",
+        })
+    else:
+        aliases.update({
+            "largo": "long",
+            "long": "long",
+            "v2largo": "long",
+            "extended": "extended",
+        })
     key = aliases.get(raw, raw)
     if key not in PODCAST_DURATION_PROFILES:
-        key = "extended" if agent_file == PODCAST_ROUNDTABLE_AGENT_FILE else "standard"
+        key = default_key
     return {"key": key, **PODCAST_DURATION_PROFILES[key]}
 
 
@@ -3025,6 +3051,11 @@ NO copies directo — los hosts hablan de la idea transformada, no recitan el ma
     profile = _podcast_duration_profile(agent_file, duration_profile)
     char_min = profile["characters_min"]
     char_max = profile["characters_max"]
+    duration_guidance = (
+        "- Perfil largo: da mas aire a cada idea, usa mas ejemplos concretos y transiciones limpias; no repitas frases para inflar duracion"
+        if profile["key"] == "long"
+        else ""
+    )
     if is_roundtable:
         format_requirements = f"""- {char_min:,} a {char_max:,} caracteres (estrictos)
 - Formato exacto: cada linea inicia con LUCIA:, TOMAS:, ELIZABETH:, AMARA:, DAVID: o MATEO: en mayusculas, seguido de dos puntos
@@ -3041,6 +3072,7 @@ NO copies directo — los hosts hablan de la idea transformada, no recitan el ma
         format_requirements = f"""- {char_min:,} a {char_max:,} caracteres (estrictos)
 - Formato exacto: cada linea inicia con MATEO: o LUCIA: en mayusculas, seguido de dos puntos
 - 10 secciones segun el ROLE definido en el system prompt
+{duration_guidance}
 - Cierra con LUCIA hablando
 - Tags emocionales solo del set permitido y con la densidad indicada
 - Idioma: espanol neutro de Latinoamerica

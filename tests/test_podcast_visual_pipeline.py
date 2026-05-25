@@ -8,6 +8,7 @@ from scripts.generate_content import (
     _group_blocks_into_scenes,
     _normalize_vertical_script_text,
     _parse_podcast_script,
+    _podcast_duration_profile,
     _strip_podcast_model_preamble,
     _tiktok_duration_profile,
     _with_podcast_duration_profile,
@@ -53,6 +54,21 @@ def test_podcast_duration_profile_is_embedded_in_parent_payload():
 
     assert payload["duration_profile"] == "standard"
     assert payload["show_name"] == "Esto no es amor"
+
+
+def test_podcast_v2_long_defaults_to_long_profile():
+    profile = _podcast_duration_profile("agent_podcast_general_v2_largo.md")
+
+    assert profile["key"] == "long"
+    assert profile["characters_min"] == 22000
+    assert profile["characters_max"] == 26000
+    assert profile["target_visual_scenes"] == 16
+
+
+def test_roundtable_largo_alias_still_uses_extended_profile():
+    profile = _podcast_duration_profile("agent_podcast_mesa_redonda.md", "largo")
+
+    assert profile["key"] == "extended"
 
 
 def test_podcast_visual_prompts_are_conceptual_and_text_safe():

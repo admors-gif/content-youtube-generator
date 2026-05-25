@@ -728,6 +728,10 @@ _YOUTUBE_SHORTS_FORMAT_BY_AGENT = {
 }
 _PODCAST_AUDIO_PLAYBACK_SPEED_BY_AGENT = {
     "agent_podcast_general_v2": 1.2,
+    "agent_podcast_general_v2_largo": 1.2,
+}
+_PODCAST_DEFAULT_DURATION_PROFILE_BY_AGENT = {
+    "agent_podcast_general_v2_largo": "long",
 }
 _TIKTOK_DURATION_ALIASES = {
     "60": "60s",
@@ -906,6 +910,7 @@ def _brand_profile_for_project(agent_id: str, data: dict) -> tuple[str, dict]:
     should_use_default = agent_id in {
         "agent_podcast_general",
         "agent_podcast_general_v2",
+        "agent_podcast_general_v2_largo",
         "agent_podcast_mesa_redonda",
         "agent_tiktok_podcast",
         "agent_youtube_shorts_esto_no_es_amor",
@@ -1175,6 +1180,25 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
         })
     elif agent_id in _PODCAST_AUDIO_PLAYBACK_SPEED_BY_AGENT:
         generation_options["audio_playback_speed"] = _PODCAST_AUDIO_PLAYBACK_SPEED_BY_AGENT[agent_id]
+        raw_duration_profile = (
+            duration_profile.replace(" ", "")
+            or _PODCAST_DEFAULT_DURATION_PROFILE_BY_AGENT.get(agent_id, "")
+        )
+        if raw_duration_profile:
+            aliases = {
+                "normal": "standard",
+                "std": "standard",
+                "estandar": "standard",
+                "standard": "standard",
+                "largo": "long",
+                "long": "long",
+                "v2largo": "long",
+                "extended": "extended",
+            }
+            normalized_duration_profile = aliases.get(raw_duration_profile, raw_duration_profile)
+            if normalized_duration_profile not in {"standard", "long", "extended"}:
+                raise HTTPException(status_code=400, detail="invalid durationProfile")
+            generation_options["duration_profile"] = normalized_duration_profile
     elif agent_id == "agent_podcast_mesa_redonda":
         raw_duration_profile = duration_profile.replace(" ", "") or "extended"
         aliases = {
@@ -3186,6 +3210,7 @@ _AGENT_CATALOG = """
 [agent_noticias_virales] Noticias Virales — eventos actuales que están en tendencia esta semana
 [agent_podcast_general] Esto no es amor — conversación entre dos hosts (Mateo y Lucía) sobre cualquier tema, formato podcast multitema con dos voces alternando
 [agent_podcast_general_v2] Esto no es amor v2 — clon seguro del podcast original con Mateo y Lucia, mismo prompt y voces, audio final 1.2x
+[agent_podcast_general_v2_largo] Esto no es amor v2 largo — clon seguro del v2 con guion mas desarrollado y audio final 1.2x
 [agent_youtube_shorts_esto_no_es_amor] Esto no es amor Shorts — shorts verticales nativos para YouTube con Mateo y Lucia, hook fuerte, ritmo rapido y CTA de suscripcion
 [agent_autohipnosis] Autohipnosis Guiada — wellness, relajación, visualización, afirmaciones positivas, desarrollo personal seguro
 [agent_meditacion_larga] Meditación Larga — sesiones de 30 min, 1 h y 3 h para sueño, calma, afirmaciones espaciadas y visuales lentos
@@ -3253,6 +3278,7 @@ _RADAR_PRIORITY_AGENT_IDS = [
     RADAR_NEWS_AGENT_ID,
     "agent_podcast_general",
     "agent_podcast_general_v2",
+    "agent_podcast_general_v2_largo",
     "agent_podcast_mesa_redonda",
     "agent_youtube_shorts_esto_no_es_amor",
     "agent_tiktok_podcast",
@@ -3308,6 +3334,7 @@ def _radar_agent_catalog() -> list[dict]:
         "agent_noticias_virales": "news",
         "agent_podcast_general": "podcast",
         "agent_podcast_general_v2": "podcast",
+        "agent_podcast_general_v2_largo": "podcast",
         "agent_youtube_shorts_esto_no_es_amor": "podcast",
         "agent_autohipnosis": "wellness",
         "agent_meditacion_larga": "wellness",

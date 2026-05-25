@@ -152,6 +152,21 @@ def test_podcast_v2_payload_adds_speed_without_touching_original():
     assert v2["generation_options"]["audio_playback_speed"] == 1.2
 
 
+def test_podcast_v2_long_payload_uses_long_profile_and_speed():
+    payload = api._validate_project_payload({
+        "title": "Alguna vez te enamoraste o solo te obsesionaste",
+        "agentId": "agent_podcast_general_v2_largo",
+        "agentFile": "agent_podcast_general_v2_largo.md",
+        "platform": "youtube",
+        "durationProfile": "long",
+    })
+
+    assert payload["format"] == "podcast"
+    assert payload["agent_file"] == "agent_podcast_general_v2_largo.md"
+    assert payload["generation_options"]["audio_playback_speed"] == 1.2
+    assert payload["generation_options"]["duration_profile"] == "long"
+
+
 def test_youtube_publish_pack_has_native_shorts_cta():
     data = {
         "title": "Por que confundes ansiedad con amor",
