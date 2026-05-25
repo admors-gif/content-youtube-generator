@@ -1020,6 +1020,13 @@ def _podcast_duration_profile(agent_file: str, requested_profile: str | None = N
     return {"key": key, **PODCAST_DURATION_PROFILES[key]}
 
 
+def _with_podcast_duration_profile(podcast_payload: dict | None, podcast_profile: dict | None) -> dict:
+    payload = dict(podcast_payload or {})
+    if podcast_profile:
+        payload["duration_profile"] = podcast_profile["key"]
+    return payload
+
+
 def _load_roundtable_voice_config() -> dict:
     try:
         with open(PODCAST_ROUNDTABLE_VOICE_CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -3716,6 +3723,11 @@ def run_full_pipeline(
                 "host_b": {"name": "Lucía", "voice": "Lina"},
                 "total_blocks": len(podcast_blocks),
             }
+        if is_podcast:
+            full_result["podcast"] = _with_podcast_duration_profile(
+                full_result.get("podcast"),
+                podcast_profile,
+            )
         if is_podcast and audio_playback_speed:
             full_result["audio_playback_speed"] = audio_playback_speed
             full_result["podcast"]["audio_playback_speed"] = audio_playback_speed
@@ -3857,7 +3869,6 @@ def run_full_pipeline(
                         firestore_payload["generationOptions.audio_playback_speed"] = audio_playback_speed
                     if podcast_profile:
                         firestore_payload["script.durationProfile"] = podcast_profile["key"]
-                        firestore_payload["podcast.duration_profile"] = podcast_profile["key"]
                 if is_vertical_short:
                     firestore_payload["platform"] = "youtube" if is_youtube_shorts else "tiktok"
                     firestore_payload["format"] = tiktok_format

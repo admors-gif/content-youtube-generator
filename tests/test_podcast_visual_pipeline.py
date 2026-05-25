@@ -10,6 +10,7 @@ from scripts.generate_content import (
     _parse_podcast_script,
     _strip_podcast_model_preamble,
     _tiktok_duration_profile,
+    _with_podcast_duration_profile,
 )
 
 
@@ -42,6 +43,16 @@ def test_podcast_dialogue_blocks_are_preserved_when_capped():
     assert len(scenes) <= 15
     assert len(preserved) == len(blocks)
     assert [b["text"] for b in preserved] == [b["text"] for b in blocks]
+
+
+def test_podcast_duration_profile_is_embedded_in_parent_payload():
+    payload = _with_podcast_duration_profile(
+        {"show_name": "Esto no es amor", "total_blocks": 12},
+        {"key": "standard"},
+    )
+
+    assert payload["duration_profile"] == "standard"
+    assert payload["show_name"] == "Esto no es amor"
 
 
 def test_podcast_visual_prompts_are_conceptual_and_text_safe():
