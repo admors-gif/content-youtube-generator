@@ -1,0 +1,165 @@
+name: Recover script result from disk
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: "Firestore project id"
+        required: true
+      status_after_recovery:
+        description: "Project status after restoring script data"
+        required: false
+        default: "draft"
+      force:
+        description: "Overwrite existing script.plain if present"
+        required: false
+        default: "false"
+
+concurrency:
+  group: recover-script-${{ github.event.inputs.project_id }}
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Restore script/scenes from FULL json on VPS
+    runs-on: [self-hosted, linux, vps, docker]
+    timeout-minutes: 10
+
+    steps:
+      - name: Restore Firestore script payload
+        run: |
+          set -euo pipefail
+          PID="${{ github.event.inputs.project_id }}"
+          STATUS_AFTER="${{ github.event.inputs.status_after_recovery }}"
+          FORCE="${{ github.event.inputs.force }}"
+          docker exec -i content-factory python - "$PID" "$STATUS_AFTER" "$FORCE" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          project_id = sys.argv[1]
+          status_after = (sys.argv[2] or "draft").strip() or "draft"
+          force = str(sys.argv[3] or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+          if status_after not in {"draft", "script_ready"}:
+              raise SystemExit("status_after_recovery must be draft or script_ready")
+
+          import api
+          from firebase_admin import firestore
+
+          api._ensure_firebase_initialized()
+          db = firestore.client()
+          doc_ref = db.collection("projects").document(project_id)
+          snap = doc_ref.get()
+          if not snap.exists:
+              raise SystemExit(f"project not found: {project_id}")
+
+          project = snap.to_dict() or {}
+          if ((project.get("script") or {}).get("plain")) and not force:
+              print(json.dumps({
+                  "ok": True,
+                  "skipped": True,
+                  "reason": "project already has script.plain",
+                  "projectId": project_id,
+              }, ensure_ascii=False, indent=2))
+              raise SystemExit(0)
+
+          title = (project.get("title") or "").strip()
+          agent_file = (project.get("agentFile") or "").strip()
+          scripts_dir = Path("/app/output/scripts")
+
+          matches = []
+          for path in sorted(scripts_dir.glob("FULL_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+              try:
+                  with path.open("r", encoding="utf-8") as handle:
+                      payload = json.load(handle)
+              except Exception:
+                  continue
+              if title and str(payload.get("topic") or "").strip() != title:
+                  continue
+              if agent_file and str(payload.get("agent") or "").strip() != agent_file:
+                  continue
+              if not payload.get("script_plain") or not payload.get("video_scenes"):
+                  continue
+              matches.append((path, payload))
+              break
+
+          if not matches:
+              recent = [p.name for p in sorted(scripts_dir.glob("FULL_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:12]]
+              raise SystemExit(json.dumps({
+                  "ok": False,
+                  "error": "no matching FULL json found",
+                  "projectId": project_id,
+                  "title": title,
+                  "agentFile": agent_file,
+                  "recentFullFiles": recent,
+              }, ensure_ascii=False, indent=2))
+
+          full_path, result = matches[0]
+          script_plain = str(result.get("script_plain") or "")
+          script_tagged = str(result.get("script_tagged") or script_plain)
+          scenes = result.get("video_scenes") if isinstance(result.get("video_scenes"), list) else []
+          words = len(script_plain.split())
+          estimated_minutes = round(words / 130, 1) if words else 0
+
+          update = {
+              "status": status_after,
+              "brandProfileId": result.get("brandProfileId") or project.get("brandProfileId") or "",
+              "brandProfile": result.get("brandProfile") or project.get("brandProfile") or {},
+              "script.plain": script_plain,
+              "script.tagged": script_tagged,
+              "script.wordCount": words,
+              "script.estimatedMinutes": estimated_minutes,
+              "script.approved": False,
+              "scenes": scenes,
+              "seo": result.get("seo_metadata") or {},
+              "format": result.get("format") or project.get("format") or "",
+              "platform": result.get("platform") or project.get("platform") or "",
+              "progress.percent": 100,
+              "progress.stepName": "Guion recuperado desde disco",
+              "completedAt": firestore.SERVER_TIMESTAMP,
+              "recoveredScriptFromDisk": True,
+              "recoveredScriptPath": str(full_path),
+              "recoveryPreviousStatus": project.get("status") or "",
+              "recoveryPreviousProgress": project.get("progress") or {},
+          }
+
+          for key in (
+              "podcast",
+              "youtubeShorts",
+              "tiktok",
+              "autohipnosis",
+              "longMeditation",
+              "customAgent",
+              "sourceInspiration",
+              "publicFigureVisuals",
+          ):
+              value = result.get(key)
+              if value:
+                  update[key] = value
+
+          speed = result.get("audio_playback_speed")
+          if speed:
+              update["audioPlaybackSpeed"] = speed
+              update["generationOptions.audio_playback_speed"] = speed
+
+          duration_profile = ((result.get("podcast") or {}).get("duration_profile")
+                              or (result.get("youtubeShorts") or {}).get("duration_profile")
+                              or (result.get("tiktok") or {}).get("duration_profile"))
+          if duration_profile:
+              update["script.durationProfile"] = duration_profile
+
+          doc_ref.update(update)
+
+          print(json.dumps({
+              "ok": True,
+              "projectId": project_id,
+              "statusAfterRecovery": status_after,
+              "path": str(full_path),
+              "title": title,
+              "agentFile": agent_file,
+              "words": words,
+              "estimatedMinutes": estimated_minutes,
+              "scenes": len(scenes),
+              "audioPlaybackSpeed": speed,
+          }, ensure_ascii=False, indent=2))
+          PY
