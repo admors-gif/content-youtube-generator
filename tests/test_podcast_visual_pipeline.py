@@ -4,6 +4,7 @@ from scripts.generate_content import (
     YOUTUBE_SHORTS_PODCAST_FORMAT,
     _build_podcast_visual_scenes,
     _build_tiktok_visual_scenes,
+    _create_claude_message_text,
     _emotion_prompt_file_for_format,
     _group_blocks_into_scenes,
     _normalize_vertical_script_text,
@@ -69,6 +70,52 @@ def test_roundtable_largo_alias_still_uses_extended_profile():
     profile = _podcast_duration_profile("agent_podcast_mesa_redonda.md", "largo")
 
     assert profile["key"] == "extended"
+
+
+def test_claude_message_text_uses_streaming_when_requested():
+    class FakeStream:
+        text_stream = iter(["MATEO: Una idea.", "\nLUCIA: Otra idea."])
+
+        def get_final_message(self):
+            return None
+
+    class FakeStreamManager:
+        def __init__(self):
+            self.stream = FakeStream()
+
+        def __enter__(self):
+            return self.stream
+
+        def __exit__(self, *_args):
+            return False
+
+    class FakeMessages:
+        def __init__(self):
+            self.stream_called = False
+
+        def stream(self, **_kwargs):
+            self.stream_called = True
+            return FakeStreamManager()
+
+        def create(self, **_kwargs):
+            raise AssertionError("non-streaming create should not be called")
+
+    class FakeClient:
+        def __init__(self):
+            self.messages = FakeMessages()
+
+    client = FakeClient()
+    text = _create_claude_message_text(
+        client,
+        use_stream=True,
+        model="claude-test",
+        max_tokens=22000,
+        system="system",
+        messages=[{"role": "user", "content": "tema"}],
+    )
+
+    assert client.messages.stream_called is True
+    assert text == "MATEO: Una idea.\nLUCIA: Otra idea."
 
 
 def test_podcast_visual_prompts_are_conceptual_and_text_safe():

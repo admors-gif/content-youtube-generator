@@ -1053,6 +1053,35 @@ def _with_podcast_duration_profile(podcast_payload: dict | None, podcast_profile
     return payload
 
 
+def _extract_claude_message_text(message) -> str:
+    parts = []
+    for block in getattr(message, "content", []) or []:
+        text = getattr(block, "text", None)
+        if text is None and isinstance(block, dict):
+            text = block.get("text")
+        if text:
+            parts.append(str(text))
+    return "".join(parts).strip()
+
+
+def _create_claude_message_text(client, *, use_stream: bool = False, **kwargs) -> str:
+    if use_stream:
+        chunks = []
+        final_message = None
+        with client.messages.stream(**kwargs) as stream:
+            for text in stream.text_stream:
+                chunks.append(text)
+            try:
+                final_message = stream.get_final_message()
+            except Exception:
+                final_message = None
+        streamed_text = "".join(chunks).strip()
+        return streamed_text or _extract_claude_message_text(final_message)
+
+    response = client.messages.create(**kwargs)
+    return _extract_claude_message_text(response)
+
+
 def _load_roundtable_voice_config() -> dict:
     try:
         with open(PODCAST_ROUNDTABLE_VOICE_CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -3088,13 +3117,17 @@ Requisitos estrictos:
 Devuelve solo el guión, sin headers ni comentarios."""
 
     if claude_client:
-        response = claude_client.messages.create(
+        use_stream = profile["max_tokens"] >= 20000
+        if use_stream:
+            print("   🌊 Claude streaming activado para guion largo")
+        script_text = _create_claude_message_text(
+            claude_client,
             model=CLAUDE_MODEL_SCRIPT,
             max_tokens=profile["max_tokens"],
             system=agent_prompt,
             messages=[{"role": "user", "content": user_message}],
+            use_stream=use_stream,
         )
-        script_text = response.content[0].text
         used_model = CLAUDE_MODEL_SCRIPT
     else:
         response = openai_client.chat.completions.create(
