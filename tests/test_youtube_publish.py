@@ -122,13 +122,13 @@ def test_youtube_shorts_native_agent_payload_uses_youtube_platform():
         "agentId": "agent_youtube_shorts_esto_no_es_amor",
         "agentFile": "agent_youtube_shorts_esto_no_es_amor.md",
         "platform": "youtube",
-        "durationProfile": "shorts90",
+        "durationProfile": "shorts75",
     })
 
     assert payload["platform"] == "youtube"
     assert payload["format"] == api.YOUTUBE_SHORTS_PODCAST_FORMAT
-    assert payload["youtube_shorts"]["targetSeconds"] == 90
-    assert payload["generation_options"]["audio_playback_speed"] == 1.2
+    assert payload["youtube_shorts"]["targetSeconds"] == 75
+    assert payload["generation_options"]["audio_playback_speed"] == 1.25
 
 
 def test_podcast_v2_payload_adds_speed_without_touching_original():

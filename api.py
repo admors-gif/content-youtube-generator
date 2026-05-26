@@ -739,6 +739,10 @@ _TIKTOK_DURATION_ALIASES = {
     "1m": "60s",
     "90": "90s",
     "90s": "90s",
+    "75": "shorts75",
+    "75s": "shorts75",
+    "shorts75": "shorts75",
+    "75shorts": "shorts75",
     "shorts90": "shorts90",
     "90shorts": "shorts90",
     "3": "3m",
@@ -757,6 +761,7 @@ _TIKTOK_DURATION_ALIASES = {
 _TIKTOK_DURATION_SECONDS = {
     "60s": 60,
     "90s": 90,
+    "shorts75": 75,
     "shorts90": 90,
     "3m": 180,
     "5m": 300,
@@ -1150,9 +1155,9 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
             "target_seconds": _TIKTOK_DURATION_SECONDS[duration_profile],
         })
     elif agent_id in _YOUTUBE_SHORTS_AGENT_IDS:
-        duration_key = duration_profile.replace(" ", "") or "shorts90"
+        duration_key = duration_profile.replace(" ", "") or "shorts75"
         duration_profile = _TIKTOK_DURATION_ALIASES.get(duration_key, duration_key)
-        if duration_profile != "shorts90":
+        if duration_profile not in {"shorts75", "shorts90"}:
             raise HTTPException(status_code=400, detail="invalid durationProfile")
         source_genre = (
             data.get("sourceGenre")
@@ -1168,7 +1173,7 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
             "durationProfile": duration_profile,
             "targetSeconds": _TIKTOK_DURATION_SECONDS[duration_profile],
             "sourceGenre": source_genre,
-            "audioPlaybackSpeed": 1.2,
+            "audioPlaybackSpeed": 1.25,
         }
         generation_options.update({
             "platform": "youtube",
@@ -1176,7 +1181,7 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
             "duration_profile": duration_profile,
             "source_genre": source_genre,
             "target_seconds": _TIKTOK_DURATION_SECONDS[duration_profile],
-            "audio_playback_speed": 1.2,
+            "audio_playback_speed": 1.25,
         })
     elif agent_id in _PODCAST_AUDIO_PLAYBACK_SPEED_BY_AGENT:
         generation_options["audio_playback_speed"] = _PODCAST_AUDIO_PLAYBACK_SPEED_BY_AGENT[agent_id]
@@ -3211,7 +3216,7 @@ _AGENT_CATALOG = """
 [agent_podcast_general] Esto no es amor — conversación entre dos hosts (Mateo y Lucía) sobre cualquier tema, formato podcast multitema con dos voces alternando
 [agent_podcast_general_v2] Esto no es amor v2 — clon seguro del podcast original con Mateo y Lucia, mismo prompt y voces, audio final 1.2x
 [agent_podcast_general_v2_largo] Esto no es amor v2 largo — clon seguro del v2 con guion mas desarrollado y audio final 1.2x
-[agent_youtube_shorts_esto_no_es_amor] Esto no es amor Shorts — shorts verticales nativos para YouTube con Mateo y Lucia, hook fuerte, ritmo rapido y CTA de suscripcion
+[agent_youtube_shorts_esto_no_es_amor] Esto no es amor Shorts — shorts verticales nativos para YouTube con Mateo y Lucia, 75s a 1.25x, hook fuerte y CTA de suscripcion
 [agent_autohipnosis] Autohipnosis Guiada — wellness, relajación, visualización, afirmaciones positivas, desarrollo personal seguro
 [agent_meditacion_larga] Meditación Larga — sesiones de 30 min, 1 h y 3 h para sueño, calma, afirmaciones espaciadas y visuales lentos
 [agent_meditacion_larga_v2] Meditación Inmersiva — sesiones largas con respiración acompañada, visualización profunda e integración emocional segura
@@ -3230,7 +3235,7 @@ _RADAR_EXTRA_AGENTS = [
     {
         "agentId": "agent_youtube_shorts_esto_no_es_amor",
         "name": "Esto no es amor: YouTube Shorts",
-        "description": "Shorts verticales nativos con Mateo y Lucia, hook fuerte, ritmo rapido y CTA de suscripcion",
+        "description": "Shorts verticales nativos con Mateo y Lucia, 75s a 1.25x, hook fuerte y CTA de suscripcion",
         "category": "podcast",
         "platform": "youtube",
         "format": YOUTUBE_SHORTS_PODCAST_FORMAT,
@@ -4664,7 +4669,7 @@ def _radar_project_payload_from_candidate(candidate: dict) -> dict:
         category = str(candidate.get("category") or "").lower()
         payload["sourceGenre"] = category if category in _TIKTOK_SOURCE_GENRES else "psychology"
     if agent_id in _YOUTUBE_SHORTS_AGENT_IDS:
-        payload.setdefault("durationProfile", "shorts90")
+        payload.setdefault("durationProfile", "shorts75")
         payload["sourceGenre"] = "psychology"
     if agent_id == "agent_meditacion_larga":
         payload.setdefault("durationProfile", "60m")

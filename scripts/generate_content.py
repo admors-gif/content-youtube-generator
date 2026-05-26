@@ -1617,6 +1617,7 @@ YOUTUBE_SHORTS_FORMAT_BY_AGENT = {
 TIKTOK_DURATION_PROFILES = {
     "60s": {"target_seconds": 60, "word_min": 120, "word_max": 170, "visual_min": 3, "visual_max": 5},
     "90s": {"target_seconds": 90, "word_min": 180, "word_max": 250, "visual_min": 3, "visual_max": 5},
+    "shorts75": {"target_seconds": 75, "word_min": 190, "word_max": 220, "word_hard_max": 240, "visual_min": 5, "visual_max": 5},
     "shorts90": {"target_seconds": 90, "word_min": 220, "word_max": 300, "visual_min": 6, "visual_max": 6},
     "3m": {"target_seconds": 180, "word_min": 350, "word_max": 500, "visual_min": 6, "visual_max": 8},
     "5m": {"target_seconds": 300, "word_min": 650, "word_max": 850, "visual_min": 8, "visual_max": 12},
@@ -1706,6 +1707,10 @@ def _tiktok_duration_profile(duration_profile: str | None) -> dict:
         "60": "60s",
         "1m": "60s",
         "90": "90s",
+        "75": "shorts75",
+        "75s": "shorts75",
+        "shorts75": "shorts75",
+        "75shorts": "shorts75",
         "shorts90": "shorts90",
         "90shorts": "shorts90",
         "3": "3m",
@@ -1833,6 +1838,330 @@ def _score_tiktok_script(script: str, profile: dict) -> dict:
         "clarityScore": min(100, clarity_score),
         "platformFitScore": min(100, platform_score),
     }
+
+
+YOUTUBE_SHORTS_QUALITY_THRESHOLDS = {
+    "overall": 90,
+    "hookScore": 85,
+    "emotionScore": 80,
+    "retentionScore": 85,
+}
+
+
+def _clamp_score(value) -> int:
+    return max(0, min(100, round(float(value or 0))))
+
+
+def _score_text_key(text: str) -> str:
+    normalized = unicodedata.normalize("NFD", str(text or "").lower())
+    return "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+
+
+def _count_scoring_terms(text: str, terms: list[str]) -> int:
+    lower = _score_text_key(text)
+    total = 0
+    for term in terms:
+        normalized_term = _score_text_key(term)
+        total += len(_re.findall(rf"(?<!\w){_re.escape(normalized_term)}(?!\w)", lower))
+    return total
+
+
+def _score_vertical_short_script(script: str, vertical_format: str = "") -> dict:
+    clean = str(script or "").strip()
+    if len(clean) < 50:
+        return {
+            "overall": 0,
+            "hookScore": 0,
+            "hooks": 0,
+            "emotionScore": 0,
+            "pacingScore": 0,
+            "structureScore": 0,
+            "retentionScore": 0,
+            "avgWordsPerSentence": 0,
+            "wordCount": 0,
+        }
+
+    words = clean.split()
+    word_count = len(words)
+    lines = [line.strip() for line in clean.splitlines() if line.strip()]
+    sentences = [sentence.strip() for sentence in _re.split(r"[.!?…]+", clean) if sentence.strip()]
+    first_line = lines[0] if lines else ""
+    first_line_words = len(first_line.split())
+    avg_sentence_words = word_count / max(1, len(sentences))
+    is_podcast = vertical_format in {"tiktok_podcast", YOUTUBE_SHORTS_PODCAST_FORMAT}
+
+    hook_terms = [
+        "no es amor",
+        "apego",
+        "ansiedad",
+        "obsesion",
+        "nadie te dice",
+        "si te pasa esto",
+        "la verdad",
+        "deja de",
+        "por que",
+        "porque",
+        "extranas",
+        "confundes",
+        "te eliges",
+    ]
+    emotional_terms = [
+        "amor",
+        "apego",
+        "ansiedad",
+        "abandono",
+        "rechazo",
+        "herida",
+        "duelo",
+        "obsesion",
+        "dependencia",
+        "autoestima",
+        "soltar",
+        "ghosting",
+        "limite",
+        "dolor",
+        "paz",
+    ]
+    retention_terms = [
+        "pero",
+        "sin embargo",
+        "a veces",
+        "lo que pasa",
+        "la pregunta",
+        "el problema",
+        "no extranas",
+        "no estas",
+        "en realidad",
+        "hasta que",
+        "porque",
+    ]
+    cta_terms = [
+        "comenta",
+        "guarda",
+        "sigueme",
+        "suscribete",
+        "canal",
+        "quedate",
+        "parte 2",
+        "episodio completo",
+    ]
+
+    speaker_turns = len(_re.findall(r"^[A-ZÁÉÍÓÚÑ]{3,12}:", clean, flags=_re.MULTILINE))
+    question_count = clean.count("?")
+    hook_term_count = _count_scoring_terms(clean, hook_terms)
+    emotion_count = _count_scoring_terms(clean, emotional_terms)
+    retention_count = _count_scoring_terms(clean, retention_terms)
+    cta_count = _count_scoring_terms(clean, cta_terms)
+
+    ideal_min = 120 if vertical_format == "tiktok_documentary" else 95
+    ideal_max = 500 if vertical_format == "tiktok_documentary" else 260
+    if word_count >= ideal_min and word_count <= ideal_max:
+        length_fit = 18
+    elif word_count < ideal_min:
+        length_fit = max(0, 18 - (ideal_min - word_count) / 6)
+    else:
+        length_fit = max(4, 18 - (word_count - ideal_max) / 18)
+
+    hook_score = _clamp_score(
+        46
+        + (18 if 4 <= first_line_words <= 18 else 6)
+        + min(hook_term_count * 7, 22)
+        + min(question_count * 5, 12)
+    )
+    emotion_score = _clamp_score(
+        42 + min(emotion_count * 6, 46) + (8 if "esto no es amor" in _score_text_key(clean) else 0)
+    )
+    rhythm_score = _clamp_score(
+        44
+        + (24 if 5 <= avg_sentence_words <= 16 else 10)
+        + min(len(lines) * 2, 16)
+        + (14 if is_podcast and speaker_turns >= 4 else 0)
+    )
+    structure_score = _clamp_score(
+        36
+        + length_fit
+        + (14 if len(lines) >= 5 else len(lines) * 2)
+        + min(speaker_turns * 4, 22 if is_podcast else 10)
+        + min(cta_count * 8, 16)
+    )
+    retention_score = _clamp_score(
+        40
+        + min(retention_count * 7, 35)
+        + min(question_count * 4, 12)
+        + min(cta_count * 8, 16)
+        + (8 if word_count <= ideal_max + 80 else 0)
+    )
+    overall = _clamp_score(
+        hook_score * 0.24
+        + emotion_score * 0.22
+        + rhythm_score * 0.18
+        + structure_score * 0.18
+        + retention_score * 0.18
+    )
+
+    return {
+        "overall": overall,
+        "hookScore": hook_score,
+        "hooks": hook_term_count + question_count,
+        "emotionScore": emotion_score,
+        "pacingScore": rhythm_score,
+        "structureScore": structure_score,
+        "retentionScore": retention_score,
+        "avgWordsPerSentence": round(avg_sentence_words),
+        "wordCount": word_count,
+    }
+
+
+def _youtube_shorts_quality_passed(scores: dict) -> bool:
+    return all(int(scores.get(key, 0)) >= minimum for key, minimum in YOUTUBE_SHORTS_QUALITY_THRESHOLDS.items())
+
+
+def _youtube_shorts_quality_feedback(scores: dict) -> str:
+    notes = []
+    labels = {
+        "overall": "indice general",
+        "hookScore": "hook",
+        "emotionScore": "emocion",
+        "retentionScore": "retencion",
+    }
+    for key, minimum in YOUTUBE_SHORTS_QUALITY_THRESHOLDS.items():
+        value = int(scores.get(key, 0))
+        if value < minimum:
+            notes.append(f"{labels[key]} {value}/{minimum}")
+    return ", ".join(notes) if notes else "pasa el filtro"
+
+
+def _fallback_youtube_shorts_script(topic: str) -> str:
+    topic_text = " ".join(str(topic or "esta historia").split()).strip()
+    return (
+        "MATEO: Si te obsesionas con quien no te elige, cuidado: esto no es amor.\n"
+        f"LUCIA: Porque {topic_text} puede sentirse como destino, pero muchas veces es ansiedad.\n"
+        "MATEO: Quedate, porque esto puede ahorrarte semanas de obsesion y dolor.\n"
+        "LUCIA: No estas esperando un mensaje. Estas esperando sentir que por fin vales.\n"
+        "MATEO: Y ahi aparece el apego: el rechazo se vuelve reto y la herida se disfraza de esperanza.\n"
+        "LUCIA: El problema no es que sientas mucho. El problema es que confundas dolor con profundidad.\n"
+        "MATEO: En realidad, tu cuerpo no esta buscando amor. Esta buscando cerrar algo viejo.\n"
+        "LUCIA: Por eso la ausencia se siente como promesa, pero solo esta tocando tu autoestima.\n"
+        "MATEO: Si tienes que adivinar, no es claridad. Si tienes que perseguir, no es cuidado.\n"
+        "LUCIA: El amor no te deja sin paz para demostrarte que existe.\n"
+        "MATEO: Soltar no es perder. A veces es dejar de negociar con una herida.\n"
+        "LUCIA: La pregunta no es por que no te eligio. Es por que tu paz depende de esa eleccion.\n"
+        "LUCIA: Suscribete. En este canal aprendemos a distinguir amor de ansiedad antes de rompernos por dentro."
+    )
+
+
+def _request_youtube_shorts_rewrite(
+    *,
+    topic: str,
+    system_prompt: str,
+    prompt_payload: dict,
+    script: str,
+    scores: dict,
+    attempt: int,
+) -> dict | None:
+    rewrite_prompt = (
+        "Reescribe el guion de YouTube Shorts porque no paso el filtro de retencion.\n"
+        "Responde SOLO JSON valido con las claves: script, beats, caption, hashtags, scores.\n"
+        "No expliques nada fuera del JSON.\n\n"
+        "CONTRATO OBLIGATORIO:\n"
+        "- 190 a 220 palabras. Maximo absoluto: 240.\n"
+        "- 12 a 18 turnos, solo LUCIA: y MATEO:.\n"
+        "- Primera linea de maximo 18 palabras con 'no es amor' y ansiedad, apego, herida, rechazo u obsesion.\n"
+        "- Tercera linea con promesa explicita: 'Quedate, porque...' o equivalente.\n"
+        "- Al menos seis terminos emocionales naturales: amor, apego, ansiedad, rechazo, herida, autoestima, dolor, paz, soltar, obsesion.\n"
+        "- Al menos cuatro conectores de retencion: pero, porque, en realidad, el problema, no estas, hasta que.\n"
+        "- Cierre con CTA fuerte de suscripcion o permanencia en el canal.\n"
+        "- No uses markdown, listas, nombres de voces ni explicaciones tecnicas.\n\n"
+        f"TEMA: {topic}\n"
+        f"INTENTO: {attempt}\n"
+        f"SCORES ACTUALES: {json.dumps(scores, ensure_ascii=False)}\n"
+        f"CONTRATO ORIGINAL: {json.dumps(prompt_payload, ensure_ascii=False)}\n\n"
+        "GUION ACTUAL:\n"
+        f"{script}"
+    )
+    try:
+        if claude_client:
+            response = claude_client.messages.create(
+                model=CLAUDE_MODEL_SCRIPT,
+                max_tokens=5000,
+                system=system_prompt,
+                messages=[{"role": "user", "content": rewrite_prompt}],
+            )
+            return _extract_json_object(response.content[0].text)
+        if openai_client:
+            response = openai_client.chat.completions.create(
+                model=GPT_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": rewrite_prompt},
+                ],
+                response_format={"type": "json_object"},
+                max_completion_tokens=5000,
+            )
+            return _extract_json_object(response.choices[0].message.content)
+    except Exception as exc:
+        print(f"   ⚠️  Rewrite YouTube Shorts omitido: {exc}")
+    return None
+
+
+def _ensure_youtube_shorts_quality(
+    *,
+    topic: str,
+    data: dict,
+    script: str,
+    system_prompt: str,
+    prompt_payload: dict,
+    project_id: str | None = None,
+) -> tuple[dict, str, dict]:
+    best_data = dict(data or {})
+    best_script = _normalize_vertical_script_text(script)
+    best_scores = _score_vertical_short_script(best_script, YOUTUBE_SHORTS_PODCAST_FORMAT)
+
+    for attempt in range(1, 3):
+        if _youtube_shorts_quality_passed(best_scores):
+            break
+        feedback = _youtube_shorts_quality_feedback(best_scores)
+        print(f"   ⚙️  YouTube Shorts quality gate: reescritura {attempt} ({feedback})")
+        if project_id:
+            update_progress(
+                project_id,
+                "Reforzando hook, emocion y CTA antes de producir...",
+                18 + attempt * 4,
+                {"status": "scripting", "qualityGate": best_scores},
+            )
+        revised = _request_youtube_shorts_rewrite(
+            topic=topic,
+            system_prompt=system_prompt,
+            prompt_payload=prompt_payload,
+            script=best_script,
+            scores=best_scores,
+            attempt=attempt,
+        )
+        revised_script = _normalize_vertical_script_text(revised.get("script")) if isinstance(revised, dict) else ""
+        if not revised_script:
+            break
+        revised_scores = _score_vertical_short_script(revised_script, YOUTUBE_SHORTS_PODCAST_FORMAT)
+        if revised_scores.get("overall", 0) >= best_scores.get("overall", 0):
+            best_data = {**best_data, **revised}
+            best_script = revised_script
+            best_scores = revised_scores
+
+    if not _youtube_shorts_quality_passed(best_scores):
+        fallback_script = _fallback_youtube_shorts_script(topic)
+        fallback_scores = _score_vertical_short_script(fallback_script, YOUTUBE_SHORTS_PODCAST_FORMAT)
+        if fallback_scores.get("overall", 0) >= best_scores.get("overall", 0):
+            print("   ⚙️  YouTube Shorts quality gate: usando fallback de alto rendimiento")
+            best_script = fallback_script
+            best_scores = fallback_scores
+            best_data = {
+                **best_data,
+                "script": fallback_script,
+                "caption": best_data.get("caption") or f"{topic}. Suscribete para distinguir amor de ansiedad.",
+                "hashtags": best_data.get("hashtags") or _tiktok_hashtags(topic, YOUTUBE_SHORTS_PODCAST_FORMAT),
+            }
+
+    best_data["script"] = best_script
+    return best_data, best_script, best_scores
 
 
 def _relationship_visual_context(topic: str) -> dict:
@@ -1967,6 +2296,7 @@ def _generate_tiktok_script_common(
         "durationProfile": profile["id"],
         "targetSeconds": profile["target_seconds"],
         "wordRange": [profile["word_min"], profile["word_max"]],
+        "wordHardMax": profile.get("word_hard_max") or profile["word_max"],
         "sourceGenre": genre_label,
         "personalization": personalization,
         "brandProfile": {
@@ -1982,6 +2312,7 @@ def _generate_tiktok_script_common(
         "beats debe ser una lista de objetos con label, purpose y timeRange aproximado.\n"
         "scores debe incluir hookScore, retentionScore, clarityScore y platformFitScore.\n"
         "El guion debe respetar el rango de palabras y no exceder 10 minutos.\n"
+        "Si el contrato incluye wordHardMax, nunca lo excedas.\n"
         "Para formatos de micro-podcast vertical, el guion debe alternar LUCIA y MATEO con turnos breves, hook inmediato, "
         "giro emocional antes de la mitad y cierre con comentario/guardado/parte 2. "
         "El CTA final debe sonar humano y puede usar el banco de CTAs de marca; debe decirlo LUCIA o MATEO como parte natural de la conversación, no como anuncio.\n\n"
@@ -2021,6 +2352,17 @@ def _generate_tiktok_script_common(
         data = _fallback_tiktok_script(topic, tiktok_format, profile, source_genre)
         script = _normalize_vertical_script_text(data.get("script"))
 
+    quality_scores = {}
+    if tiktok_format == YOUTUBE_SHORTS_PODCAST_FORMAT:
+        data, script, quality_scores = _ensure_youtube_shorts_quality(
+            topic=topic,
+            data=data,
+            script=script,
+            system_prompt=system_prompt,
+            prompt_payload=prompt_payload,
+            project_id=project_id,
+        )
+
     data["script"] = script
     beats = data.get("beats") if isinstance(data.get("beats"), list) else []
     hashtags = data.get("hashtags") or _tiktok_hashtags(topic, tiktok_format)
@@ -2028,6 +2370,16 @@ def _generate_tiktok_script_common(
         hashtags = [h for h in hashtags.split() if h.startswith("#")]
     scores = data.get("scores") if isinstance(data.get("scores"), dict) else {}
     scores = {**_score_tiktok_script(script, profile), **scores}
+    if tiktok_format == YOUTUBE_SHORTS_PODCAST_FORMAT:
+        quality_scores = quality_scores or _score_vertical_short_script(script, tiktok_format)
+        scores = {
+            **scores,
+            **quality_scores,
+            "clarityScore": scores.get("clarityScore"),
+            "platformFitScore": scores.get("platformFitScore"),
+            "qualityPassed": _youtube_shorts_quality_passed(quality_scores),
+            "qualityThresholds": YOUTUBE_SHORTS_QUALITY_THRESHOLDS,
+        }
     metadata = {
         "format": tiktok_format,
         "platform": platform_label,
@@ -3481,7 +3833,7 @@ def run_full_pipeline(
         if is_vertical_short
         else ""
     )
-    vertical_duration_profile = generation_options.get("duration_profile") or ("shorts90" if is_youtube_shorts else None)
+    vertical_duration_profile = generation_options.get("duration_profile") or ("shorts75" if is_youtube_shorts else None)
     tiktok_profile = _tiktok_duration_profile(vertical_duration_profile) if is_vertical_short else None
     tiktok_source_genre = generation_options.get("source_genre") or "psychology"
     if is_podcast:
@@ -3826,7 +4178,7 @@ def run_full_pipeline(
                     "platform": "youtube_shorts" if is_youtube_shorts else "tiktok",
                 }
                 if is_youtube_shorts:
-                    speed = audio_playback_speed or 1.2
+                    speed = audio_playback_speed or 1.25
                     full_result["audio_playback_speed"] = speed
                     full_result["podcast"]["audio_playback_speed"] = speed
         if is_autohypnosis:
@@ -3944,7 +4296,7 @@ def run_full_pipeline(
                     firestore_payload["script.targetSeconds"] = result["metadata"].get("target_seconds")
                     firestore_payload["script.durationProfile"] = result["metadata"].get("duration_profile")
                     if is_youtube_shorts:
-                        speed = audio_playback_speed or 1.2
+                        speed = audio_playback_speed or 1.25
                         firestore_payload["audioPlaybackSpeed"] = speed
                         firestore_payload["generationOptions.audio_playback_speed"] = speed
                     if tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:

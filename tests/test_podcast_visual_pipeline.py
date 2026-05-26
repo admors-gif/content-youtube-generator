@@ -7,9 +7,11 @@ from scripts.generate_content import (
     _create_claude_message_text,
     _emotion_prompt_file_for_format,
     _group_blocks_into_scenes,
+    _score_vertical_short_script,
     _normalize_vertical_script_text,
     _parse_podcast_script,
     _podcast_duration_profile,
+    _youtube_shorts_quality_passed,
     _strip_podcast_model_preamble,
     _tiktok_duration_profile,
     _with_podcast_duration_profile,
@@ -249,8 +251,8 @@ def test_tiktok_visual_prompts_are_vertical_and_safe():
     assert not any("phone face down" in prompt for prompt in prompts)
 
 
-def test_youtube_shorts_profile_uses_six_vertical_scenes():
-    profile = _tiktok_duration_profile("shorts90")
+def test_youtube_shorts_profile_uses_five_vertical_scenes():
+    profile = _tiktok_duration_profile("shorts75")
     scenes = _build_tiktok_visual_scenes(
         "Por que confundes ansiedad con amor",
         (
@@ -263,8 +265,11 @@ def test_youtube_shorts_profile_uses_six_vertical_scenes():
     )
     prompts = [scene["prompt"].lower() for scene in scenes]
 
-    assert profile["target_seconds"] == 90
-    assert len(scenes) == 6
+    assert profile["target_seconds"] == 75
+    assert len(scenes) == 5
+    assert profile["word_min"] == 190
+    assert profile["word_max"] == 220
+    assert profile["word_hard_max"] == 240
     assert all(scene["platform"] == "youtube" for scene in scenes)
     assert all(scene["aspect_ratio"] == "9:16" for scene in scenes)
     assert all(scene.get("dialogue_blocks") for scene in scenes)
@@ -274,8 +279,8 @@ def test_youtube_shorts_profile_uses_six_vertical_scenes():
     assert all("youtube shorts safe zones" in prompt for prompt in prompts)
 
 
-def test_youtube_shorts_normalizes_list_script_and_keeps_six_scenes():
-    profile = _tiktok_duration_profile("shorts90")
+def test_youtube_shorts_normalizes_list_script_and_keeps_five_scenes():
+    profile = _tiktok_duration_profile("shorts75")
     raw_script = str([
         "LUCIA: Cuanto mas alguien te ignora, mas lo quieres. Por que pasa eso?",
         "MATEO: Porque no es amor lo que sientes. Es tu sistema nervioso buscando cerrar algo abierto.",
@@ -301,13 +306,39 @@ def test_youtube_shorts_normalizes_list_script_and_keeps_six_scenes():
 
     assert normalized.startswith("LUCIA:")
     assert "['" not in normalized
-    assert len(scenes) == 6
+    assert len(scenes) == 5
     assert all(scene.get("dialogue_blocks") for scene in scenes)
 
 
 def test_youtube_shorts_uses_podcast_emotion_tagger():
     assert _emotion_prompt_file_for_format(False, YOUTUBE_SHORTS_PODCAST_FORMAT) == "emotion_tagger_podcast.md"
     assert _emotion_prompt_file_for_format(False, "tiktok_documentary") == "emotion_tagger.md"
+
+
+def test_youtube_shorts_quality_gate_matches_winning_structure():
+    script = (
+        "MATEO: Si su nombre en tus historias te dio esperanza, cuidado: eso no es amor. Es ansiedad disfrazada.\n"
+        "LUCIA: Porque una persona puede mirarte todos los dias y aun asi no elegirte nunca.\n"
+        "MATEO: Quedate, porque esto puede ahorrarte semanas de obsesion.\n"
+        "LUCIA: Tu no estas esperando una vista. Estas esperando que esa vista signifique: todavia me quiere.\n"
+        "MATEO: Pero cuando alguien tiene interes real, actua. Escribe. Propone. Se acerca.\n"
+        "LUCIA: Cuando solo tiene curiosidad, consume tu vida desde lejos.\n"
+        "MATEO: Y ahi aparece el apego. El rechazo se vuelve reto. La ausencia se vuelve promesa.\n"
+        "LUCIA: No te engancho su amor. Te engancho la posibilidad.\n"
+        "MATEO: Esa puerta entreabierta alimenta la herida: si ahora me elige, entonces si valgo.\n"
+        "LUCIA: Pero tu autoestima no puede depender de alguien que solo mira y no hace nada.\n"
+        "MATEO: No estas confundida porque sea profundo. Estas confundida porque duele.\n"
+        "LUCIA: El amor no te deja analizando una pantalla para sentir paz.\n"
+        "MATEO: Si tienes que adivinar, no es claridad. Si tienes que perseguir, no es cuidado.\n"
+        "LUCIA: Suscribete. En este canal aprendemos a soltar las migajas antes de confundirlas con amor."
+    )
+
+    scores = _score_vertical_short_script(script, YOUTUBE_SHORTS_PODCAST_FORMAT)
+
+    assert scores["overall"] >= 90
+    assert scores["emotionScore"] >= 80
+    assert scores["retentionScore"] >= 85
+    assert _youtube_shorts_quality_passed(scores)
 
 
 def test_podcast_parser_ignores_model_preamble_and_leading_tags():
