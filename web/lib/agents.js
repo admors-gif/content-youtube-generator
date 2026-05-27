@@ -34,6 +34,23 @@ export const SYSTEM_AGENTS = [
     color: "#1a1a2e",
   },
   {
+    agentId: "agent_misterios_v2",
+    name: "Misterios Sin Resolver v2",
+    emoji: "M2",
+    description: "Version premium del canal de misterios: hook inmediato, giros de retencion, factualidad estricta y voz Salvatore a 1.25x.",
+    category: "mystery",
+    promptFile: "agent_misterios_v2.md",
+    tier: "creator",
+    defaultVoices: { narrator: "Salvatore" },
+    audioPlaybackSpeed: 1.25,
+    exampleTopics: [
+      "El caso Dyatlov: la noche que no encaja",
+      "La desaparicion de Elisa Lam",
+      "La colonia Roanoke: el mensaje que nadie pudo explicar"
+    ],
+    color: "#24324F",
+  },
+  {
     agentId: "agent_biografias",
     name: "Biografías Épicas",
     emoji: "👑",

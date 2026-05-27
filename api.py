@@ -740,6 +740,9 @@ _PODCAST_AUDIO_PLAYBACK_SPEED_BY_AGENT = {
 _PODCAST_DEFAULT_DURATION_PROFILE_BY_AGENT = {
     "agent_podcast_general_v2_largo": "long",
 }
+_AUDIO_PLAYBACK_SPEED_BY_AGENT = {
+    "agent_misterios_v2": 1.25,
+}
 _TIKTOK_DURATION_ALIASES = {
     "60": "60s",
     "60s": "60s",
@@ -1232,6 +1235,8 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
             if normalized_duration_profile not in {"standard", "long", "extended"}:
                 raise HTTPException(status_code=400, detail="invalid durationProfile")
             generation_options["duration_profile"] = normalized_duration_profile
+    elif agent_id in _AUDIO_PLAYBACK_SPEED_BY_AGENT:
+        generation_options["audio_playback_speed"] = _AUDIO_PLAYBACK_SPEED_BY_AGENT[agent_id]
     elif agent_id == "agent_podcast_mesa_redonda":
         raw_duration_profile = duration_profile.replace(" ", "") or "extended"
         aliases = {
@@ -3217,6 +3222,7 @@ def serve_image(project: str, filename: str):
 _AGENT_CATALOG = """
 [agent_horror] Horror Histórico — torturas, plagas, castillos malditos, episodios oscuros documentados
 [agent_misterios] Misterios Sin Resolver — desapariciones, casos fríos, anomalías sin explicación
+[agent_misterios_v2] Misterios Sin Resolver v2 — canal premium de misterios con hook inmediato, giros de retencion, factualidad estricta y voz Salvatore a 1.25x
 [agent_biografias] Biografías Épicas — vidas legendarias con drama humano, figuras históricas
 [agent_ciencia] Ciencia Explicada — universo, física cuántica, biología, asombro cósmico
 [agent_finanzas] Catástrofes Financieras — crashes bursátiles, esquemas Ponzi, burbujas, fraudes
@@ -3352,6 +3358,7 @@ def _radar_agent_catalog() -> list[dict]:
     category_by_id = {
         "agent_horror": "history",
         "agent_misterios": "mystery",
+        "agent_misterios_v2": "mystery",
         "agent_biografias": "biography",
         "agent_ciencia": "science",
         "agent_finanzas": "finance",

@@ -83,6 +83,7 @@ AGENT_VOICE_MAP = {
     "psicologia_oscura": "Salvatore",
     "terror": "Salvatore",
     "misterios": "Salvatore",
+    "misterios_v2": "Salvatore",
     "biografias": "Salvatore",
     "historia": "Salvatore",
     "documentales": "Salvatore",

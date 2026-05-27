@@ -26,6 +26,7 @@ import { SYSTEM_AGENTS } from "./agents";
 export const MONOGRAM_BY_AGENT_ID = {
   agent_horror:           "HH",
   agent_misterios:        "M?",
+  agent_misterios_v2:     "M2",
   agent_biografias:       "BÉ",
   agent_ciencia:          "Cn",
   agent_finanzas:         "F$",

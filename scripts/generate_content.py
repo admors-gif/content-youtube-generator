@@ -4696,6 +4696,8 @@ def run_full_pipeline(
             full_result["sourceInspiration"] = source_inspiration_options
         if public_figure_visuals.get("detected"):
             full_result["publicFigureVisuals"] = public_figure_visuals
+        if audio_playback_speed:
+            full_result["audio_playback_speed"] = audio_playback_speed
         if is_instagram_carousel:
             full_result["carousel"] = {
                 **result["carousel"],
@@ -4738,7 +4740,6 @@ def run_full_pipeline(
                 podcast_profile,
             )
         if is_podcast and audio_playback_speed:
-            full_result["audio_playback_speed"] = audio_playback_speed
             full_result["podcast"]["audio_playback_speed"] = audio_playback_speed
         if is_vertical_short:
             vertical_delivery_key = "youtubeShorts" if is_youtube_shorts else "tiktok"
@@ -4865,6 +4866,9 @@ def run_full_pipeline(
                     firestore_payload["customAgent"] = full_result["customAgent"]
                 if source_inspiration_options:
                     firestore_payload["sourceInspiration"] = source_inspiration_options
+                if audio_playback_speed:
+                    firestore_payload["audioPlaybackSpeed"] = audio_playback_speed
+                    firestore_payload["generationOptions.audio_playback_speed"] = audio_playback_speed
                 if is_long_meditation:
                     firestore_payload["script.speechEstimatedMinutes"] = result["metadata"].get("estimated_speech_minutes")
                     firestore_payload["script.targetMinutes"] = result["metadata"].get("target_duration_minutes")
@@ -4875,9 +4879,6 @@ def run_full_pipeline(
                 if is_podcast:
                     firestore_payload["format"] = "podcast"
                     firestore_payload["podcast"] = full_result["podcast"]
-                    if audio_playback_speed:
-                        firestore_payload["audioPlaybackSpeed"] = audio_playback_speed
-                        firestore_payload["generationOptions.audio_playback_speed"] = audio_playback_speed
                     if podcast_profile:
                         firestore_payload["script.durationProfile"] = podcast_profile["key"]
                 if is_vertical_short:
