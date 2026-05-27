@@ -518,6 +518,26 @@ export const SYSTEM_AGENTS = [
     color: "#E0533D",
   },
   {
+    agentId: "agent_instagram_carousel_esto_no_es_amor",
+    name: "Esto no es amor: Carrusel",
+    emoji: "IG",
+    description: "Carruseles premium de 8 slides para Instagram, con copy de retencion, visual noir y CTA hacia YouTube.",
+    category: "instagram",
+    promptFile: "agent_instagram_carousel_esto_no_es_amor.md",
+    tier: "creator",
+    platform: "instagram",
+    format: "instagram_carousel",
+    durationProfiles: [
+      { id: "carousel8", label: "8 slides", description: "Carrusel estatico premium: 1080x1350 + version 1080x1920.", targetSlides: 8 },
+    ],
+    exampleTopics: [
+      "Por que te obsesionas con quien no te elige",
+      "Cuando confundes ansiedad con amor",
+      "La diferencia entre calma y aburrimiento emocional"
+    ],
+    color: "#C6423A",
+  },
+  {
     agentId: "agent_autohipnosis",
     name: "Autohipnosis Guiada",
     emoji: "🌙",

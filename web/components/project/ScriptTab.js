@@ -47,7 +47,15 @@ export default function ScriptTab({
   const wordCount = project.script?.wordCount || 0;
   const minutes = project.script?.estimatedMinutes || 0;
   const isWellness = ["autohipnosis", "meditacion_larga"].includes(project.format);
-  const loadingCopy = isWellness
+  const isCarousel = project.platform === "instagram" || project.format === "instagram_carousel";
+  const slideCount = project.script?.slideCount || project.carousel?.slideCount || project.carousel?.slides?.length || 0;
+  const loadingCopy = isCarousel
+    ? {
+        eyebrow: "CARRUSEL EN PREPARACION",
+        title: "Disenando slides de alta retencion",
+        body: "Estamos creando hook, copy, caption y direccion visual para el carrusel.",
+      }
+    : isWellness
     ? {
         eyebrow: "SESIÓN EN PREPARACIÓN",
         title: "Diseñando una guía profunda",
@@ -108,7 +116,9 @@ export default function ScriptTab({
                 }}
               >
                 {hasScript
-                  ? `${wordCount.toLocaleString("es")} palabras${minutes ? ` · ${minutes} min estimados` : ""}`
+                  ? isCarousel
+                    ? `${slideCount || 8} slides`
+                    : `${wordCount.toLocaleString("es")} palabras${minutes ? ` · ${minutes} min estimados` : ""}`
                   : "Guionizando…"}
               </div>
             </div>
@@ -149,7 +159,7 @@ export default function ScriptTab({
                     }}
                   >
                     <Icon name="check" size={14} />
-                    Aprobar y producir
+                    {isCarousel ? "Aprobar y producir carrusel" : "Aprobar y producir"}
                   </button>
                 </div>
               ))}

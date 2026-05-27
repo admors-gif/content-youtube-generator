@@ -58,6 +58,12 @@ const PLATFORM_OPTIONS = [
         },
       ]
     : []),
+  {
+    id: "instagram",
+    label: "Instagram",
+    icon: "image",
+    description: "Carruseles premium con slides, caption y paquete descargable.",
+  },
 ];
 
 const WELLNESS_FORMATS = new Set([
@@ -87,7 +93,9 @@ function defaultDurationProfileForAgent(agent, preferredId = "") {
     if (explicit) return explicit;
   }
   const preferredIds =
-    agent?.agentId === "agent_meditacion_larga_v2"
+    agent?.agentId === "agent_instagram_carousel_esto_no_es_amor"
+      ? ["carousel8"]
+      : agent?.agentId === "agent_meditacion_larga_v2"
       ? ["60m-guided", "60m-immersive"]
       : [agent?.platform === "tiktok" ? "90s" : "60m"];
   for (const id of preferredIds) {
@@ -478,7 +486,7 @@ export default function NewProjectPage() {
     setSelectedAgent(null);
     setRecommendations([]);
     setRecommendError(null);
-    setDurationProfile(nextPlatform === "tiktok" ? "90s" : "60m");
+    setDurationProfile(nextPlatform === "tiktok" ? "90s" : nextPlatform === "instagram" ? "carousel8" : "60m");
   };
 
   const updatePersonalization = (field, value) => {
@@ -627,6 +635,7 @@ export default function NewProjectPage() {
   const durationProfiles = selectedAgent?.durationProfiles || [];
   const selectedDurationProfile = durationProfiles.find((p) => p.id === durationProfile)
     || durationProfiles[0];
+  const isInstagramCarouselSelected = selectedAgent?.format === "instagram_carousel";
   const isYoutubeShortsSelected = selectedAgent?.format === "youtube_shorts_podcast";
   const isPodcastSelected = selectedAgent?.format === "podcast";
 
@@ -914,7 +923,10 @@ export default function NewProjectPage() {
               style={{
                 padding: "var(--s-5)",
                 marginBottom: "var(--s-6)",
-                borderColor: "rgba(20, 184, 166, 0.35)",
+                borderColor:
+                  platform === "instagram"
+                    ? "rgba(224, 83, 61, 0.36)"
+                    : "rgba(20, 184, 166, 0.35)",
               }}
             >
               <div
@@ -922,21 +934,25 @@ export default function NewProjectPage() {
                   display: "flex",
                   alignItems: "center",
                   gap: 8,
-                  color: "#14B8A6",
+                  color: platform === "instagram" ? "var(--ember)" : "#14B8A6",
                   font: "var(--t-mono-sm)",
                   letterSpacing: "0.18em",
                   textTransform: "uppercase",
                   marginBottom: 8,
                 }}
               >
-                <Icon name="zap" size={16} /> TIKTOK STUDIO
+                <Icon name={platform === "instagram" ? "image" : "zap"} size={16} />{" "}
+                {platform === "instagram" ? "INSTAGRAM STUDIO" : "TIKTOK STUDIO"}
               </div>
               <div style={{ color: "var(--paper)", fontWeight: 650, marginBottom: 6 }}>
-                Nuevo módulo vertical nativo
+                {platform === "instagram"
+                  ? "Carrusel premium de marca"
+                  : "Nuevo modulo vertical nativo"}
               </div>
               <div style={{ font: "var(--t-caption)", color: "var(--paper-dim)", lineHeight: 1.5 }}>
-                Estos agentes no recortan YouTube ni reutilizan Shorts: crean guion,
-                visuales, subtítulos, caption y hashtags pensados para TikTok.
+                {platform === "instagram"
+                  ? "Crea 8 slides, caption, hashtags y versiones 1080x1350/1080x1920 listas para descargar."
+                  : "Estos agentes no recortan YouTube ni reutilizan Shorts: crean guion, visuales, subtitulos, caption y hashtags pensados para TikTok."}
               </div>
             </div>
           )}
@@ -1226,7 +1242,7 @@ export default function NewProjectPage() {
                     textTransform: "uppercase",
                   }}
                 >
-                  PERFIL DE DURACIÓN
+                  {isInstagramCarouselSelected ? "FORMATO DE CARRUSEL" : "PERFIL DE DURACIÓN"}
                 </div>
                 <div
                   style={{
@@ -1288,7 +1304,9 @@ export default function NewProjectPage() {
                       color: "var(--paper-dim)",
                     }}
                   >
-                    {platform === "tiktok" || isYoutubeShortsSelected
+                    {isInstagramCarouselSelected
+                      ? "Carrusel premium con 8 slides, version Instagram 1080x1350 y derivado 1080x1920 para TikTok/Stories."
+                      : platform === "tiktok" || isYoutubeShortsSelected
                       ? `Formato vertical nativo con hook, beats cortos y render 9:16 de ${selectedDurationProfile.label}.`
                       : isPodcastSelected
                         ? `Estructura conversacional de ${selectedDurationProfile.label}, con ritmo y densidad ajustados al formato.`
@@ -1485,7 +1503,7 @@ export default function NewProjectPage() {
               <div style={{ flex: 1, fontSize: 14, lineHeight: 1.4 }}>
                 {creditsLeft > 0 ? (
                   <>
-                    Este vídeo costará{" "}
+                    {isInstagramCarouselSelected ? "Este carrusel costara" : "Este video costara"}{" "}
                     <strong style={{ color: "var(--ember)" }}>1 crédito</strong>.
                     Tienes{" "}
                     <strong style={{ color: "var(--paper)" }}>
@@ -1548,7 +1566,9 @@ export default function NewProjectPage() {
                 </>
               ) : (
                 <>
-                  {platform === "tiktok"
+                  {isInstagramCarouselSelected
+                    ? "Crear carrusel"
+                    : platform === "tiktok"
                     ? "Crear TikTok"
                     : isWellnessSelected
                     ? "Crear sesión"

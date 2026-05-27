@@ -267,3 +267,119 @@ export function computeVerticalShortScore(text, format = "") {
 export function computeTikTokScore(text, format = "") {
   return computeVerticalShortScore(text, format);
 }
+
+/**
+ * Carousel Score Engine.
+ *
+ * Optimizado para carruseles de Instagram: no premia duracion ni SEO, premia
+ * portada con golpe, retencion de swipe, claridad, potencial de guardado y CTA.
+ */
+export function computeCarouselScore(text) {
+  if (!text || text.length < 50) return null;
+
+  const clean = String(text || "").trim();
+  const lower = clean.toLowerCase();
+  const lines = clean.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const words = clean.split(/\s+/).filter(Boolean);
+  const slideMarkers = (clean.match(/slide\s*\d|^\d{1,2}[).:-]/gim) || []).length;
+  const questionCount = (clean.match(/\?/g) || []).length;
+  const imperativeCount = countMatches(clean, [
+    "guarda",
+    "comparte",
+    "busca",
+    "suscribete",
+    "suscríbete",
+    "manda",
+    "envia",
+    "envía",
+    "lee",
+    "mira",
+  ]);
+  const hookTerms = countMatches(clean, [
+    "no es amor",
+    "si te pasa esto",
+    "nadie te dice",
+    "la verdad",
+    "deja de",
+    "confundes",
+    "ansiedad",
+    "apego",
+    "obsesion",
+    "obsesión",
+    "rechazo",
+  ]);
+  const emotionTerms = countMatches(clean, [
+    "amor",
+    "miedo",
+    "dolor",
+    "herida",
+    "abandono",
+    "rechazo",
+    "ansiedad",
+    "culpa",
+    "apego",
+    "soltar",
+    "suficiente",
+    "intensidad",
+  ]);
+  const swipeTerms = countMatches(clean, [
+    "pero",
+    "entonces",
+    "porque",
+    "la trampa",
+    "el giro",
+    "lo incomodo",
+    "en realidad",
+    "hasta que",
+    "no necesitas",
+  ]);
+  const saveTerms = countMatches(clean, [
+    "guarda",
+    "recuerda",
+    "frase",
+    "cuando vuelvas",
+    "necesitas",
+    "si esto",
+    "mandaselo",
+    "mándaselo",
+  ]);
+  const ctaTerms = countMatches(clean, [
+    "youtube",
+    "canal",
+    "episodio completo",
+    "suscribete",
+    "suscríbete",
+    "busca esto no es amor",
+  ]);
+
+  const firstLineWords = (lines[0] || "").split(/\s+/).filter(Boolean).length;
+  const avgWordsPerLine = words.length / Math.max(lines.length, 1);
+  const hasEightSlides = slideMarkers >= 6 || lines.length >= 8;
+
+  const hookScore = clampScore(48 + hookTerms * 7 + questionCount * 5 + (firstLineWords >= 4 && firstLineWords <= 14 ? 22 : 6));
+  const swipeRetention = clampScore(46 + swipeTerms * 7 + (hasEightSlides ? 22 : 8) + (avgWordsPerLine <= 28 ? 12 : 0));
+  const emotionScore = clampScore(42 + emotionTerms * 5 + (lower.includes("esto no es amor") ? 8 : 0));
+  const clarityScore = clampScore(54 + (avgWordsPerLine >= 5 && avgWordsPerLine <= 28 ? 26 : 8) + (hasEightSlides ? 10 : 0));
+  const saveShareScore = clampScore(44 + saveTerms * 9 + imperativeCount * 5 + (questionCount >= 1 ? 6 : 0));
+  const ctaScore = clampScore(45 + ctaTerms * 11 + imperativeCount * 5);
+  const overall = clampScore(
+    hookScore * 0.2 +
+      swipeRetention * 0.2 +
+      emotionScore * 0.18 +
+      clarityScore * 0.17 +
+      saveShareScore * 0.15 +
+      ctaScore * 0.1,
+  );
+
+  return {
+    overall,
+    hookScore,
+    hooks: hookTerms + questionCount,
+    emotionScore,
+    pacingScore: swipeRetention,
+    structureScore: clarityScore,
+    retentionScore: saveShareScore,
+    ctaScore,
+    wordCount: words.length,
+  };
+}

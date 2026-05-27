@@ -27,9 +27,12 @@ export default function ScenesTab({ project }) {
     "publishing",
   ].includes(project.status);
   const isTikTok = project.platform === "tiktok" || String(project.format || "").startsWith("tiktok_");
+  const isCarousel = project.platform === "instagram" || project.format === "instagram_carousel";
   const isWellness = ["autohipnosis", "meditacion_larga", "tiktok_autohypnosis", "tiktok_meditation"].includes(project.format);
   const itemLabel = isWellness
     ? `visual${totalScenes === 1 ? "" : "es"}`
+    : isCarousel
+      ? `slide${totalScenes === 1 ? "" : "s"}`
     : isTikTok
       ? `beat${totalScenes === 1 ? "" : "s"}`
     : `escena${totalScenes === 1 ? "" : "s"}`;
@@ -70,7 +73,7 @@ export default function ScenesTab({ project }) {
             textTransform: "uppercase",
           }}
         >
-          {isTikTok ? "DISEÑANDO BEATS" : isWellness ? "DISEÑANDO VISUALES" : "DIRIGIENDO ESCENAS"}
+          {isCarousel ? "DISENANDO SLIDES" : isTikTok ? "DISEÑANDO BEATS" : isWellness ? "DISEÑANDO VISUALES" : "DIRIGIENDO ESCENAS"}
         </div>
         <h3
           style={{
@@ -83,7 +86,7 @@ export default function ScenesTab({ project }) {
             letterSpacing: "-0.02em",
           }}
         >
-          {isTikTok ? "Beats verticales en preparación" : isWellness ? "Visuales en preparación" : "Storyboard en preparación"}
+          {isCarousel ? "Carrusel en preparacion" : isTikTok ? "Beats verticales en preparación" : isWellness ? "Visuales en preparación" : "Storyboard en preparación"}
         </h3>
         <p
           style={{
@@ -93,7 +96,9 @@ export default function ScenesTab({ project }) {
             lineHeight: 1.5,
           }}
         >
-          {isTikTok
+          {isCarousel
+            ? "Estamos creando fondos sin texto y renderizando el copy encima con layout estable."
+            : isTikTok
             ? "Estamos creando visuales verticales 9:16 con espacio seguro para subtítulos."
             : isWellness
             ? "Estamos preparando visuales lentos y calmados para sostener la sesión."
@@ -124,7 +129,7 @@ export default function ScenesTab({ project }) {
               textTransform: "uppercase",
             }}
           >
-            {isTikTok ? "BEATS VERTICALES" : isWellness ? "VISUALES" : "STORYBOARD"}
+            {isCarousel ? "CARRUSEL" : isTikTok ? "BEATS VERTICALES" : isWellness ? "VISUALES" : "STORYBOARD"}
           </div>
           <div
             style={{
@@ -212,8 +217,8 @@ export default function ScenesTab({ project }) {
               {/* Thumbnail */}
               <div
                 style={{
-                  width: isTikTok ? 76 : 120,
-                  height: isTikTok ? 136 : 68,
+                  width: isCarousel ? 86 : isTikTok ? 76 : 120,
+                  height: isCarousel ? 108 : isTikTok ? 136 : 68,
                   borderRadius: "var(--r-1)",
                   border: `1px solid ${isOk ? "var(--rule-2)" : "var(--rule-1)"}`,
                   flex: "none",
@@ -228,9 +233,9 @@ export default function ScenesTab({ project }) {
                 {isOk ? (
                   <Image
                     src={scene.imageUrl}
-                    alt={`Escena ${idx + 1}`}
+                    alt={isCarousel ? `Slide ${idx + 1}` : `Escena ${idx + 1}`}
                     fill
-                    sizes={isTikTok ? "76px" : "120px"}
+                    sizes={isCarousel ? "86px" : isTikTok ? "76px" : "120px"}
                     style={{ objectFit: "cover" }}
                     loading="lazy"
                     unoptimized={!/^https:\/\//.test(scene.imageUrl)}
@@ -301,7 +306,11 @@ export default function ScenesTab({ project }) {
                     lineHeight: 1.55,
                   }}
                 >
-                  {typeof scene === "string" ? scene : scene.prompt || "—"}
+                  {typeof scene === "string"
+                    ? scene
+                    : isCarousel && scene.carousel_slide
+                      ? `${scene.carousel_slide.headline || ""}${scene.carousel_slide.body ? ` — ${scene.carousel_slide.body}` : ""}`
+                      : scene.prompt || "—"}
                 </div>
               </div>
             </div>

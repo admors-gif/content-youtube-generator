@@ -726,6 +726,13 @@ _YOUTUBE_SHORTS_AGENT_IDS = {
 _YOUTUBE_SHORTS_FORMAT_BY_AGENT = {
     "agent_youtube_shorts_esto_no_es_amor": YOUTUBE_SHORTS_PODCAST_FORMAT,
 }
+INSTAGRAM_CAROUSEL_FORMAT = "instagram_carousel"
+_INSTAGRAM_AGENT_IDS = {
+    "agent_instagram_carousel_esto_no_es_amor",
+}
+_INSTAGRAM_FORMAT_BY_AGENT = {
+    "agent_instagram_carousel_esto_no_es_amor": INSTAGRAM_CAROUSEL_FORMAT,
+}
 _PODCAST_AUDIO_PLAYBACK_SPEED_BY_AGENT = {
     "agent_podcast_general_v2": 1.2,
     "agent_podcast_general_v2_largo": 1.2,
@@ -919,6 +926,7 @@ def _brand_profile_for_project(agent_id: str, data: dict) -> tuple[str, dict]:
         "agent_podcast_mesa_redonda",
         "agent_tiktok_podcast",
         "agent_youtube_shorts_esto_no_es_amor",
+        "agent_instagram_carousel_esto_no_es_amor",
     }
     if not requested and not should_use_default:
         return "", {}
@@ -972,7 +980,7 @@ def _custom_agent_project_payload(data: dict, principal: dict | None) -> dict | 
 
     platform = str(agent.get("platform") or template.get("platform") or "youtube").strip().lower()
     project_format = str(agent.get("format") or template.get("format") or "").strip()
-    if platform not in {"youtube", "tiktok"}:
+    if platform not in {"youtube", "tiktok", "instagram"}:
         raise HTTPException(status_code=400, detail="invalid custom agent platform")
 
     raw_generation_options = data.get("generationOptions") or data.get("generation_options") or {}
@@ -1095,19 +1103,24 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
         raise HTTPException(status_code=400, detail="agent mismatch")
 
     requested_platform = (data.get("platform") or "").strip().lower()
-    inferred_platform = "tiktok" if agent_id in _TIKTOK_AGENT_IDS else "youtube"
+    inferred_platform = "instagram" if agent_id in _INSTAGRAM_AGENT_IDS else "tiktok" if agent_id in _TIKTOK_AGENT_IDS else "youtube"
     platform = requested_platform or inferred_platform
-    if platform not in {"youtube", "tiktok"}:
+    if platform not in {"youtube", "tiktok", "instagram"}:
         raise HTTPException(status_code=400, detail="invalid platform")
     if platform == "tiktok":
         if not _flag_enabled("CONTENT_FACTORY_TIKTOK_GENERATION_ENABLED", default=True):
             raise HTTPException(status_code=403, detail="tiktok generation disabled")
         if agent_id not in _TIKTOK_AGENT_IDS:
             raise HTTPException(status_code=400, detail="invalid TikTok agent")
+    elif platform == "instagram":
+        if agent_id not in _INSTAGRAM_AGENT_IDS:
+            raise HTTPException(status_code=400, detail="invalid Instagram agent")
     elif agent_id in _TIKTOK_AGENT_IDS:
         raise HTTPException(status_code=400, detail="TikTok agent requires TikTok platform")
     elif agent_id in _YOUTUBE_SHORTS_AGENT_IDS and platform != "youtube":
         raise HTTPException(status_code=400, detail="YouTube Shorts agent requires YouTube platform")
+    elif agent_id in _INSTAGRAM_AGENT_IDS and platform != "instagram":
+        raise HTTPException(status_code=400, detail="Instagram agent requires Instagram platform")
 
     duration_profile = (data.get("durationProfile") or data.get("duration_profile") or "").strip().lower()
     allowed_duration_profiles = {"30m", "60m", "180m"}
@@ -1122,11 +1135,12 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
     if brand_profile_id:
         generation_options["brand_profile_id"] = brand_profile_id
         generation_options["brand_profile_snapshot"] = brand_profile
-    project_format = _YOUTUBE_SHORTS_FORMAT_BY_AGENT.get(agent_id) or _TIKTOK_FORMAT_BY_AGENT.get(agent_id, "")
+    project_format = _INSTAGRAM_FORMAT_BY_AGENT.get(agent_id) or _YOUTUBE_SHORTS_FORMAT_BY_AGENT.get(agent_id) or _TIKTOK_FORMAT_BY_AGENT.get(agent_id, "")
     if agent_id.startswith("agent_podcast_"):
         project_format = "podcast"
     tiktok_payload = {}
     youtube_shorts_payload = {}
+    instagram_payload = {}
     if platform == "tiktok":
         duration_key = duration_profile.replace(" ", "") or "90s"
         duration_profile = _TIKTOK_DURATION_ALIASES.get(duration_key, duration_key)
@@ -1182,6 +1196,20 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
             "source_genre": source_genre,
             "target_seconds": _TIKTOK_DURATION_SECONDS[duration_profile],
             "audio_playback_speed": 1.25,
+        })
+    elif agent_id in _INSTAGRAM_AGENT_IDS:
+        instagram_payload = {
+            "format": project_format,
+            "slideCount": 8,
+            "primarySize": "1080x1350",
+            "secondarySize": "1080x1920",
+        }
+        generation_options.update({
+            "platform": "instagram",
+            "format": project_format,
+            "slide_count": 8,
+            "primary_size": "1080x1350",
+            "secondary_size": "1080x1920",
         })
     elif agent_id in _PODCAST_AUDIO_PLAYBACK_SPEED_BY_AGENT:
         generation_options["audio_playback_speed"] = _PODCAST_AUDIO_PLAYBACK_SPEED_BY_AGENT[agent_id]
@@ -1272,6 +1300,7 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
         "format": project_format,
         "tiktok": tiktok_payload,
         "youtube_shorts": youtube_shorts_payload,
+        "instagram": instagram_payload,
         "personalization": personalization,
         "brand_profile_id": brand_profile_id,
         "brand_profile_snapshot": brand_profile,
@@ -3217,6 +3246,7 @@ _AGENT_CATALOG = """
 [agent_podcast_general_v2] Esto no es amor v2 — clon seguro del podcast original con Mateo y Lucia, mismo prompt y voces, audio final 1.2x
 [agent_podcast_general_v2_largo] Esto no es amor v2 largo — clon seguro del v2 con guion mas desarrollado y audio final 1.2x
 [agent_youtube_shorts_esto_no_es_amor] Esto no es amor Shorts — shorts verticales nativos para YouTube con Mateo y Lucia, 75s a 1.25x, hook fuerte y CTA de suscripcion
+[agent_instagram_carousel_esto_no_es_amor] Esto no es amor Carrusel — carruseles premium de Instagram con 8 slides, visual noir y CTA hacia YouTube
 [agent_autohipnosis] Autohipnosis Guiada — wellness, relajación, visualización, afirmaciones positivas, desarrollo personal seguro
 [agent_meditacion_larga] Meditación Larga — sesiones de 30 min, 1 h y 3 h para sueño, calma, afirmaciones espaciadas y visuales lentos
 [agent_meditacion_larga_v2] Meditación Inmersiva — sesiones largas con respiración acompañada, visualización profunda e integración emocional segura
@@ -3240,6 +3270,15 @@ _RADAR_EXTRA_AGENTS = [
         "platform": "youtube",
         "format": YOUTUBE_SHORTS_PODCAST_FORMAT,
         "promptFile": "agent_youtube_shorts_esto_no_es_amor.md",
+    },
+    {
+        "agentId": "agent_instagram_carousel_esto_no_es_amor",
+        "name": "Esto no es amor: Carrusel",
+        "description": "Carrusel premium de Instagram con 8 slides, copy de retencion, visuales noir y CTA hacia YouTube",
+        "category": "instagram",
+        "platform": "instagram",
+        "format": INSTAGRAM_CAROUSEL_FORMAT,
+        "promptFile": "agent_instagram_carousel_esto_no_es_amor.md",
     },
     {
         "agentId": "agent_tiktok_documentary",
@@ -3286,6 +3325,7 @@ _RADAR_PRIORITY_AGENT_IDS = [
     "agent_podcast_general_v2_largo",
     "agent_podcast_mesa_redonda",
     "agent_youtube_shorts_esto_no_es_amor",
+    "agent_instagram_carousel_esto_no_es_amor",
     "agent_tiktok_podcast",
     "agent_tiktok_documentary",
     "agent_meditacion_larga",
@@ -3341,6 +3381,7 @@ def _radar_agent_catalog() -> list[dict]:
         "agent_podcast_general_v2": "podcast",
         "agent_podcast_general_v2_largo": "podcast",
         "agent_youtube_shorts_esto_no_es_amor": "podcast",
+        "agent_instagram_carousel_esto_no_es_amor": "instagram",
         "agent_autohipnosis": "wellness",
         "agent_meditacion_larga": "wellness",
         "agent_meditacion_larga_v2": "wellness",
@@ -3351,8 +3392,8 @@ def _radar_agent_catalog() -> list[dict]:
         if not match:
             continue
         aid = match.group("id").strip()
-        platform = "tiktok" if aid in _TIKTOK_AGENT_IDS else "youtube"
-        project_format = _YOUTUBE_SHORTS_FORMAT_BY_AGENT.get(aid) or _TIKTOK_FORMAT_BY_AGENT.get(aid) or ""
+        platform = "instagram" if aid in _INSTAGRAM_AGENT_IDS else "tiktok" if aid in _TIKTOK_AGENT_IDS else "youtube"
+        project_format = _INSTAGRAM_FORMAT_BY_AGENT.get(aid) or _YOUTUBE_SHORTS_FORMAT_BY_AGENT.get(aid) or _TIKTOK_FORMAT_BY_AGENT.get(aid) or ""
         if aid.startswith("agent_podcast_"):
             project_format = "podcast"
         elif aid == "agent_autohipnosis":
@@ -8118,6 +8159,12 @@ def _is_tiktok_project(data: dict) -> bool:
     return data.get("platform") == "tiktok" or fmt in set(_TIKTOK_FORMAT_BY_AGENT.values()) or agent in _TIKTOK_AGENT_IDS
 
 
+def _is_instagram_carousel_project(data: dict) -> bool:
+    fmt = data.get("format") or ""
+    agent = data.get("agentId") or data.get("agent") or ""
+    return data.get("platform") == "instagram" or fmt == INSTAGRAM_CAROUSEL_FORMAT or agent in _INSTAGRAM_AGENT_IDS
+
+
 def _is_vertical_short_project(data: dict) -> bool:
     return _is_tiktok_project(data) or _is_youtube_shorts_project(data)
 
@@ -10734,6 +10781,11 @@ def download_all(project_id: str, request: Request):
         add_glob(video_dir / "tiktok", "*.json", "tiktok")
         add_glob(video_dir / "tiktok", "*.txt", "tiktok")
         add_glob(video_dir / "tiktok", "*.jpg", "tiktok")
+        add_glob(video_dir / "carousel" / "instagram", "*.png", "carousel/instagram")
+        add_glob(video_dir / "carousel" / "tiktok", "*.png", "carousel/tiktok")
+        add_glob(video_dir / "carousel" / "backgrounds", "*.png", "carousel/backgrounds")
+        add_glob(video_dir / "carousel", "*.json", "carousel")
+        add_glob(video_dir / "carousel", "*.txt", "carousel")
 
         # Otros activos sueltos del root del folder
         add_if(video_dir / "subtitles.ass", "subtitulos.ass")
@@ -10781,6 +10833,7 @@ def download_all(project_id: str, request: Request):
             "seo_metadata": data.get("seo_metadata"),
             "youtube": publish_pack,
             "tiktok": data.get("tiktok") or {},
+            "carousel": data.get("carousel") or {},
             "scenesCount": len(data.get("scenes") or []),
             "downloadedAt": datetime.now(timezone.utc).isoformat(),
         }
@@ -11423,6 +11476,7 @@ def _create_project_with_credit(
             "format": payload.get("format") or "",
             "tiktok": payload.get("tiktok") or {},
             "youtubeShorts": payload.get("youtube_shorts") or {},
+            "instagram": payload.get("instagram") or {},
             "brandProfileId": payload.get("brand_profile_id") or "",
             "brandProfile": payload.get("brand_profile_snapshot") or {},
             "personalization": payload.get("personalization") or {},
@@ -11510,6 +11564,7 @@ def _create_project_with_credit(
             "seo": {},
             "tiktok": payload.get("tiktok") or {},
             "youtubeShorts": payload.get("youtube_shorts") or {},
+            "instagram": payload.get("instagram") or {},
             "brandProfileId": payload.get("brand_profile_id") or "",
             "brandProfile": payload.get("brand_profile_snapshot") or {},
             "costs": {"creditCost": 1},
@@ -12411,6 +12466,7 @@ def run_production(project_id):
         is_tiktok_project = _is_tiktok_project(project)
         is_youtube_shorts_project = _is_youtube_shorts_project(project)
         is_vertical_short_project = is_tiktok_project or is_youtube_shorts_project
+        is_instagram_carousel_project = project_format == INSTAGRAM_CAROUSEL_FORMAT or agent_id in _INSTAGRAM_AGENT_IDS
 
         if not scenes:
             update_progress(0, "Error: No hay escenas visuales", "error")
@@ -12473,7 +12529,7 @@ def run_production(project_id):
             "project_id": project_id,
             "output_folder": safe_title,
             "agent": agent_id,
-            "platform": "tiktok" if is_tiktok_project else "youtube",
+            "platform": "instagram" if is_instagram_carousel_project else "tiktok" if is_tiktok_project else "youtube",
             "video_scenes": factory_scenes,
             "seo_metadata": project.get("seo_metadata", {"title": title}),
             "brandProfileId": project.get("brandProfileId") or "",
@@ -12484,7 +12540,10 @@ def run_production(project_id):
         audio_playback_speed = (project.get("generationOptions") or {}).get("audio_playback_speed")
         if audio_playback_speed:
             temp_json["audio_playback_speed"] = audio_playback_speed
-        if is_tiktok_project:
+        if is_instagram_carousel_project:
+            temp_json["format"] = INSTAGRAM_CAROUSEL_FORMAT
+            temp_json["carousel"] = project.get("carousel") or project.get("instagram") or {}
+        elif is_tiktok_project:
             temp_json["format"] = project_format
             temp_json["tiktok"] = project.get("tiktok") or {}
             if project_format == "tiktok_podcast":
@@ -12580,7 +12639,7 @@ def run_production(project_id):
             # finally que mata subprocess + monitor thread aunque haya
             # excepción (SoftTimeLimitExceeded, KeyboardInterrupt, etc.).
             returncode, stderr_tail = _run_factory_subprocess(
-                ["python", "scripts/factory.py", temp_path, "--mode", "narrativa" if is_tiktok_project else "cinematico", "--images-only"],
+                ["python", "scripts/factory.py", temp_path, "--mode", "narrativa" if (is_tiktok_project or is_instagram_carousel_project) else "cinematico", "--images-only"],
                 monitor_thread=monitor_thread,
                 stop_event=stop_monitoring,
                 timeout=7200,
@@ -12612,6 +12671,67 @@ def run_production(project_id):
                 return
 
             update_progress(35, f"{image_sync['ready']} visuales base listos", "imaging")
+
+        if is_instagram_carousel_project:
+            update_progress(58, "Renderizando carrusel premium...", "rendering")
+            try:
+                sys.path.insert(0, "/app/scripts")
+                from carousel_renderer import render_carousel_package
+
+                vps_base = os.environ.get("VPS_PUBLIC_URL", "http://100.99.207.113:8085").rstrip("/")
+                latest_project = doc_ref.get().to_dict() or {}
+                carousel_result = render_carousel_package(
+                    Path(f"/app/output/videos/{safe_title}"),
+                    latest_project.get("carousel") or project.get("carousel") or {},
+                    latest_project.get("scenes") or scenes,
+                    public_base_url=vps_base,
+                    folder=safe_title,
+                )
+                updated_scenes = carousel_result.pop("updatedScenes", [])
+                update_payload = {
+                    "status": "completed",
+                    "platform": "instagram",
+                    "format": INSTAGRAM_CAROUSEL_FORMAT,
+                    "progress.percent": 100,
+                    "progress.stepName": "Tu carrusel esta listo",
+                    "productionCompletedAt": firestore.SERVER_TIMESTAMP,
+                    "productionDurationSeconds": round(time.time() - production_start, 1),
+                    "videoFolder": safe_title,
+                    "carousel": {
+                        **(latest_project.get("carousel") or project.get("carousel") or {}),
+                        **carousel_result,
+                    },
+                    "instagram": {
+                        **(latest_project.get("instagram") or project.get("instagram") or {}),
+                        "status": "ready",
+                        "format": INSTAGRAM_CAROUSEL_FORMAT,
+                        "slideCount": carousel_result.get("slideCount"),
+                        "primarySize": "1080x1350",
+                        "secondarySize": "1080x1920",
+                    },
+                    "visuals.ready": carousel_result.get("slideCount", len(updated_scenes)),
+                    "visuals.total": carousel_result.get("slideCount", len(updated_scenes)),
+                    "visuals.missing": [],
+                }
+                if updated_scenes:
+                    update_payload["scenes"] = updated_scenes
+                doc_ref.update(update_payload)
+                _notify_project_event(
+                    db,
+                    firestore,
+                    project_id,
+                    {**(project or {}), **update_payload},
+                    kind="project_completed",
+                    title="Carrusel listo",
+                    body=(project.get("title") or "Tu carrusel")[:160],
+                    extra={"slidesCount": carousel_result.get("slideCount", 0)},
+                )
+                print(f"[carousel] Carrusel completo: {carousel_result.get('slideCount', 0)} slides | {safe_title}")
+                return
+            except Exception as carousel_err:
+                update_progress(0, "Error renderizando el carrusel", "error")
+                print(f"[carousel] Error: {carousel_err}", flush=True)
+                return
         
         # ═══════════════════════════════════════════
         # PASO 2-4: Voz + movimiento + montaje (35% → 94%)

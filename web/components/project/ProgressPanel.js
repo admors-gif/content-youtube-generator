@@ -46,7 +46,17 @@ const LONG_MEDITATION_PHASE_DEFS = [
   { id: "delivery", label: "Entrega final" },
 ];
 
+const CAROUSEL_PHASE_DEFS = [
+  { id: "research", label: "Estrategia" },
+  { id: "script",   label: "Copy" },
+  { id: "images",   label: "Fondos" },
+  { id: "voice",    label: "Render" },
+  { id: "assembly", label: "Paquete" },
+  { id: "delivery", label: "Entrega final" },
+];
+
 function phaseDefsForFormat(format) {
+  if (format === "instagram_carousel") return CAROUSEL_PHASE_DEFS;
   if (format === "meditacion_larga") return LONG_MEDITATION_PHASE_DEFS;
   if (format === "autohipnosis") return AUTOHYPNOSIS_PHASE_DEFS;
   return PHASE_DEFS;
@@ -131,8 +141,12 @@ function getPhasesFromStatus(status, scenes, percent = 0, format = "") {
       states.research = "ok";
       states.script = "ok";
       states.images = "ok";
-      states.voice = "ok";
-      states.assembly = "current";
+      if (format === "instagram_carousel" && status === "rendering") {
+        states.voice = "current";
+      } else {
+        states.voice = "ok";
+        states.assembly = "current";
+      }
       break;
     case "publishing":
       states.research = "ok";

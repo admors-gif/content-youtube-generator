@@ -163,6 +163,132 @@ function TikTokDeliveryPanel({ project }) {
   );
 }
 
+function CarouselDeliveryPanel({ project }) {
+  const carousel = project?.carousel || {};
+  const slides = Array.isArray(carousel.slides) ? carousel.slides : [];
+  const scores = carousel.qualityScores || carousel.quality_scores || {};
+  const isCarousel =
+    project?.platform === "instagram" || project?.format === "instagram_carousel";
+  if (!project || !isCarousel) return null;
+
+  return (
+    <section
+      className="cf-card cf-fade cf-fade--1"
+      style={{
+        padding: "var(--s-5)",
+        marginBottom: "var(--s-6)",
+        borderColor: "rgba(224, 83, 61, 0.36)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          font: "var(--t-mono-sm)",
+          color: "var(--ember)",
+          letterSpacing: "0.18em",
+          textTransform: "uppercase",
+          marginBottom: 12,
+        }}
+      >
+        <Icon name="image" size={16} /> CARRUSEL STUDIO
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.2fr) minmax(260px, 0.8fr)",
+          gap: 18,
+          alignItems: "start",
+        }}
+      >
+        <div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(118px, 1fr))",
+              gap: 10,
+            }}
+          >
+            {slides.map((slide, index) => (
+              <div
+                key={slide.index || index}
+                style={{
+                  aspectRatio: "4 / 5",
+                  borderRadius: 8,
+                  border: "1px solid var(--rule-1)",
+                  background: "var(--ink-0)",
+                  backgroundImage: slide.imageUrl ? `url("${slide.imageUrl}")` : "none",
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                  overflow: "hidden",
+                  position: "relative",
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 8,
+                    top: 8,
+                    padding: "3px 6px",
+                    borderRadius: 6,
+                    background: "rgba(5,5,8,0.72)",
+                    color: "var(--paper)",
+                    font: "var(--t-mono-sm)",
+                  }}
+                >
+                  {String(slide.index || index + 1).padStart(2, "0")}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <div style={{ font: "var(--t-mono-sm)", color: "var(--paper-mute)", marginBottom: 6 }}>
+              CALIDAD
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: 8,
+                color: "var(--paper)",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              <span>Total {scores.total ?? scores.overall ?? "-"}</span>
+              <span>Hook {scores.hook ?? "-"}</span>
+              <span>Swipe {scores.swipe_retention ?? scores.swipeRetention ?? "-"}</span>
+              <span>CTA {scores.cta ?? "-"}</span>
+            </div>
+          </div>
+          <div>
+            <div style={{ font: "var(--t-mono-sm)", color: "var(--paper-mute)", marginBottom: 6 }}>
+              CAPTION
+            </div>
+            <div style={{ color: "var(--paper)", lineHeight: 1.5 }}>
+              {carousel.caption || "Caption listo en el paquete descargable."}
+            </div>
+          </div>
+          <div>
+            <div style={{ font: "var(--t-mono-sm)", color: "var(--paper-mute)", marginBottom: 6 }}>
+              HASHTAGS
+            </div>
+            <div style={{ color: "var(--paper-dim)", lineHeight: 1.6 }}>
+              {Array.isArray(carousel.hashtags) && carousel.hashtags.length
+                ? carousel.hashtags.join(" ")
+                : "#EstoNoEsAmor #Apego #AmorPropio"}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function ProjectDetailsPage({ params }) {
   const resolvedParams = React.use(params);
   const { id } = resolvedParams;
@@ -469,6 +595,8 @@ export default function ProjectDetailsPage({ params }) {
 
   const agent = SYSTEM_AGENTS.find((a) => a.agentId === project.agentId);
   const isTikTok = project.platform === "tiktok" || String(project.format || "").startsWith("tiktok_");
+  const isInstagramCarousel =
+    project.platform === "instagram" || project.format === "instagram_carousel";
   const isWellness = ["autohipnosis", "meditacion_larga", "tiktok_autohypnosis", "tiktok_meditation"].includes(project.format);
   const isDeliveryRecoverable = Boolean(project.deliveryRecoverableFromDisk);
   const isProcessing =
@@ -546,8 +674,8 @@ export default function ProjectDetailsPage({ params }) {
   };
 
   const TABS = [
-    { id: "script", label: isTikTok ? "Guión vertical" : isWellness ? "Sesión y voz" : "Guión y voz" },
-    { id: "scenes", label: isTikTok ? "Beats visuales" : isWellness ? "Visuales" : "Escenas" },
+    { id: "script", label: isInstagramCarousel ? "Copy" : isTikTok ? "Guion vertical" : isWellness ? "Sesion y voz" : "Guion y voz" },
+    { id: "scenes", label: isInstagramCarousel ? "Slides" : isTikTok ? "Beats visuales" : isWellness ? "Visuales" : "Escenas" },
   ];
 
   return (
@@ -557,13 +685,13 @@ export default function ProjectDetailsPage({ params }) {
         agent={agent}
         onDownloadVideo={handleDownloadVideo}
         onDownloadAll={handleDownloadAll}
-        onPublishYouTube={isTikTok ? null : () => setPublishModalOpen(true)}
+        onPublishYouTube={isTikTok || isInstagramCarousel ? null : () => setPublishModalOpen(true)}
         onPublishTikTok={isTikTok ? () => setTikTokPublishModalOpen(true) : null}
         downloadAllLoading={downloadAllLoading}
-        platform={isTikTok ? "tiktok" : "youtube"}
+        platform={isInstagramCarousel ? "instagram" : isTikTok ? "tiktok" : "youtube"}
       />
 
-      {!isTikTok && (
+      {!isTikTok && !isInstagramCarousel && (
         <YouTubePublishModal
           open={publishModalOpen}
           onClose={() => setPublishModalOpen(false)}
@@ -573,7 +701,7 @@ export default function ProjectDetailsPage({ params }) {
         />
       )}
 
-      {!isTikTok && (
+      {!isTikTok && !isInstagramCarousel && (
         <YouTubeShortsPublishModal
           open={shortsPublishModalOpen}
           onClose={() => setShortsPublishModalOpen(false)}
@@ -647,7 +775,7 @@ export default function ProjectDetailsPage({ params }) {
         </div>
       )}
 
-      {(project.status === "completed" || isDeliveryRecoverable) && (
+      {!isInstagramCarousel && (project.status === "completed" || isDeliveryRecoverable) && (
         <VideoPlayer
           project={project}
           videoState={videoState}
@@ -660,14 +788,18 @@ export default function ProjectDetailsPage({ params }) {
         <TikTokDeliveryPanel project={project} />
       )}
 
-      {project.status === "completed" && !isTikTok && (
+      {project.status === "completed" && isInstagramCarousel && (
+        <CarouselDeliveryPanel project={project} />
+      )}
+
+      {project.status === "completed" && !isTikTok && !isInstagramCarousel && (
         <ShortsGrid
           shorts={project.shorts}
           onPublishShorts={() => setShortsPublishModalOpen(true)}
         />
       )}
 
-      {project.status === "completed" && !isTikTok && (
+      {project.status === "completed" && !isTikTok && !isInstagramCarousel && (
         <ThumbnailsGrid thumbnails={project.thumbnails} />
       )}
 

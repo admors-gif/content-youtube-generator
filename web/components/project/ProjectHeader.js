@@ -33,6 +33,7 @@ export default function ProjectHeader({
   const created = formatRelativeTime(project.createdAt);
   const isCompleted = project.status === "completed";
   const canDownload = isCompleted || project.deliveryRecoverableFromDisk;
+  const isCarousel = platform === "instagram" || project.format === "instagram_carousel";
 
   return (
     <header className="cf-fade" style={{ marginBottom: "var(--s-6)" }}>
@@ -141,17 +142,19 @@ export default function ProjectHeader({
 
         {canDownload && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              onClick={onDownloadVideo}
-              className="cf-btn cf-btn--secondary"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <Icon name="download" size={16} /> Descargar video
-            </button>
+            {!isCarousel && (
+              <button
+                onClick={onDownloadVideo}
+                className="cf-btn cf-btn--secondary"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <Icon name="download" size={16} /> Descargar video
+              </button>
+            )}
             <button
               onClick={onDownloadAll}
               disabled={downloadAllLoading}
@@ -166,25 +169,31 @@ export default function ProjectHeader({
               title="Todo el material del proyecto en un ZIP organizado"
             >
               <Icon name="package" size={16} />{" "}
-              {downloadAllLoading ? "Preparando ZIP" : "Material completo"}
+              {downloadAllLoading
+                ? "Preparando ZIP"
+                : isCarousel
+                  ? "Descargar carrusel"
+                  : "Material completo"}
             </button>
-            <button
-              onClick={platform === "tiktok" ? onPublishTikTok : onPublishYouTube}
-              className="cf-btn cf-btn--ghost"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-              }}
-              title={
-                platform === "tiktok"
-                  ? "Enviar el video al Inbox de TikTok para revisión"
-                  : "Revisar metadata y subir como privado o programado"
-              }
-            >
-              <Icon name={platform === "tiktok" ? "zap" : "uploadCloud"} size={16} />{" "}
-              {platform === "tiktok" ? "Enviar a TikTok" : "Publicar en YouTube"}
-            </button>
+            {!isCarousel && (
+              <button
+                onClick={platform === "tiktok" ? onPublishTikTok : onPublishYouTube}
+                className="cf-btn cf-btn--ghost"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+                title={
+                  platform === "tiktok"
+                    ? "Enviar el video al Inbox de TikTok para revision"
+                    : "Revisar metadata y subir como privado o programado"
+                }
+              >
+                <Icon name={platform === "tiktok" ? "zap" : "uploadCloud"} size={16} />{" "}
+                {platform === "tiktok" ? "Enviar a TikTok" : "Publicar en YouTube"}
+              </button>
+            )}
           </div>
         )}
       </div>

@@ -69,6 +69,8 @@ TIKTOK_FORMATS = {
 YOUTUBE_SHORTS_PODCAST_FORMAT = "youtube_shorts_podcast"
 YOUTUBE_SHORTS_FORMATS = {YOUTUBE_SHORTS_PODCAST_FORMAT}
 VERTICAL_SHORTS_FORMATS = {*TIKTOK_FORMATS, *YOUTUBE_SHORTS_FORMATS}
+INSTAGRAM_CAROUSEL_FORMAT = "instagram_carousel"
+INSTAGRAM_CAROUSEL_FORMATS = {INSTAGRAM_CAROUSEL_FORMAT}
 LONG_MEDITATION_DEFAULT_MUSIC_VOLUME_DB = -24.0
 LONG_MEDITATION_STATIC_FPS = 6
 
@@ -249,6 +251,12 @@ def _save_image_jobs(images_dir: Path, jobs: dict) -> None:
 
 def _build_image_prompt(prompt: str, pipeline_format: str = "narrativa", provider: str = "flux") -> str:
     prompt = (prompt or "").strip()
+    if pipeline_format in INSTAGRAM_CAROUSEL_FORMATS:
+        return (
+            "Premium editorial Instagram carousel background, dark elegant noir, "
+            "deep crimson accents, off-white highlights, clean negative space for "
+            f"later typography overlay, no readable text. {prompt}"
+        ).strip()
     if pipeline_format in VERTICAL_SHORTS_FORMATS:
         return (
             f"{GENERAL_IMAGE_PROMPT_PREFIX} vertical 9:16 short-form frame, "
@@ -269,12 +277,13 @@ def _select_image_workflow(pipeline_format: str) -> dict:
     kept out of production routes so a missing Cloud approval cannot stall jobs.
     """
     is_vertical_short = pipeline_format in VERTICAL_SHORTS_FORMATS
-    width = 768 if is_vertical_short else 1344
-    height = 1344 if is_vertical_short else 768
-    if is_vertical_short:
+    is_instagram_carousel = pipeline_format in INSTAGRAM_CAROUSEL_FORMATS
+    width = 1080 if is_instagram_carousel else 768 if is_vertical_short else 1344
+    height = 1350 if is_instagram_carousel else 1344 if is_vertical_short else 768
+    if is_vertical_short or is_instagram_carousel:
         return {
             "provider": "flux",
-            "label": "FLUX/Krea vertical",
+            "label": "FLUX/Krea carousel" if is_instagram_carousel else "FLUX/Krea vertical",
             "workflow": BASE_DIR / "config" / "flux1_krea_dev_api.json",
             "prompt_node": "200:195",
             "prompt_input": "text",

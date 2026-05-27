@@ -1,5 +1,5 @@
 "use client";
-import { computeVerticalShortScore, computeViralityScore } from "@/lib/virality";
+import { computeCarouselScore, computeVerticalShortScore, computeViralityScore } from "@/lib/virality";
 
 /**
  * ViralityPanel — Editorial Cinematic v2.
@@ -165,11 +165,14 @@ function getWellnessVerdict(overall) {
 
 export default function ViralityPanel({ text, format }) {
   const isWellness = ["autohipnosis", "meditacion_larga"].includes(format);
+  const isCarousel = format === "instagram_carousel";
   const isTikTok = String(format || "").startsWith("tiktok_");
   const isYouTubeShorts = format === "youtube_shorts_podcast";
   const isVerticalShort = isTikTok || isYouTubeShorts;
   const isLongMeditation = format === "meditacion_larga";
-  const score = isVerticalShort
+  const score = isCarousel
+    ? computeCarouselScore(text)
+    : isVerticalShort
     ? computeVerticalShortScore(text, format)
     : isWellness
       ? computeWellnessScore(text)
@@ -196,6 +199,8 @@ export default function ViralityPanel({ text, format }) {
           ? isLongMeditation
             ? "ÍNDICE DE DESCANSO"
             : "ÍNDICE DE CALMA"
+          : isCarousel
+            ? "INDICE CARRUSEL"
           : isVerticalShort
             ? isYouTubeShorts
               ? "ÍNDICE YOUTUBE SHORTS"
@@ -265,6 +270,8 @@ export default function ViralityPanel({ text, format }) {
               ? isLongMeditation
                 ? "sesión larga"
                 : "sesión guiada"
+              : isCarousel
+                ? `${score.hooks} hook${score.hooks === 1 ? "" : "s"} / swipe`
               : isVerticalShort
                 ? `${score.hooks} hook${score.hooks === 1 ? "" : "s"} detectado${score.hooks === 1 ? "" : "s"}`
                 : `${score.hooks} hook${score.hooks === 1 ? "" : "s"} detectado${score.hooks === 1 ? "" : "s"}`}
@@ -280,6 +287,14 @@ export default function ViralityPanel({ text, format }) {
             <ScoreBar label={isLongMeditation ? "Afirmaciones" : "Profundidad"} value={score.depth} />
             <ScoreBar label="Ritmo" value={score.rhythm} />
             <ScoreBar label="Seguridad" value={score.safety} />
+          </>
+        ) : isCarousel ? (
+          <>
+            <ScoreBar label="Hook" value={score.hookScore} />
+            <ScoreBar label="Swipe" value={score.pacingScore} />
+            <ScoreBar label="Emocion" value={score.emotionScore} />
+            <ScoreBar label="Guardar" value={score.retentionScore} />
+            <ScoreBar label="CTA" value={score.ctaScore} />
           </>
         ) : (
           <>

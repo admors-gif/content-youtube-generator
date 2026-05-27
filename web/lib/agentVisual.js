@@ -56,6 +56,7 @@ export const MONOGRAM_BY_AGENT_ID = {
   agent_podcast_general_v2_largo: "VL",
   agent_podcast_mesa_redonda: "MR",
   agent_youtube_shorts_esto_no_es_amor: "YS",
+  agent_instagram_carousel_esto_no_es_amor: "IG",
   agent_autohipnosis:     "Ah",
   agent_meditacion_larga: "ML",
   agent_meditacion_larga_v2: "MI",

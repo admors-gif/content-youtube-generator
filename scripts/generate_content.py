@@ -1605,6 +1605,8 @@ TIKTOK_FORMATS = {
 YOUTUBE_SHORTS_PODCAST_FORMAT = "youtube_shorts_podcast"
 YOUTUBE_SHORTS_FORMATS = {YOUTUBE_SHORTS_PODCAST_FORMAT}
 VERTICAL_SHORTS_FORMATS = {*TIKTOK_FORMATS, *YOUTUBE_SHORTS_FORMATS}
+INSTAGRAM_CAROUSEL_FORMAT = "instagram_carousel"
+INSTAGRAM_CAROUSEL_AGENT_FILE = "agent_instagram_carousel_esto_no_es_amor.md"
 TIKTOK_FORMAT_BY_AGENT = {
     "agent_tiktok_documentary.md": "tiktok_documentary",
     "agent_tiktok_podcast.md": "tiktok_podcast",
@@ -1613,6 +1615,9 @@ TIKTOK_FORMAT_BY_AGENT = {
 }
 YOUTUBE_SHORTS_FORMAT_BY_AGENT = {
     "agent_youtube_shorts_esto_no_es_amor.md": YOUTUBE_SHORTS_PODCAST_FORMAT,
+}
+INSTAGRAM_CAROUSEL_FORMAT_BY_AGENT = {
+    INSTAGRAM_CAROUSEL_AGENT_FILE: INSTAGRAM_CAROUSEL_FORMAT,
 }
 TIKTOK_DURATION_PROFILES = {
     "60s": {"target_seconds": 60, "word_min": 120, "word_max": 170, "visual_min": 3, "visual_max": 5},
@@ -2162,6 +2167,568 @@ def _ensure_youtube_shorts_quality(
 
     best_data["script"] = best_script
     return best_data, best_script, best_scores
+
+
+CAROUSEL_QUALITY_THRESHOLDS = {
+    "overall": 90,
+    "hookScore": 85,
+    "swipeRetentionScore": 85,
+    "emotionScore": 80,
+    "clarityScore": 85,
+    "saveShareScore": 85,
+    "ctaScore": 80,
+}
+
+CAROUSEL_SLIDE_ROLES = [
+    "cover",
+    "identification",
+    "mechanism",
+    "example",
+    "turn",
+    "reframe",
+    "saveable",
+    "cta",
+]
+
+
+def _normalize_carousel_text(value, limit: int) -> str:
+    text = " ".join(str(value or "").replace("\n", " ").split()).strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip(" .,;:") + "."
+
+
+def _normalize_carousel_hashtags(value) -> list[str]:
+    if isinstance(value, str):
+        raw_items = value.replace(",", " ").split()
+    elif isinstance(value, list):
+        raw_items = value
+    else:
+        raw_items = []
+    tags = []
+    for item in raw_items:
+        tag = str(item or "").strip()
+        if not tag:
+            continue
+        if not tag.startswith("#"):
+            tag = "#" + tag
+        tag = tag.replace(" ", "")
+        if tag not in tags:
+            tags.append(tag[:40])
+    defaults = ["#EstoNoEsAmor", "#ApegoEmocional", "#AmorPropio", "#Relaciones"]
+    for tag in defaults:
+        if tag not in tags:
+            tags.append(tag)
+    return tags[:10]
+
+
+def _carousel_base_visual_prompt(topic: str, slide_role: str, visual_hint: str = "") -> str:
+    relationship = _relationship_visual_context(topic)
+    role_lens = {
+        "cover": "one iconic cover metaphor with strong negative space for overlaid title",
+        "identification": "lonely mirror-like emotional recognition, intimate but not literal",
+        "mechanism": "abstract psychological mechanism, threads, fracture lines and tension",
+        "example": "everyday emotional pattern represented symbolically, no phones as main subject",
+        "turn": "uncomfortable reveal, crimson light cutting through smoke",
+        "reframe": "quiet repair, dignity, distance and inner structure",
+        "saveable": "minimal quote-card background, elegant empty space and one memorable symbol",
+        "cta": "open ending with subtle path toward clarity, premium branded closing frame",
+    }.get(slide_role, "minimal emotional metaphor with clean negative space")
+    return (
+        "Esto No Es Amor premium Instagram carousel background. "
+        "Dark elegant noir, black and deep crimson, off-white highlights, smoky gray atmosphere, "
+        "one clear emotional metaphor, editorial premium composition, no readable text, no letters, "
+        "no logos, no watermarks, no detailed faces, no realistic close-up faces, no visible hands, "
+        "no fingers, no phones as main subject, no microphones, no headphones, no studio gear, "
+        f"theme: {relationship['theme']}; emotion: {relationship['emotion']}; "
+        f"metaphor: {relationship['metaphor']}; slide role: {role_lens}. {visual_hint}"
+    ).strip()
+
+
+def _fallback_instagram_carousel(topic: str) -> dict:
+    clean_topic = " ".join(str(topic or "esto que sientes").split()).strip()
+    slides = [
+        {
+            "index": 1,
+            "role": "cover",
+            "headline": "Si tienes que perseguirlo, no es amor.",
+            "body": "Es una herida intentando ganar una respuesta.",
+        },
+        {
+            "index": 2,
+            "role": "identification",
+            "headline": "Lo sabes, pero vuelves a mirar.",
+            "body": "Revisas senales pequenas como si ahi estuviera tu valor.",
+        },
+        {
+            "index": 3,
+            "role": "mechanism",
+            "headline": "El rechazo engancha al sistema nervioso.",
+            "body": "No porque esa persona sea unica. Porque activa algo que ya dolia.",
+        },
+        {
+            "index": 4,
+            "role": "example",
+            "headline": "Una vista, un silencio, una esperanza.",
+            "body": "Tu mente convierte migajas en pruebas de que todavia hay algo.",
+        },
+        {
+            "index": 5,
+            "role": "turn",
+            "headline": "El giro incomodo es este:",
+            "body": "A veces no buscas amor. Buscas que por fin alguien te elija.",
+        },
+        {
+            "index": 6,
+            "role": "reframe",
+            "headline": "Soltar no es perder.",
+            "body": "Es dejar de pedirle a una persona que repare una historia vieja.",
+        },
+        {
+            "index": 7,
+            "role": "saveable",
+            "headline": "La intensidad no siempre es profundidad.",
+            "body": "A veces solo es ansiedad con buen disfraz.",
+        },
+        {
+            "index": 8,
+            "role": "cta",
+            "headline": "Esto No Es Amor.",
+            "body": "Busca el episodio completo en YouTube si necesitas ponerle nombre a esto.",
+        },
+    ]
+    for slide in slides:
+        slide["visualPrompt"] = _carousel_base_visual_prompt(clean_topic, slide["role"])
+        slide["layout"] = "cover" if slide["index"] == 1 else "quote" if slide["role"] == "saveable" else "editorial"
+        slide["altText"] = f"Carrusel Esto No Es Amor sobre {clean_topic}, slide {slide['index']}."
+    caption = (
+        f"{clean_topic}\n\n"
+        "No todo lo intenso es amor. A veces es una parte de ti intentando resolver una herida vieja.\n\n"
+        "Si esto te movio algo, busca Esto No Es Amor en YouTube. Hay episodios completos para entender lo que aqui solo abrimos."
+    )
+    return {
+        "slides": slides,
+        "caption": caption,
+        "hashtags": ["#EstoNoEsAmor", "#ApegoEmocional", "#AmorPropio", "#Relaciones", "#Sanar"],
+        "cta": {
+            "type": "youtube_search",
+            "text": "Busca Esto No Es Amor en YouTube para ver el episodio completo.",
+        },
+        "visual_direction": "Noir emocional premium, fondos sin texto y tipografia aplicada despues por backend.",
+        "quality_scores": _score_instagram_carousel({"slides": slides, "caption": caption, "cta": {"text": "Busca Esto No Es Amor en YouTube."}}),
+    }
+
+
+def _normalize_instagram_carousel_payload(payload: dict, topic: str) -> dict:
+    data = dict(payload or {})
+    raw_slides = data.get("slides") if isinstance(data.get("slides"), list) else []
+    slides = []
+    for idx in range(8):
+        source = raw_slides[idx] if idx < len(raw_slides) and isinstance(raw_slides[idx], dict) else {}
+        role = str(source.get("role") or CAROUSEL_SLIDE_ROLES[idx]).strip().lower()
+        if role not in CAROUSEL_SLIDE_ROLES:
+            role = CAROUSEL_SLIDE_ROLES[idx]
+        headline_limit = 72 if idx == 0 else 86
+        body_limit = 150 if idx else 110
+        headline = _normalize_carousel_text(source.get("headline") or source.get("title"), headline_limit)
+        body = _normalize_carousel_text(source.get("body") or source.get("text") or source.get("copy"), body_limit)
+        if not headline:
+            headline = _fallback_instagram_carousel(topic)["slides"][idx]["headline"]
+        if not body:
+            body = _fallback_instagram_carousel(topic)["slides"][idx]["body"]
+        visual_prompt = _normalize_carousel_text(source.get("visualPrompt") or source.get("visual_prompt"), 1200)
+        if not visual_prompt:
+            visual_prompt = _carousel_base_visual_prompt(topic, role, source.get("visual_hint") or "")
+        slides.append({
+            "index": idx + 1,
+            "role": role,
+            "headline": headline,
+            "body": body,
+            "visualPrompt": visual_prompt,
+            "layout": str(source.get("layout") or ("cover" if idx == 0 else "quote" if role == "saveable" else "editorial")).strip(),
+            "altText": _normalize_carousel_text(source.get("altText") or source.get("alt_text") or f"Slide {idx + 1} de Esto No Es Amor sobre {topic}.", 180),
+        })
+
+    caption = _normalize_carousel_text(
+        data.get("caption"),
+        1800,
+    ) or _fallback_instagram_carousel(topic)["caption"]
+    if "youtube" not in _score_text_key(caption):
+        caption = (
+            f"{caption}\n\n"
+            "Si esto te movio algo, busca Esto No Es Amor en YouTube. Hay episodios completos para entender lo que aqui solo abrimos."
+        )
+    cta = data.get("cta") if isinstance(data.get("cta"), dict) else {}
+    cta_text = _normalize_carousel_text(cta.get("text") or data.get("ctaText"), 180)
+    if not cta_text:
+        cta_text = "Busca Esto No Es Amor en YouTube para ver el episodio completo."
+
+    normalized = {
+        "slides": slides,
+        "caption": caption,
+        "hashtags": _normalize_carousel_hashtags(data.get("hashtags")),
+        "cta": {
+            "type": str(cta.get("type") or "youtube_search"),
+            "text": cta_text,
+        },
+        "visual_direction": _normalize_carousel_text(data.get("visual_direction") or data.get("visualDirection"), 700)
+        or "Noir emocional premium con textos renderizados por backend.",
+    }
+    normalized["quality_scores"] = _score_instagram_carousel(normalized)
+    return normalized
+
+
+def _score_instagram_carousel(carousel: dict) -> dict:
+    slides = carousel.get("slides") if isinstance(carousel, dict) else []
+    if not isinstance(slides, list) or not slides:
+        return {
+            "overall": 0,
+            "hookScore": 0,
+            "swipeRetentionScore": 0,
+            "emotionScore": 0,
+            "clarityScore": 0,
+            "saveShareScore": 0,
+            "ctaScore": 0,
+            "slideCount": 0,
+        }
+    text = "\n".join(
+        f"{slide.get('headline', '')} {slide.get('body', '')}"
+        for slide in slides
+        if isinstance(slide, dict)
+    )
+    lower = _score_text_key(text)
+    first = slides[0] if isinstance(slides[0], dict) else {}
+    first_words = len(str(first.get("headline") or "").split())
+    roles = {str(slide.get("role") or "").lower() for slide in slides if isinstance(slide, dict)}
+    emotion_terms = [
+        "amor",
+        "apego",
+        "ansiedad",
+        "rechazo",
+        "herida",
+        "obsesion",
+        "autoestima",
+        "dolor",
+        "paz",
+        "soltar",
+        "abandono",
+        "dependencia",
+        "miedo",
+    ]
+    retention_terms = [
+        "pero",
+        "porque",
+        "en realidad",
+        "el problema",
+        "a veces",
+        "el giro",
+        "no estas",
+        "no es amor",
+    ]
+    save_terms = [
+        "guarda",
+        "recuerda",
+        "regla",
+        "si tienes que",
+        "la intensidad",
+        "no es amor",
+    ]
+    cta_text = " ".join([
+        str((carousel.get("cta") or {}).get("text") if isinstance(carousel.get("cta"), dict) else ""),
+        str(carousel.get("caption") or ""),
+    ])
+    emotion_count = _count_scoring_terms(lower, emotion_terms)
+    retention_count = _count_scoring_terms(lower, retention_terms)
+    save_count = _count_scoring_terms(lower, save_terms)
+    avg_words = sum(
+        len(f"{slide.get('headline', '')} {slide.get('body', '')}".split())
+        for slide in slides
+        if isinstance(slide, dict)
+    ) / max(1, len(slides))
+    has_youtube_cta = "youtube" in _score_text_key(cta_text)
+
+    hook_score = _clamp_score(
+        50
+        + (24 if 4 <= first_words <= 14 else 10)
+        + (14 if any(term in _score_text_key(str(first.get("headline") or "")) for term in ["no es amor", "apego", "ansiedad", "herida", "rechazo", "obsesion"]) else 0)
+        + (8 if "?" in str(first.get("headline") or "") else 0)
+    )
+    swipe_score = _clamp_score(48 + min(len(roles) * 5, 35) + min(retention_count * 4, 20))
+    emotion_score = _clamp_score(42 + min(emotion_count * 5, 48) + (8 if "esto no es amor" in lower else 0))
+    clarity_score = _clamp_score(88 - abs(avg_words - 20) * 1.3 + (8 if len(slides) == 8 else -8))
+    save_score = _clamp_score(50 + min(save_count * 8, 32) + (12 if "saveable" in roles else 0))
+    cta_score = _clamp_score(45 + (35 if has_youtube_cta else 0) + (14 if "canal" in _score_text_key(cta_text) or "episodio" in _score_text_key(cta_text) else 0))
+    overall = _clamp_score(
+        hook_score * 0.2
+        + swipe_score * 0.2
+        + emotion_score * 0.18
+        + clarity_score * 0.15
+        + save_score * 0.15
+        + cta_score * 0.12
+    )
+    return {
+        "overall": overall,
+        "hookScore": hook_score,
+        "swipeRetentionScore": swipe_score,
+        "emotionScore": emotion_score,
+        "clarityScore": clarity_score,
+        "saveShareScore": save_score,
+        "ctaScore": cta_score,
+        "slideCount": len(slides),
+        "avgWordsPerSlide": round(avg_words, 1),
+        "thresholds": CAROUSEL_QUALITY_THRESHOLDS,
+        "qualityPassed": all(
+            int({
+                "overall": overall,
+                "hookScore": hook_score,
+                "swipeRetentionScore": swipe_score,
+                "emotionScore": emotion_score,
+                "clarityScore": clarity_score,
+                "saveShareScore": save_score,
+                "ctaScore": cta_score,
+            }.get(key, 0)) >= minimum
+            for key, minimum in CAROUSEL_QUALITY_THRESHOLDS.items()
+        ),
+    }
+
+
+def _instagram_carousel_quality_feedback(scores: dict) -> str:
+    labels = {
+        "overall": "indice general",
+        "hookScore": "hook",
+        "swipeRetentionScore": "retencion por swipe",
+        "emotionScore": "emocion",
+        "clarityScore": "claridad",
+        "saveShareScore": "guardable/compartible",
+        "ctaScore": "CTA",
+    }
+    notes = []
+    for key, minimum in CAROUSEL_QUALITY_THRESHOLDS.items():
+        value = int(scores.get(key, 0))
+        if value < minimum:
+            notes.append(f"{labels[key]} {value}/{minimum}")
+    return ", ".join(notes) if notes else "pasa el filtro"
+
+
+def _request_instagram_carousel_rewrite(
+    *,
+    topic: str,
+    system_prompt: str,
+    carousel: dict,
+    scores: dict,
+    attempt: int,
+) -> dict | None:
+    prompt = (
+        "Reescribe este carrusel premium porque no paso el filtro de calidad.\n"
+        "Responde SOLO JSON valido con las claves: slides, caption, hashtags, cta, visual_direction.\n"
+        "No expliques nada fuera del JSON.\n\n"
+        "CONTRATO OBLIGATORIO:\n"
+        "- Exactamente 8 slides.\n"
+        "- Slide 1: hook de maximo 14 palabras, duro y claro.\n"
+        "- Slides 2-7: maximo 32 palabras por slide entre headline y body.\n"
+        "- Slide 8: CTA hacia YouTube/canal sin sonar generico.\n"
+        "- Cada slide debe tener headline, body, role, layout, visualPrompt y altText.\n"
+        "- Los visualPrompt NO pueden pedir texto, letras, logos, manos, caras detalladas ni telefonos como protagonista.\n"
+        "- Debe sentirse como Esto No Es Amor: directo, elegante, incomodo, emocional y util.\n\n"
+        f"TEMA: {topic}\n"
+        f"INTENTO: {attempt}\n"
+        f"SCORES ACTUALES: {json.dumps(scores, ensure_ascii=False)}\n"
+        f"CARRUSEL ACTUAL: {json.dumps(carousel, ensure_ascii=False)}"
+    )
+    try:
+        if claude_client:
+            response = claude_client.messages.create(
+                model=CLAUDE_MODEL_SCRIPT,
+                max_tokens=7000,
+                system=system_prompt,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return _extract_json_object(response.content[0].text)
+        if openai_client:
+            response = openai_client.chat.completions.create(
+                model=GPT_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+                max_completion_tokens=7000,
+            )
+            return _extract_json_object(response.choices[0].message.content)
+    except Exception as exc:
+        print(f"   [!] Rewrite carousel omitido: {exc}")
+    return None
+
+
+def _ensure_instagram_carousel_quality(
+    *,
+    topic: str,
+    carousel: dict,
+    system_prompt: str,
+    project_id: str | None = None,
+) -> dict:
+    best = _normalize_instagram_carousel_payload(carousel, topic)
+    best_scores = best.get("quality_scores") or {}
+    best_quality = int(best_scores.get("overall", 0))
+
+    for attempt in range(1, 3):
+        if best_scores.get("qualityPassed"):
+            break
+        feedback = _instagram_carousel_quality_feedback(best_scores)
+        print(f"   [carousel] quality gate: reescritura {attempt} ({feedback})")
+        if project_id:
+            update_progress(
+                project_id,
+                "Reforzando hook, emocion y CTA del carrusel...",
+                18 + attempt * 4,
+                {"status": "scripting", "carouselQualityGate": best_scores},
+            )
+        revised = _request_instagram_carousel_rewrite(
+            topic=topic,
+            system_prompt=system_prompt,
+            carousel=best,
+            scores=best_scores,
+            attempt=attempt,
+        )
+        if not isinstance(revised, dict):
+            break
+        normalized = _normalize_instagram_carousel_payload(revised, topic)
+        normalized_quality = int((normalized.get("quality_scores") or {}).get("overall", 0))
+        if normalized_quality >= best_quality:
+            best = normalized
+            best_scores = best.get("quality_scores") or {}
+            best_quality = normalized_quality
+
+    if not best_scores.get("qualityPassed"):
+        fallback = _fallback_instagram_carousel(topic)
+        fallback = _normalize_instagram_carousel_payload(fallback, topic)
+        fallback_score = int((fallback.get("quality_scores") or {}).get("overall", 0))
+        if fallback_score >= best_quality:
+            print("   [carousel] quality gate: usando fallback de alto rendimiento")
+            best = fallback
+    return best
+
+
+def _carousel_plain_script(carousel: dict) -> str:
+    lines = []
+    for slide in carousel.get("slides") or []:
+        lines.append(
+            f"SLIDE {int(slide.get('index') or len(lines) + 1):02d} - {str(slide.get('role') or '').upper()}\n"
+            f"{slide.get('headline')}\n"
+            f"{slide.get('body')}"
+        )
+    caption = carousel.get("caption") or ""
+    hashtags = " ".join(carousel.get("hashtags") or [])
+    cta = (carousel.get("cta") or {}).get("text") if isinstance(carousel.get("cta"), dict) else ""
+    return "\n\n".join(lines + [f"CAPTION\n{caption}", f"HASHTAGS\n{hashtags}", f"CTA\n{cta}"]).strip()
+
+
+def _build_instagram_carousel_scenes(topic: str, carousel: dict) -> list[dict]:
+    scenes = []
+    topic_tags = _topic_tags(topic)
+    for slide in carousel.get("slides") or []:
+        index = int(slide.get("index") or len(scenes) + 1)
+        scenes.append({
+            "scene_number": index,
+            "narration_text": f"{slide.get('headline', '')}\n{slide.get('body', '')}".strip(),
+            "narration": f"{slide.get('headline', '')} {slide.get('body', '')}".strip(),
+            "prompt": slide.get("visualPrompt") or _carousel_base_visual_prompt(topic, slide.get("role") or ""),
+            "tags": [slide.get("role") or "carousel", "instagram", "esto_no_es_amor"] + topic_tags[:2],
+            "visual_category": slide.get("role") or "carousel",
+            "carousel_slide": {
+                "index": index,
+                "role": slide.get("role"),
+                "headline": slide.get("headline"),
+                "body": slide.get("body"),
+                "layout": slide.get("layout"),
+                "altText": slide.get("altText"),
+            },
+        })
+    return scenes
+
+
+def generate_instagram_carousel(topic: str, agent_file: str = INSTAGRAM_CAROUSEL_AGENT_FILE, project_id: str = None, **kwargs) -> dict:
+    system_prompt = load_prompt(agent_file)
+    brand_profile = kwargs.get("brand_profile") or get_brand_profile(DEFAULT_BRAND_PROFILE_ID)
+    prompt_payload = {
+        "topic": topic,
+        "format": INSTAGRAM_CAROUSEL_FORMAT,
+        "platform": "instagram",
+        "slides": 8,
+        "primaryOutput": "1080x1350",
+        "secondaryOutput": "1080x1920",
+        "brandProfile": {
+            "id": (brand_profile or {}).get("id") or DEFAULT_BRAND_PROFILE_ID,
+            "name": (brand_profile or {}).get("name") or "Esto No Es Amor",
+            "coreMessage": (brand_profile or {}).get("coreMessage") or "",
+            "ctaBank": _profile_cta_examples(brand_profile),
+        },
+    }
+    user_prompt = (
+        "Crea un carrusel premium para Instagram con este contrato.\n"
+        "Responde SOLO JSON valido con las claves: slides, caption, hashtags, cta, visual_direction.\n"
+        "slides debe contener exactamente 8 objetos con index, role, headline, body, layout, visualPrompt y altText.\n"
+        "No incluyas markdown ni explicaciones fuera del JSON.\n\n"
+        f"CONTRATO:\n{json.dumps(prompt_payload, ensure_ascii=False, indent=2)}"
+    )
+
+    print(f"\n[carousel] MOTOR 1: Generando carrusel Instagram ({INSTAGRAM_CAROUSEL_FORMAT})...")
+    if project_id:
+        update_progress(project_id, "Escribiendo carrusel premium...", 15, {"status": "scripting"})
+
+    data = None
+    try:
+        if claude_client:
+            response = claude_client.messages.create(
+                model=CLAUDE_MODEL_SCRIPT,
+                max_tokens=8000,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            data = _extract_json_object(response.content[0].text)
+        elif openai_client:
+            response = openai_client.chat.completions.create(
+                model=GPT_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+                max_completion_tokens=8000,
+            )
+            data = _extract_json_object(response.choices[0].message.content)
+    except Exception as exc:
+        print(f"   [!] Carousel fallback por error: {exc}")
+
+    if not isinstance(data, dict):
+        data = _fallback_instagram_carousel(topic)
+    carousel = _ensure_instagram_carousel_quality(
+        topic=topic,
+        carousel=data,
+        system_prompt=system_prompt,
+        project_id=project_id,
+    )
+    script = _carousel_plain_script(carousel)
+    scenes = _build_instagram_carousel_scenes(topic, carousel)
+    metadata = {
+        "format": INSTAGRAM_CAROUSEL_FORMAT,
+        "platform": "instagram",
+        "slide_count": len(scenes),
+        "primary_size": "1080x1350",
+        "secondary_size": "1080x1920",
+        "caption": carousel.get("caption"),
+        "hashtags": carousel.get("hashtags"),
+        "cta": carousel.get("cta"),
+        "quality_scores": carousel.get("quality_scores"),
+        "visual_direction": carousel.get("visual_direction"),
+    }
+    print(f"   [OK] Carrusel: {len(scenes)} slides | score {metadata['quality_scores']}")
+    return {
+        "script": script,
+        "scenes": scenes,
+        "carousel": carousel,
+        "metadata": metadata,
+    }
 
 
 def _relationship_visual_context(topic: str) -> dict:
@@ -3818,6 +4385,7 @@ def run_full_pipeline(
     is_tiktok = _is_tiktok_agent_file(agent_file) or custom_format.startswith("tiktok_")
     is_youtube_shorts = _is_youtube_shorts_agent_file(agent_file) or custom_format in YOUTUBE_SHORTS_FORMATS
     is_vertical_short = is_tiktok or is_youtube_shorts
+    is_instagram_carousel = agent_file in INSTAGRAM_CAROUSEL_FORMAT_BY_AGENT or custom_format == INSTAGRAM_CAROUSEL_FORMAT
     audio_playback_speed = None
     raw_audio_playback_speed = generation_options.get("audio_playback_speed") or generation_options.get("audioPlaybackSpeed")
     try:
@@ -3846,6 +4414,8 @@ def run_full_pipeline(
         print(f"⚡ Modo TIKTOK detectado — {tiktok_format} vertical {tiktok_profile['id']}")
     elif is_youtube_shorts:
         print(f"[shorts] Modo YOUTUBE SHORTS detectado - {tiktok_format} vertical {tiktok_profile['id']}")
+    if is_instagram_carousel:
+        print("[carousel] Modo INSTAGRAM CAROUSEL detectado - 8 slides premium")
     public_figure_visuals = {"enabled": False, "detected": False}
     public_figure_visual_context = ""
 
@@ -3853,7 +4423,15 @@ def run_full_pipeline(
         update_progress(project_id, "Escribiendo la estructura narrativa...", 10, {"status": "scripting"})
 
         # PASO 1: Generar guión (formatos especiales usan generador propio)
-        if is_vertical_short:
+        if is_instagram_carousel:
+            result = generate_instagram_carousel(
+                topic,
+                agent_file,
+                project_id,
+                brand_profile=brand_profile,
+                agent_prompt_override=agent_prompt_override,
+            )
+        elif is_vertical_short:
             if _is_relationship_short_format(tiktok_format):
                 result = generate_tiktok_podcast_script(
                     topic,
@@ -3929,7 +4507,9 @@ def run_full_pipeline(
 
         # PASO 2: Agregar etiquetas de emoción (tagger especializado para podcast
         # respeta densidades por speaker)
-        if is_vertical_short and tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
+        if is_instagram_carousel:
+            tagged_script = script
+        elif is_vertical_short and tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
             tagged_script = _normalize_autohypnosis_delivery(script)
         elif is_autohypnosis or is_long_meditation:
             tagged_script = _normalize_autohypnosis_delivery(script)
@@ -3954,7 +4534,7 @@ def run_full_pipeline(
             print(f"   🎭 Podcast parseado: {len(podcast_blocks)} bloques de diálogo → "
                   f"{len(podcast_scenes_grouped)} escenas visuales")
 
-        generic_documentary_visuals = not (is_podcast or is_autohypnosis or is_long_meditation or is_vertical_short)
+        generic_documentary_visuals = not (is_podcast or is_autohypnosis or is_long_meditation or is_vertical_short or is_instagram_carousel)
         if generic_documentary_visuals and should_prepare_public_figure_visuals(
             topic,
             agent_file,
@@ -3986,7 +4566,10 @@ def run_full_pipeline(
         update_progress(project_id, "Diseñando escenas visuales...", 60, {"status": "prompting"})
 
         # PASO 3: Generar prompts de video (estética por formato)
-        if is_vertical_short:
+        if is_instagram_carousel:
+            video_scenes = result["scenes"]
+            print(f"   [carousel] Visual: {len(video_scenes)} fondos para slides")
+        elif is_vertical_short:
             video_scenes = _build_tiktok_visual_scenes(
                 topic,
                 tagged_script,
@@ -4087,8 +4670,8 @@ def run_full_pipeline(
         full_result = {
             "topic": topic,
             "agent": agent_file,
-            "platform": "tiktok" if is_tiktok else "youtube",
-            "format": tiktok_format if is_vertical_short else "podcast" if is_podcast else LONG_MEDITATION_FORMAT if is_long_meditation else "autohipnosis" if is_autohypnosis else "narrativa",
+            "platform": "instagram" if is_instagram_carousel else "tiktok" if is_tiktok else "youtube",
+            "format": INSTAGRAM_CAROUSEL_FORMAT if is_instagram_carousel else tiktok_format if is_vertical_short else "podcast" if is_podcast else LONG_MEDITATION_FORMAT if is_long_meditation else "autohipnosis" if is_autohypnosis else "narrativa",
             "brandProfileId": brand_profile_id,
             "brandProfile": brand_profile,
             "script_plain": script,
@@ -4113,6 +4696,15 @@ def run_full_pipeline(
             full_result["sourceInspiration"] = source_inspiration_options
         if public_figure_visuals.get("detected"):
             full_result["publicFigureVisuals"] = public_figure_visuals
+        if is_instagram_carousel:
+            full_result["carousel"] = {
+                **result["carousel"],
+                "status": "script_ready",
+                "delivery": {
+                    "enabled": False,
+                    "reason": "awaiting_static_carousel_render",
+                },
+            }
         if is_autohypnosis or is_long_meditation:
             full_result["personalization"] = result["metadata"].get("personalization") or {
                 "enabled": False,
@@ -4248,6 +4840,8 @@ def run_full_pipeline(
                 # Podcast/autohipnosis son más pausados que narrativa.
                 wpm = 135 if is_vertical_short else 130 if is_podcast else LONG_MEDITATION_ESTIMATED_WPM if is_long_meditation else AUTOHYPNOSIS_ESTIMATED_WPM if is_autohypnosis else 150
                 estimated_minutes = round(words / wpm, 1)
+                if is_instagram_carousel:
+                    estimated_minutes = 0
                 if is_vertical_short:
                     estimated_minutes = round((result["metadata"].get("target_seconds") or tiktok_profile["target_seconds"]) / 60, 1)
                 if is_long_meditation:
@@ -4305,6 +4899,11 @@ def run_full_pipeline(
                         )
                     if _is_relationship_short_format(tiktok_format) and full_result.get("podcast"):
                         firestore_payload["podcast"] = full_result["podcast"]
+                if is_instagram_carousel:
+                    firestore_payload["platform"] = "instagram"
+                    firestore_payload["format"] = INSTAGRAM_CAROUSEL_FORMAT
+                    firestore_payload["carousel"] = full_result["carousel"]
+                    firestore_payload["script.slideCount"] = len(video_scenes)
                 if is_autohypnosis:
                     firestore_payload["format"] = "autohipnosis"
                     firestore_payload["autohipnosis"] = full_result["autohipnosis"]
