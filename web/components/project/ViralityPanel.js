@@ -167,7 +167,7 @@ export default function ViralityPanel({ text, format }) {
   const isWellness = ["autohipnosis", "meditacion_larga"].includes(format);
   const isCarousel = format === "instagram_carousel";
   const isTikTok = String(format || "").startsWith("tiktok_");
-  const isYouTubeShorts = format === "youtube_shorts_podcast";
+  const isYouTubeShorts = String(format || "").startsWith("youtube_shorts_");
   const isVerticalShort = isTikTok || isYouTubeShorts;
   const isLongMeditation = format === "meditacion_larga";
   const score = isCarousel

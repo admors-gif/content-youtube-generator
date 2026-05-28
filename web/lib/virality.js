@@ -136,6 +136,7 @@ export function computeVerticalShortScore(text, format = "") {
   const firstLineWords = firstLine.split(/\s+/).filter(Boolean).length;
   const avgSentenceWords = wordCount / Math.max(sentences.length, 1);
   const isPodcast = format === "tiktok_podcast" || format === "youtube_shorts_podcast";
+  const isDocumentaryYouTubeShort = format === "youtube_shorts_documentary";
 
   const hookTerms = [
     "no es amor",
@@ -199,6 +200,77 @@ export function computeVerticalShortScore(text, format = "") {
     "parte 2",
     "episodio completo",
   ];
+  if (isDocumentaryYouTubeShort) {
+    hookTerms.splice(0, hookTerms.length,
+      "desaparecio",
+      "desapareció",
+      "nadie sabe",
+      "nadie pudo explicar",
+      "version oficial",
+      "versión oficial",
+      "no encaja",
+      "lo que nadie",
+      "ultimo mensaje",
+      "último mensaje",
+      "señal",
+      "senal",
+      "silencio",
+      "misterio",
+      "expediente",
+      "caso",
+      "pregunta",
+    );
+    emotionalTerms.splice(0, emotionalTerms.length,
+      "miedo",
+      "silencio",
+      "familia",
+      "familias",
+      "desaparecio",
+      "desapareció",
+      "nadie",
+      "dolor",
+      "verdad",
+      "ultimo",
+      "último",
+      "esperaban",
+      "cuerpo",
+      "cabina",
+      "oceano",
+      "océano",
+      "rastro",
+      "muerte",
+      "secreto",
+    );
+    retentionTerms.splice(0, retentionTerms.length,
+      "pero",
+      "sin embargo",
+      "el problema",
+      "lo extraño",
+      "lo extrano",
+      "la pregunta",
+      "entonces",
+      "y ahí",
+      "y ahi",
+      "lo inquietante",
+      "lo que no encaja",
+      "si no fuera",
+      "minutos despues",
+      "minutos después",
+      "durante años",
+      "durante anos",
+    );
+    ctaTerms.splice(0, ctaTerms.length,
+      "comenta",
+      "suscríbete",
+      "suscribete",
+      "canal",
+      "parte 2",
+      "expediente",
+      "archivos prohibidos",
+      "siguiente caso",
+      "visita el canal",
+    );
+  }
   const speakerTurns = (clean.match(/^[A-ZÁÉÍÓÚÑ]{3,12}:/gm) || []).length;
   const questionCount = (clean.match(/\?/g) || []).length;
   const hookTermCount = countMatches(clean, hookTerms);
@@ -206,8 +278,8 @@ export function computeVerticalShortScore(text, format = "") {
   const retentionCount = countMatches(clean, retentionTerms);
   const ctaCount = countMatches(clean, ctaTerms);
 
-  const idealMin = format === "tiktok_documentary" ? 120 : 95;
-  const idealMax = format === "tiktok_documentary" ? 500 : 260;
+  const idealMin = isDocumentaryYouTubeShort ? 220 : format === "tiktok_documentary" ? 120 : 95;
+  const idealMax = isDocumentaryYouTubeShort ? 300 : format === "tiktok_documentary" ? 500 : 260;
   const lengthFit =
     wordCount >= idealMin && wordCount <= idealMax
       ? 18
@@ -221,7 +293,10 @@ export function computeVerticalShortScore(text, format = "") {
       Math.min(hookTermCount * 7, 22) +
       Math.min(questionCount * 5, 12),
   );
-  const emotionScore = clampScore(42 + Math.min(emotionCount * 6, 46) + (lower.includes("esto no es amor") ? 8 : 0));
+  const brandEmotionBonus = isDocumentaryYouTubeShort
+    ? (lower.includes("archivos prohibidos") || lower.includes("misterio") || lower.includes("expediente") ? 8 : 0)
+    : (lower.includes("esto no es amor") ? 8 : 0);
+  const emotionScore = clampScore(42 + Math.min(emotionCount * 6, 46) + brandEmotionBonus);
   const rhythmScore = clampScore(
     44 +
       (avgSentenceWords >= 5 && avgSentenceWords <= 16 ? 24 : 10) +

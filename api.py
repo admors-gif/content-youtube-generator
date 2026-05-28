@@ -720,11 +720,21 @@ _TIKTOK_FORMAT_BY_AGENT = {
     "agent_tiktok_meditation": "tiktok_meditation",
 }
 YOUTUBE_SHORTS_PODCAST_FORMAT = "youtube_shorts_podcast"
+YOUTUBE_SHORTS_DOCUMENTARY_FORMAT = "youtube_shorts_documentary"
 _YOUTUBE_SHORTS_AGENT_IDS = {
     "agent_youtube_shorts_esto_no_es_amor",
+    "agent_youtube_shorts_archivos_prohibidos",
 }
 _YOUTUBE_SHORTS_FORMAT_BY_AGENT = {
     "agent_youtube_shorts_esto_no_es_amor": YOUTUBE_SHORTS_PODCAST_FORMAT,
+    "agent_youtube_shorts_archivos_prohibidos": YOUTUBE_SHORTS_DOCUMENTARY_FORMAT,
+}
+_YOUTUBE_SHORTS_DEFAULT_DURATION_BY_AGENT = {
+    "agent_youtube_shorts_esto_no_es_amor": "shorts75",
+    "agent_youtube_shorts_archivos_prohibidos": "shorts90",
+}
+_YOUTUBE_SHORTS_DEFAULT_GENRE_BY_AGENT = {
+    "agent_youtube_shorts_archivos_prohibidos": "mystery",
 }
 INSTAGRAM_CAROUSEL_FORMAT = "instagram_carousel"
 _INSTAGRAM_AGENT_IDS = {
@@ -1172,7 +1182,8 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
             "target_seconds": _TIKTOK_DURATION_SECONDS[duration_profile],
         })
     elif agent_id in _YOUTUBE_SHORTS_AGENT_IDS:
-        duration_key = duration_profile.replace(" ", "") or "shorts75"
+        default_duration_profile = _YOUTUBE_SHORTS_DEFAULT_DURATION_BY_AGENT.get(agent_id, "shorts75")
+        duration_key = duration_profile.replace(" ", "") or default_duration_profile
         duration_profile = _TIKTOK_DURATION_ALIASES.get(duration_key, duration_key)
         if duration_profile not in {"shorts75", "shorts90"}:
             raise HTTPException(status_code=400, detail="invalid durationProfile")
@@ -1180,6 +1191,7 @@ def _validate_project_payload(data: dict, principal: dict | None = None) -> dict
             data.get("sourceGenre")
             or data.get("source_genre")
             or data.get("genre")
+            or _YOUTUBE_SHORTS_DEFAULT_GENRE_BY_AGENT.get(agent_id)
             or "psychology"
         )
         source_genre = str(source_genre).strip().lower().replace("-", "_")
@@ -3252,6 +3264,7 @@ _AGENT_CATALOG = """
 [agent_podcast_general_v2] Esto no es amor v2 — clon seguro del podcast original con Mateo y Lucia, mismo prompt y voces, audio final 1.2x
 [agent_podcast_general_v2_largo] Esto no es amor v2 largo — clon seguro del v2 con guion mas desarrollado y audio final 1.2x
 [agent_youtube_shorts_esto_no_es_amor] Esto no es amor Shorts — shorts verticales nativos para YouTube con Mateo y Lucia, 75s a 1.25x, hook fuerte y CTA de suscripcion
+[agent_youtube_shorts_archivos_prohibidos] Archivos Prohibidos Shorts — shorts documentales nativos para YouTube, 90s a 1.25x, misterio inmediato, retencion alta y CTA de suscripcion
 [agent_instagram_carousel_esto_no_es_amor] Esto no es amor Carrusel — carruseles premium de Instagram con 8 slides, visual noir y CTA hacia YouTube
 [agent_autohipnosis] Autohipnosis Guiada — wellness, relajación, visualización, afirmaciones positivas, desarrollo personal seguro
 [agent_meditacion_larga] Meditación Larga — sesiones de 30 min, 1 h y 3 h para sueño, calma, afirmaciones espaciadas y visuales lentos
@@ -3276,6 +3289,15 @@ _RADAR_EXTRA_AGENTS = [
         "platform": "youtube",
         "format": YOUTUBE_SHORTS_PODCAST_FORMAT,
         "promptFile": "agent_youtube_shorts_esto_no_es_amor.md",
+    },
+    {
+        "agentId": "agent_youtube_shorts_archivos_prohibidos",
+        "name": "Archivos Prohibidos: YouTube Shorts",
+        "description": "Shorts documentales nativos de 90s con misterio inmediato, evidencia, giro y CTA al canal",
+        "category": "mystery",
+        "platform": "youtube",
+        "format": YOUTUBE_SHORTS_DOCUMENTARY_FORMAT,
+        "promptFile": "agent_youtube_shorts_archivos_prohibidos.md",
     },
     {
         "agentId": "agent_instagram_carousel_esto_no_es_amor",
@@ -3331,6 +3353,7 @@ _RADAR_PRIORITY_AGENT_IDS = [
     "agent_podcast_general_v2_largo",
     "agent_podcast_mesa_redonda",
     "agent_youtube_shorts_esto_no_es_amor",
+    "agent_youtube_shorts_archivos_prohibidos",
     "agent_instagram_carousel_esto_no_es_amor",
     "agent_tiktok_podcast",
     "agent_tiktok_documentary",
@@ -3388,6 +3411,7 @@ def _radar_agent_catalog() -> list[dict]:
         "agent_podcast_general_v2": "podcast",
         "agent_podcast_general_v2_largo": "podcast",
         "agent_youtube_shorts_esto_no_es_amor": "podcast",
+        "agent_youtube_shorts_archivos_prohibidos": "mystery",
         "agent_instagram_carousel_esto_no_es_amor": "instagram",
         "agent_autohipnosis": "wellness",
         "agent_meditacion_larga": "wellness",
@@ -4717,8 +4741,8 @@ def _radar_project_payload_from_candidate(candidate: dict) -> dict:
         category = str(candidate.get("category") or "").lower()
         payload["sourceGenre"] = category if category in _TIKTOK_SOURCE_GENRES else "psychology"
     if agent_id in _YOUTUBE_SHORTS_AGENT_IDS:
-        payload.setdefault("durationProfile", "shorts75")
-        payload["sourceGenre"] = "psychology"
+        payload.setdefault("durationProfile", _YOUTUBE_SHORTS_DEFAULT_DURATION_BY_AGENT.get(agent_id, "shorts75"))
+        payload["sourceGenre"] = _YOUTUBE_SHORTS_DEFAULT_GENRE_BY_AGENT.get(agent_id, "psychology")
     if agent_id == "agent_meditacion_larga":
         payload.setdefault("durationProfile", "60m")
     if agent_id == "agent_meditacion_larga_v2":
@@ -8179,13 +8203,13 @@ def _is_podcast_project(data: dict) -> bool:
 
 def _is_archivos_prohibidos_project(data: dict) -> bool:
     agent = data.get("agentId") or data.get("agent") or ""
-    return str(agent) == "agent_misterios_v2"
+    return str(agent) in {"agent_misterios_v2", "agent_youtube_shorts_archivos_prohibidos"}
 
 
 def _is_youtube_shorts_project(data: dict) -> bool:
     fmt = data.get("format") or ""
     agent = data.get("agentId") or data.get("agent") or ""
-    return fmt == YOUTUBE_SHORTS_PODCAST_FORMAT or agent in _YOUTUBE_SHORTS_AGENT_IDS
+    return fmt in {YOUTUBE_SHORTS_PODCAST_FORMAT, YOUTUBE_SHORTS_DOCUMENTARY_FORMAT} or agent in _YOUTUBE_SHORTS_AGENT_IDS
 
 
 def _is_tiktok_project(data: dict) -> bool:
@@ -8238,6 +8262,27 @@ def _youtube_description_for_project(
     if _is_archivos_prohibidos_project(data):
         clean_title = " ".join(str(title or "este caso").split())
         intro = " ".join(str(base_description or "").split())
+        if _is_youtube_shorts_project(data):
+            parts = [
+                (
+                    f"Short de Archivos Prohibidos - MX sobre {clean_title}: "
+                    "un expediente breve con misterio, contradiccion y una pregunta que sigue abierta."
+                ),
+            ]
+            if intro and not intro.lower().startswith("nuevo video:"):
+                parts.append(intro)
+            parts.extend([
+                (
+                    "Si quieres ver mas casos reales, desapariciones, misterios sin resolver y expedientes donde la version oficial "
+                    "deja una pieza fuera, visita el canal y suscribete."
+                ),
+                (
+                    "Pregunta para comentarios: que detalle no te cuadra? Tu teoria puede abrir el siguiente expediente."
+                ),
+            ])
+            if hashtag_line:
+                parts.append(hashtag_line)
+            return "\n\n".join(part for part in parts if part).strip()[:5000]
         parts = [
             (
                 f"En este expediente de Archivos Prohibidos - MX investigamos {clean_title} "
@@ -8336,7 +8381,7 @@ def _build_youtube_publish_pack(project_id: str, data: dict) -> dict:
             "Que detalle de este expediente no te cuadra: la version oficial, la linea de tiempo o la teoria mas inquietante? "
             "Te leo en comentarios. Suscribete a Archivos Prohibidos - MX para mas casos donde falta una pieza."
         )
-    if _is_youtube_shorts_project(data):
+    if _is_youtube_shorts_project(data) and not _is_archivos_prohibidos_project(data):
         pinned_comment = "Si esto te hizo pensar en alguien, mandaselo. Y cuentame que tema deberia ser el siguiente Short."
 
     checklist = "\n".join([
@@ -12560,7 +12605,6 @@ def run_production(project_id):
         is_podcast_project = (
             project_format in {"podcast", "tiktok_podcast", YOUTUBE_SHORTS_PODCAST_FORMAT}
             or (agent_id or "").startswith("agent_podcast_")
-            or agent_id in _YOUTUBE_SHORTS_AGENT_IDS
         )
         is_autohypnosis_project = (
             project_format == "autohipnosis"
@@ -12631,8 +12675,19 @@ def run_production(project_id):
                 })
             elif project_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
                 temp_json["autohipnosis"] = project.get("autohipnosis") or {}
+        elif is_youtube_shorts_project:
+            temp_json["format"] = project_format
+            temp_json["youtubeShorts"] = project.get("youtubeShorts") or {}
+            if project_format == YOUTUBE_SHORTS_PODCAST_FORMAT:
+                temp_json["podcast"] = project.get("podcast", {
+                    "show_name": "Esto no es amor",
+                    "host_a": {"name": "Mateo", "voice": "Will"},
+                    "host_b": {"name": "Lucia", "voice": "Lina"},
+                    "platform": "youtube_shorts",
+                })
+                temp_json["podcast"]["platform"] = "youtube_shorts"
         elif is_podcast_project:
-            temp_json["format"] = project_format if is_youtube_shorts_project else "podcast"
+            temp_json["format"] = "podcast"
             # Reusa la podcast config persistida en Firestore (host_a/host_b voices, etc.)
             # Defaults actualizados 2026-05-03: Will + Lina (eleven_v3 con audio
             # tags). Salvatore + Serafina quedan para documentales (eleven v2).
@@ -12641,9 +12696,6 @@ def run_production(project_id):
                 "host_a": {"name": "Mateo", "voice": "Will"},
                 "host_b": {"name": "Lucía", "voice": "Lina"},
             })
-            if is_youtube_shorts_project:
-                temp_json["youtubeShorts"] = project.get("youtubeShorts") or {}
-                temp_json["podcast"]["platform"] = "youtube_shorts"
         elif is_autohypnosis_project:
             temp_json["format"] = "autohipnosis"
             temp_json["autohipnosis"] = project.get("autohipnosis") or {}

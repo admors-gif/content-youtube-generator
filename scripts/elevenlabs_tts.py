@@ -84,6 +84,8 @@ AGENT_VOICE_MAP = {
     "terror": "Salvatore",
     "misterios": "Salvatore",
     "misterios_v2": "Salvatore",
+    "archivos_prohibidos": "Salvatore",
+    "youtube_shorts_archivos_prohibidos": "Salvatore",
     "biografias": "Salvatore",
     "historia": "Salvatore",
     "documentales": "Salvatore",

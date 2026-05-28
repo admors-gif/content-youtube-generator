@@ -1603,7 +1603,8 @@ TIKTOK_FORMATS = {
     "tiktok_meditation",
 }
 YOUTUBE_SHORTS_PODCAST_FORMAT = "youtube_shorts_podcast"
-YOUTUBE_SHORTS_FORMATS = {YOUTUBE_SHORTS_PODCAST_FORMAT}
+YOUTUBE_SHORTS_DOCUMENTARY_FORMAT = "youtube_shorts_documentary"
+YOUTUBE_SHORTS_FORMATS = {YOUTUBE_SHORTS_PODCAST_FORMAT, YOUTUBE_SHORTS_DOCUMENTARY_FORMAT}
 VERTICAL_SHORTS_FORMATS = {*TIKTOK_FORMATS, *YOUTUBE_SHORTS_FORMATS}
 INSTAGRAM_CAROUSEL_FORMAT = "instagram_carousel"
 INSTAGRAM_CAROUSEL_AGENT_FILE = "agent_instagram_carousel_esto_no_es_amor.md"
@@ -1615,6 +1616,7 @@ TIKTOK_FORMAT_BY_AGENT = {
 }
 YOUTUBE_SHORTS_FORMAT_BY_AGENT = {
     "agent_youtube_shorts_esto_no_es_amor.md": YOUTUBE_SHORTS_PODCAST_FORMAT,
+    "agent_youtube_shorts_archivos_prohibidos.md": YOUTUBE_SHORTS_DOCUMENTARY_FORMAT,
 }
 INSTAGRAM_CAROUSEL_FORMAT_BY_AGENT = {
     INSTAGRAM_CAROUSEL_AGENT_FILE: INSTAGRAM_CAROUSEL_FORMAT,
@@ -1810,6 +1812,8 @@ def _tiktok_hashtags(topic: str, tiktok_format: str) -> list:
     base = ["#TikTok", "#ContenidoEnEspañol"]
     if tiktok_format == YOUTUBE_SHORTS_PODCAST_FORMAT:
         base = ["#Shorts", "#EstoNoEsAmor", "#ApegoEmocional", "#AmorPropio", "#Relaciones"]
+    elif tiktok_format == YOUTUBE_SHORTS_DOCUMENTARY_FORMAT:
+        base = ["#Shorts", "#ArchivosProhibidosMX", "#MisteriosSinResolver", "#CasosSinResolver", "#Documental"]
     elif tiktok_format == "tiktok_podcast":
         base = ["#EstoNoEsAmor", "#ApegoEmocional", "#AmorPropio", "#Relaciones", "#Podcast"]
     elif tiktok_format == "tiktok_documentary":
@@ -1951,6 +1955,65 @@ def _score_vertical_short_script(script: str, vertical_format: str = "") -> dict
         "episodio completo",
     ]
 
+    if vertical_format == YOUTUBE_SHORTS_DOCUMENTARY_FORMAT:
+        hook_terms = [
+            "desaparecio",
+            "nadie sabe",
+            "nadie pudo explicar",
+            "version oficial",
+            "no encaja",
+            "lo que nadie",
+            "ultimo mensaje",
+            "senal",
+            "silencio",
+            "misterio",
+            "expediente",
+            "caso",
+            "pregunta",
+        ]
+        emotional_terms = [
+            "miedo",
+            "silencio",
+            "familia",
+            "familias",
+            "desaparecio",
+            "nadie",
+            "dolor",
+            "verdad",
+            "ultimo",
+            "esperaban",
+            "cuerpo",
+            "cabina",
+            "oceano",
+            "rastro",
+            "muerte",
+            "secreto",
+        ]
+        retention_terms = [
+            "pero",
+            "sin embargo",
+            "el problema",
+            "lo extrano",
+            "la pregunta",
+            "entonces",
+            "y ahi",
+            "lo inquietante",
+            "lo que no encaja",
+            "si no fuera",
+            "minutos despues",
+            "durante anos",
+        ]
+        cta_terms = [
+            "comenta",
+            "suscribete",
+            "canal",
+            "parte 2",
+            "expediente",
+            "archivos prohibidos",
+            "siguiente caso",
+            "visita el canal",
+        ]
+
     speaker_turns = len(_re.findall(r"^[A-ZÁÉÍÓÚÑ]{3,12}:", clean, flags=_re.MULTILINE))
     question_count = clean.count("?")
     hook_term_count = _count_scoring_terms(clean, hook_terms)
@@ -1958,8 +2021,8 @@ def _score_vertical_short_script(script: str, vertical_format: str = "") -> dict
     retention_count = _count_scoring_terms(clean, retention_terms)
     cta_count = _count_scoring_terms(clean, cta_terms)
 
-    ideal_min = 120 if vertical_format == "tiktok_documentary" else 95
-    ideal_max = 500 if vertical_format == "tiktok_documentary" else 260
+    ideal_min = 220 if vertical_format == YOUTUBE_SHORTS_DOCUMENTARY_FORMAT else 120 if vertical_format == "tiktok_documentary" else 95
+    ideal_max = 300 if vertical_format == YOUTUBE_SHORTS_DOCUMENTARY_FORMAT else 500 if vertical_format == "tiktok_documentary" else 260
     if word_count >= ideal_min and word_count <= ideal_max:
         length_fit = 18
     elif word_count < ideal_min:
@@ -1973,8 +2036,11 @@ def _score_vertical_short_script(script: str, vertical_format: str = "") -> dict
         + min(hook_term_count * 7, 22)
         + min(question_count * 5, 12)
     )
+    brand_emotion_bonus = 8 if "esto no es amor" in _score_text_key(clean) else 0
+    if vertical_format == YOUTUBE_SHORTS_DOCUMENTARY_FORMAT:
+        brand_emotion_bonus = 8 if any(term in _score_text_key(clean) for term in ("archivos prohibidos", "misterio", "expediente")) else 0
     emotion_score = _clamp_score(
-        42 + min(emotion_count * 6, 46) + (8 if "esto no es amor" in _score_text_key(clean) else 0)
+        42 + min(emotion_count * 6, 46) + brand_emotion_bonus
     )
     rhythm_score = _clamp_score(
         44
@@ -2036,8 +2102,21 @@ def _youtube_shorts_quality_feedback(scores: dict) -> str:
     return ", ".join(notes) if notes else "pasa el filtro"
 
 
-def _fallback_youtube_shorts_script(topic: str) -> str:
+def _fallback_youtube_shorts_script(topic: str, vertical_format: str = YOUTUBE_SHORTS_PODCAST_FORMAT) -> str:
     topic_text = " ".join(str(topic or "esta historia").split()).strip()
+    if vertical_format == YOUTUBE_SHORTS_DOCUMENTARY_FORMAT:
+        return (
+            f"Nadie desaparece asi. Y ese es el problema con {topic_text}.\n\n"
+            "Porque la version oficial intenta cerrar el caso, pero hay un detalle que no encaja.\n\n"
+            "Quedate, porque en menos de noventa segundos vas a entender por que este expediente sigue abierto.\n\n"
+            "Primero: hubo una senal que todos esperaban ver, pero nunca llego. No una senal menor. La clase de rastro que deberia aparecer cuando algo termina de forma normal.\n\n"
+            "Despues aparecio la contradiccion. No era una falla simple. Algo cambio justo en el momento mas incomodo, y ahi el caso dejo de parecer accidente.\n\n"
+            "Entonces las familias empezaron a recibir respuestas incompletas. Fechas que no cerraban. Versiones que cambiaban. Silencios que dolian mas que una mala noticia.\n\n"
+            "Lo inquietante es esto: cuando las autoridades explicaron una parte, otra pieza empezo a sonar peor. Y cada intento de cerrar el expediente dejaba una pregunta nueva.\n\n"
+            "La pregunta no es solo que paso. La pregunta es por que todavia hay tanto silencio alrededor, y por que nadie pudo explicar del todo el ultimo rastro.\n\n"
+            "Porque un misterio real no vive en lo que se sabe. Vive en lo que alguien no pudo, o no quiso, explicar.\n\n"
+            "Comenta que detalle no te cuadra y suscribete a Archivos Prohibidos - MX. El siguiente expediente puede empezar con tu teoria."
+        )
     return (
         "MATEO: Si te obsesionas con quien no te elige, cuidado: esto no es amor.\n"
         f"LUCIA: Porque {topic_text} puede sentirse como destino, pero muchas veces es ansiedad.\n"
@@ -2058,25 +2137,41 @@ def _fallback_youtube_shorts_script(topic: str) -> str:
 def _request_youtube_shorts_rewrite(
     *,
     topic: str,
+    vertical_format: str,
     system_prompt: str,
     prompt_payload: dict,
     script: str,
     scores: dict,
     attempt: int,
 ) -> dict | None:
+    if vertical_format == YOUTUBE_SHORTS_DOCUMENTARY_FORMAT:
+        format_contract = (
+            "- 220 a 300 palabras.\n"
+            "- Narrador unico, sin nombres de personajes ni etiquetas de voz.\n"
+            "- Primera linea de maximo 18 palabras con misterio inmediato: desaparecio, nadie sabe, version oficial, no encaja, silencio o expediente.\n"
+            "- Tercera linea con promesa explicita: 'Quedate, porque...' o equivalente.\n"
+            "- Al menos seis terminos de tension documental: misterio, expediente, version oficial, no encaja, silencio, ultimo, senal, familias, verdad, pregunta.\n"
+            "- Al menos cinco conectores de retencion: pero, sin embargo, el problema, lo extrano, la pregunta, entonces, y ahi, lo inquietante.\n"
+            "- Cierre con CTA fuerte para visitar/suscribirse a Archivos Prohibidos - MX y comentar una teoria.\n"
+            "- No uses markdown, listas, LUCIA, MATEO, nombres de voces ni explicaciones tecnicas.\n"
+        )
+    else:
+        format_contract = (
+            "- 190 a 220 palabras. Maximo absoluto: 240.\n"
+            "- 12 a 18 turnos, solo LUCIA: y MATEO:.\n"
+            "- Primera linea de maximo 18 palabras con 'no es amor' y ansiedad, apego, herida, rechazo u obsesion.\n"
+            "- Tercera linea con promesa explicita: 'Quedate, porque...' o equivalente.\n"
+            "- Al menos seis terminos emocionales naturales: amor, apego, ansiedad, rechazo, herida, autoestima, dolor, paz, soltar, obsesion.\n"
+            "- Al menos cuatro conectores de retencion: pero, porque, en realidad, el problema, no estas, hasta que.\n"
+            "- Cierre con CTA fuerte de suscripcion o permanencia en el canal.\n"
+            "- No uses markdown, listas, nombres de voces ni explicaciones tecnicas.\n"
+        )
     rewrite_prompt = (
         "Reescribe el guion de YouTube Shorts porque no paso el filtro de retencion.\n"
         "Responde SOLO JSON valido con las claves: script, beats, caption, hashtags, scores.\n"
         "No expliques nada fuera del JSON.\n\n"
         "CONTRATO OBLIGATORIO:\n"
-        "- 190 a 220 palabras. Maximo absoluto: 240.\n"
-        "- 12 a 18 turnos, solo LUCIA: y MATEO:.\n"
-        "- Primera linea de maximo 18 palabras con 'no es amor' y ansiedad, apego, herida, rechazo u obsesion.\n"
-        "- Tercera linea con promesa explicita: 'Quedate, porque...' o equivalente.\n"
-        "- Al menos seis terminos emocionales naturales: amor, apego, ansiedad, rechazo, herida, autoestima, dolor, paz, soltar, obsesion.\n"
-        "- Al menos cuatro conectores de retencion: pero, porque, en realidad, el problema, no estas, hasta que.\n"
-        "- Cierre con CTA fuerte de suscripcion o permanencia en el canal.\n"
-        "- No uses markdown, listas, nombres de voces ni explicaciones tecnicas.\n\n"
+        f"{format_contract}\n"
         f"TEMA: {topic}\n"
         f"INTENTO: {attempt}\n"
         f"SCORES ACTUALES: {json.dumps(scores, ensure_ascii=False)}\n"
@@ -2112,6 +2207,7 @@ def _request_youtube_shorts_rewrite(
 def _ensure_youtube_shorts_quality(
     *,
     topic: str,
+    vertical_format: str,
     data: dict,
     script: str,
     system_prompt: str,
@@ -2120,7 +2216,7 @@ def _ensure_youtube_shorts_quality(
 ) -> tuple[dict, str, dict]:
     best_data = dict(data or {})
     best_script = _normalize_vertical_script_text(script)
-    best_scores = _score_vertical_short_script(best_script, YOUTUBE_SHORTS_PODCAST_FORMAT)
+    best_scores = _score_vertical_short_script(best_script, vertical_format)
 
     for attempt in range(1, 3):
         if _youtube_shorts_quality_passed(best_scores):
@@ -2136,6 +2232,7 @@ def _ensure_youtube_shorts_quality(
             )
         revised = _request_youtube_shorts_rewrite(
             topic=topic,
+            vertical_format=vertical_format,
             system_prompt=system_prompt,
             prompt_payload=prompt_payload,
             script=best_script,
@@ -2145,15 +2242,15 @@ def _ensure_youtube_shorts_quality(
         revised_script = _normalize_vertical_script_text(revised.get("script")) if isinstance(revised, dict) else ""
         if not revised_script:
             break
-        revised_scores = _score_vertical_short_script(revised_script, YOUTUBE_SHORTS_PODCAST_FORMAT)
+        revised_scores = _score_vertical_short_script(revised_script, vertical_format)
         if revised_scores.get("overall", 0) >= best_scores.get("overall", 0):
             best_data = {**best_data, **revised}
             best_script = revised_script
             best_scores = revised_scores
 
     if not _youtube_shorts_quality_passed(best_scores):
-        fallback_script = _fallback_youtube_shorts_script(topic)
-        fallback_scores = _score_vertical_short_script(fallback_script, YOUTUBE_SHORTS_PODCAST_FORMAT)
+        fallback_script = _fallback_youtube_shorts_script(topic, vertical_format)
+        fallback_scores = _score_vertical_short_script(fallback_script, vertical_format)
         if fallback_scores.get("overall", 0) >= best_scores.get("overall", 0):
             print("   ⚙️  YouTube Shorts quality gate: usando fallback de alto rendimiento")
             best_script = fallback_script
@@ -2162,7 +2259,7 @@ def _ensure_youtube_shorts_quality(
                 **best_data,
                 "script": fallback_script,
                 "caption": best_data.get("caption") or f"{topic}. Suscribete para distinguir amor de ansiedad.",
-                "hashtags": best_data.get("hashtags") or _tiktok_hashtags(topic, YOUTUBE_SHORTS_PODCAST_FORMAT),
+                "hashtags": best_data.get("hashtags") or _tiktok_hashtags(topic, vertical_format),
             }
 
     best_data["script"] = best_script
@@ -2873,6 +2970,13 @@ def _generate_tiktok_script_common(
             "ctaBank": _profile_cta_examples(brand_profile),
         } if _is_relationship_short_format(tiktok_format) else {},
     }
+    format_guidance = (
+        "Para formatos de micro-podcast vertical, el guion debe alternar LUCIA y MATEO con turnos breves, hook inmediato, "
+        "giro emocional antes de la mitad y cierre con comentario/guardado/parte 2. "
+        "El CTA final debe sonar humano y puede usar el banco de CTAs de marca; debe decirlo LUCIA o MATEO como parte natural de la conversacion, no como anuncio.\n\n"
+        if _is_relationship_short_format(tiktok_format)
+        else "Para shorts documentales verticales, usa narrador unico, frases cortas, misterio inmediato, evidencia concreta, mini cliffhangers y CTA natural para suscribirse o visitar el canal. No uses nombres de personajes.\n\n"
+    )
     user_prompt = (
         f"Crea un guion nativo para {display_platform} con este contrato.\n"
         "Responde SOLO JSON valido con las claves: script, beats, caption, hashtags, scores.\n"
@@ -2880,9 +2984,7 @@ def _generate_tiktok_script_common(
         "scores debe incluir hookScore, retentionScore, clarityScore y platformFitScore.\n"
         "El guion debe respetar el rango de palabras y no exceder 10 minutos.\n"
         "Si el contrato incluye wordHardMax, nunca lo excedas.\n"
-        "Para formatos de micro-podcast vertical, el guion debe alternar LUCIA y MATEO con turnos breves, hook inmediato, "
-        "giro emocional antes de la mitad y cierre con comentario/guardado/parte 2. "
-        "El CTA final debe sonar humano y puede usar el banco de CTAs de marca; debe decirlo LUCIA o MATEO como parte natural de la conversación, no como anuncio.\n\n"
+        f"{format_guidance}"
         f"CONTRATO:\n{json.dumps(prompt_payload, ensure_ascii=False, indent=2)}"
     )
 
@@ -2920,9 +3022,10 @@ def _generate_tiktok_script_common(
         script = _normalize_vertical_script_text(data.get("script"))
 
     quality_scores = {}
-    if tiktok_format == YOUTUBE_SHORTS_PODCAST_FORMAT:
+    if tiktok_format in YOUTUBE_SHORTS_FORMATS:
         data, script, quality_scores = _ensure_youtube_shorts_quality(
             topic=topic,
+            vertical_format=tiktok_format,
             data=data,
             script=script,
             system_prompt=system_prompt,
@@ -2937,7 +3040,7 @@ def _generate_tiktok_script_common(
         hashtags = [h for h in hashtags.split() if h.startswith("#")]
     scores = data.get("scores") if isinstance(data.get("scores"), dict) else {}
     scores = {**_score_tiktok_script(script, profile), **scores}
-    if tiktok_format == YOUTUBE_SHORTS_PODCAST_FORMAT:
+    if tiktok_format in YOUTUBE_SHORTS_FORMATS:
         quality_scores = quality_scores or _score_vertical_short_script(script, tiktok_format)
         scores = {
             **scores,
@@ -3100,7 +3203,13 @@ def _build_tiktok_visual_scenes(
             for seg in _split_text_into_balanced_segments(script_text, profile["visual_max"])
         ]
         visual_bank = TIKTOK_DOCUMENTARY_VISUALS
-        identity = f"premium vertical mini-documentary visual identity, {TIKTOK_SOURCE_GENRE_LABELS.get(source_genre, 'story')} mood"
+        if tiktok_format == YOUTUBE_SHORTS_DOCUMENTARY_FORMAT:
+            identity = (
+                "Archivos Prohibidos - MX premium vertical documentary identity, dark investigative noir, "
+                "black and deep red palette, classified file atmosphere, cinematic evidence-board mood"
+            )
+        else:
+            identity = f"premium vertical mini-documentary visual identity, {TIKTOK_SOURCE_GENRE_LABELS.get(source_genre, 'story')} mood"
 
     if not segments:
         segments = [{"narration": script_text, "narration_text": script_text}]
@@ -4401,7 +4510,8 @@ def run_full_pipeline(
         if is_vertical_short
         else ""
     )
-    vertical_duration_profile = generation_options.get("duration_profile") or ("shorts75" if is_youtube_shorts else None)
+    default_youtube_shorts_profile = "shorts90" if tiktok_format == YOUTUBE_SHORTS_DOCUMENTARY_FORMAT else "shorts75"
+    vertical_duration_profile = generation_options.get("duration_profile") or (default_youtube_shorts_profile if is_youtube_shorts else None)
     tiktok_profile = _tiktok_duration_profile(vertical_duration_profile) if is_vertical_short else None
     tiktok_source_genre = generation_options.get("source_genre") or "psychology"
     if is_podcast:

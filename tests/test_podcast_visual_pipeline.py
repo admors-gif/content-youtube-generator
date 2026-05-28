@@ -1,11 +1,13 @@
 from pathlib import Path
 
 from scripts.generate_content import (
+    YOUTUBE_SHORTS_DOCUMENTARY_FORMAT,
     YOUTUBE_SHORTS_PODCAST_FORMAT,
     _build_podcast_visual_scenes,
     _build_tiktok_visual_scenes,
     _create_claude_message_text,
     _emotion_prompt_file_for_format,
+    _fallback_youtube_shorts_script,
     _group_blocks_into_scenes,
     _score_vertical_short_script,
     _normalize_vertical_script_text,
@@ -312,6 +314,7 @@ def test_youtube_shorts_normalizes_list_script_and_keeps_five_scenes():
 
 def test_youtube_shorts_uses_podcast_emotion_tagger():
     assert _emotion_prompt_file_for_format(False, YOUTUBE_SHORTS_PODCAST_FORMAT) == "emotion_tagger_podcast.md"
+    assert _emotion_prompt_file_for_format(False, YOUTUBE_SHORTS_DOCUMENTARY_FORMAT) == "emotion_tagger.md"
     assert _emotion_prompt_file_for_format(False, "tiktok_documentary") == "emotion_tagger.md"
 
 
@@ -339,6 +342,19 @@ def test_youtube_shorts_quality_gate_matches_winning_structure():
     assert scores["emotionScore"] >= 80
     assert scores["retentionScore"] >= 85
     assert _youtube_shorts_quality_passed(scores)
+
+
+def test_youtube_documentary_shorts_quality_gate_uses_mystery_terms():
+    script = _fallback_youtube_shorts_script(
+        "El ultimo mensaje del vuelo MH370",
+        YOUTUBE_SHORTS_DOCUMENTARY_FORMAT,
+    )
+    scores = _score_vertical_short_script(script, YOUTUBE_SHORTS_DOCUMENTARY_FORMAT)
+
+    assert scores["overall"] >= 90
+    assert scores["hookScore"] >= 85
+    assert scores["emotionScore"] >= 80
+    assert scores["retentionScore"] >= 85
 
 
 def test_podcast_parser_ignores_model_preamble_and_leading_tags():

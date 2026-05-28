@@ -535,6 +535,28 @@ export const SYSTEM_AGENTS = [
     color: "#E0533D",
   },
   {
+    agentId: "agent_youtube_shorts_archivos_prohibidos",
+    name: "Archivos Prohibidos: YouTube Shorts",
+    emoji: "AP",
+    description: "Shorts documentales nativos de 90 segundos para Archivos Prohibidos - MX: misterio inmediato, evidencia, giro y CTA al canal.",
+    category: "mystery",
+    promptFile: "agent_youtube_shorts_archivos_prohibidos.md",
+    tier: "creator",
+    platform: "youtube",
+    format: "youtube_shorts_documentary",
+    defaultVoices: { narrator: "Salvatore" },
+    audioPlaybackSpeed: 1.25,
+    durationProfiles: [
+      { id: "shorts90", label: "90 s", description: "Short documental: 6 escenas de 15 segundos, voz Salvatore 1.25x y CTA de suscripcion.", targetSeconds: 90 },
+    ],
+    exampleTopics: [
+      "El ultimo mensaje del vuelo MH370",
+      "La desaparicion que la version oficial no cerro",
+      "El detalle que cambio todo el expediente"
+    ],
+    color: "#B23A32",
+  },
+  {
     agentId: "agent_instagram_carousel_esto_no_es_amor",
     name: "Esto no es amor: Carrusel",
     emoji: "IG",

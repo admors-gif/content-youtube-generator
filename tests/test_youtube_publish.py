@@ -131,6 +131,22 @@ def test_youtube_shorts_native_agent_payload_uses_youtube_platform():
     assert payload["generation_options"]["audio_playback_speed"] == 1.25
 
 
+def test_archivos_prohibidos_shorts_payload_uses_90s_documentary_format():
+    payload = api._validate_project_payload({
+        "title": "El ultimo mensaje del vuelo MH370",
+        "agentId": "agent_youtube_shorts_archivos_prohibidos",
+        "agentFile": "agent_youtube_shorts_archivos_prohibidos.md",
+        "platform": "youtube",
+    })
+
+    assert payload["platform"] == "youtube"
+    assert payload["format"] == api.YOUTUBE_SHORTS_DOCUMENTARY_FORMAT
+    assert payload["youtube_shorts"]["durationProfile"] == "shorts90"
+    assert payload["youtube_shorts"]["targetSeconds"] == 90
+    assert payload["youtube_shorts"]["sourceGenre"] == "mystery"
+    assert payload["generation_options"]["audio_playback_speed"] == 1.25
+
+
 def test_podcast_v2_payload_adds_speed_without_touching_original():
     original = api._validate_project_payload({
         "title": "Por que confundimos intensidad con amor",
@@ -198,6 +214,22 @@ def test_mystery_v2_publish_pack_uses_archivos_prohibidos_metadata():
     assert "#MisteriosSinResolver" in pack["description"]
     assert "Que detalle" in pack["pinned_comment"]
     assert "Esto no es amor" not in pack["description"]
+
+
+def test_archivos_prohibidos_shorts_publish_pack_keeps_channel_identity():
+    data = {
+        "title": "El ultimo mensaje del vuelo MH370",
+        "agentId": "agent_youtube_shorts_archivos_prohibidos",
+        "format": api.YOUTUBE_SHORTS_DOCUMENTARY_FORMAT,
+    }
+
+    pack = api._build_youtube_publish_pack("project-1", data)
+
+    assert "Short de Archivos Prohibidos - MX" in pack["description"]
+    assert "suscribete" in pack["description"]
+    assert "#ArchivosProhibidosMX" in pack["hashtags"]
+    assert "Esto no es amor" not in pack["description"]
+    assert "siguiente Short" not in pack["pinned_comment"]
 
 
 def test_youtube_shorts_pack_includes_seo_hashtags_and_offsets():

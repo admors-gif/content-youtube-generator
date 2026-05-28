@@ -636,7 +636,7 @@ export default function NewProjectPage() {
   const selectedDurationProfile = durationProfiles.find((p) => p.id === durationProfile)
     || durationProfiles[0];
   const isInstagramCarouselSelected = selectedAgent?.format === "instagram_carousel";
-  const isYoutubeShortsSelected = selectedAgent?.format === "youtube_shorts_podcast";
+  const isYoutubeShortsSelected = String(selectedAgent?.format || "").startsWith("youtube_shorts_");
   const isPodcastSelected = selectedAgent?.format === "podcast";
 
   return (
