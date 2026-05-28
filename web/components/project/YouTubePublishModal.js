@@ -312,7 +312,19 @@ export default function YouTubePublishModal({ open, onClose, projectId, project,
               )}
 
               <div>
-                <FieldLabel>Canal</FieldLabel>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                  <FieldLabel>Canal</FieldLabel>
+                  <button
+                    type="button"
+                    className="cf-btn cf-btn--ghost"
+                    onClick={connectYouTube}
+                    disabled={loading}
+                    style={{ padding: "7px 10px", minHeight: 0, fontSize: 12 }}
+                    title="Conectar otro canal de YouTube a Content Factory"
+                  >
+                    <Icon name="uploadCloud" size={14} /> Conectar otro canal
+                  </button>
+                </div>
                 <select
                   style={inputStyle}
                   value={form.channelId}
