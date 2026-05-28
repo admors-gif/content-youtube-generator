@@ -324,7 +324,8 @@ if __name__ == "__main__":
     
     if not LUMA_API_KEY:
         print("[!] LUMA_API_KEY no configurada en .env")
-        print("    Obtener en: https://lumalabs.ai/dream-machine/api/keys")
+        print("    API docs: https://docs.lumalabs.ai/")
+        print("    Billing API: https://lumalabs.ai/api/billing/overview")
         sys.exit(1)
     
     if len(sys.argv) < 2:

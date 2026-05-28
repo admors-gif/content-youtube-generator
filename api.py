@@ -12804,8 +12804,13 @@ def run_production(project_id):
             "python", "scripts/factory.py", temp_path,
             "--mode", "narrativa" if is_vertical_short_project else "cinematico", "--skip-images",
         ]
-        if not is_vertical_short_project:
-            factory_cmd.extend(["--luma-scenes", "8"])
+        if not is_vertical_short_project and _env_bool("CONTENT_FACTORY_LUMA_ENABLED", False):
+            try:
+                luma_scene_count = max(0, int(os.environ.get("CONTENT_FACTORY_LUMA_SCENES", "8")))
+            except Exception:
+                luma_scene_count = 8
+            if luma_scene_count > 0:
+                factory_cmd.extend(["--luma-scenes", str(luma_scene_count)])
         if is_long_meditation_project:
             factory_cmd.append("--skip-subs")
         returncode, stderr_tail = _run_factory_subprocess(

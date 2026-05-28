@@ -9,9 +9,9 @@
      → Rápido, barato, ideal para volumen diario
      → Costo: ~$1.60 USD/video
 
-  🎥 CINEMÁTICO: FLUX + ElevenLabs + Luma AI + Ken Burns mix
-     → Premium, clips con movimiento real
-     → Costo: ~$5.35 USD/video
+  🎥 CINEMÁTICO: FLUX + ElevenLabs + Ken Burns
+     → Premium visual sin gasto de video generativo por defecto.
+     → Luma solo se usa si CONTENT_FACTORY_LUMA_ENABLED=true.
 
   Uso:
     python factory.py <FULL_json> --mode narrativa
@@ -38,6 +38,16 @@ COMFYUI_BASE = "https://cloud.comfy.org/api"
 COMFYUI_HEADERS = {"X-API-Key": COMFYUI_API_KEY, "Content-Type": "application/json"}
 IMAGE_MIN_BYTES = 5000
 IMAGE_JOBS_FILENAME = "image_jobs.json"
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+LUMA_MOTION_ENABLED = _env_bool("CONTENT_FACTORY_LUMA_ENABLED", False)
 
 GENERAL_IMAGE_PROMPT_PREFIX = (
     "Highly realistic cinematic film still, masterpiece, 8k resolution, "
@@ -1770,7 +1780,7 @@ if __name__ == "__main__":
     json_path = Path(sys.argv[1])
     mode = "narrativa"
     forced_voice = None
-    luma_scenes = 15
+    luma_scenes = 0
     images_only = "--images-only" in sys.argv
     skip_images = "--skip-images" in sys.argv
     skip_assembly = "--skip-assembly" in sys.argv
@@ -1789,6 +1799,10 @@ if __name__ == "__main__":
         idx = sys.argv.index("--luma-scenes")
         if idx + 1 < len(sys.argv):
             luma_scenes = int(sys.argv[idx + 1])
+
+    if not LUMA_MOTION_ENABLED and luma_scenes > 0:
+        print("⚠️  Luma desactivado (CONTENT_FACTORY_LUMA_ENABLED=false); usando Ken Burns/static motion.")
+        luma_scenes = 0
     
     # Cargar guión
     with open(json_path, "r", encoding="utf-8") as f:
@@ -1861,7 +1875,10 @@ if __name__ == "__main__":
     print(f"   🎙️ Voz: {voice}")
     print(f"   🤖 Agente: {agent_name or 'general'}")
     if mode == "cinematico":
-        print(f"   🎥 Luma clips: {luma_scenes}")
+        if luma_scenes > 0:
+            print(f"   🎥 Luma clips: {luma_scenes}")
+        else:
+            print("   🎥 Movimiento: Ken Burns/static (Luma apagado)")
     print("═" * 60)
     
     # ════════════════════════════════════════════════════════
@@ -1954,8 +1971,8 @@ if __name__ == "__main__":
         print(f"   [!] Movimiento incompleto: missing={kb_stats.get('missing')} failed={kb_stats.get('failed')}")
         sys.exit(2)
     
-    # Luma solo en modo cinemático
-    if mode == "cinematico":
+    # Luma solo en modo cinemático y explícitamente habilitado.
+    if mode == "cinematico" and luma_scenes > 0:
         luma_stats, luma_indices = generate_luma_clips(
             scenes, images_dir, luma_dir, max_luma=luma_scenes
         )

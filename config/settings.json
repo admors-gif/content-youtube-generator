@@ -22,7 +22,7 @@
         "openai_fallback": "gpt-5.5",
         "tts_engine": "elevenlabs",
         "image_generation": "flux1-krea-dev",
-        "motion_generation": "luma-ray-flash-2",
+        "motion_generation": "ken-burns-static",
         "subtitles": "whisper-1",
         "thumbnail_generation": "gpt-image-1.5"
     },
