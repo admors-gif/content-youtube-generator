@@ -8048,7 +8048,19 @@ def _youtube_tags_for_project(data: dict, title: str) -> list[str]:
     seo = data.get("seo_metadata") or {}
     agent_id = data.get("agentId") or data.get("agent")
     fmt = data.get("format")
-    if agent_id == "agent_podcast_general" or fmt == "podcast":
+    if _is_archivos_prohibidos_project(data):
+        extras = [
+            "Archivos Prohibidos MX",
+            "misterios sin resolver",
+            "casos sin resolver",
+            "documental de misterio",
+            "misterios reales",
+            "investigacion documental",
+            "teorias y evidencias",
+            "historia oculta",
+            "enigmas reales",
+        ]
+    elif agent_id == "agent_podcast_general" or fmt == "podcast":
         extras = [
             "Esto no es amor",
             "podcast en español",
@@ -8088,7 +8100,14 @@ def _youtube_tags_for_project(data: dict, title: str) -> list[str]:
 def _youtube_hashtags_for_project(data: dict, title: str, tags: list[str]) -> list[str]:
     agent_id = data.get("agentId") or data.get("agent")
     fmt = data.get("format")
-    if agent_id == "agent_podcast_general" or fmt == "podcast":
+    if _is_archivos_prohibidos_project(data):
+        base = [
+            "Archivos Prohibidos MX",
+            "Misterios Sin Resolver",
+            "Casos Sin Resolver",
+            "Documental",
+        ]
+    elif agent_id == "agent_podcast_general" or fmt == "podcast":
         base = [
             "Esto no es amor",
             "Apego emocional",
@@ -8101,7 +8120,11 @@ def _youtube_hashtags_for_project(data: dict, title: str, tags: list[str]) -> li
         base = ["Meditación guiada", "Calma", "Bienestar", "Relajación"]
     else:
         base = ["Documental", "Historia", "Cultura"]
-    candidates = base if (agent_id == "agent_podcast_general" or fmt == "podcast") else base + tags[:6] + _compact_title_words(title, limit=5)
+    candidates = base if (
+        _is_archivos_prohibidos_project(data)
+        or agent_id == "agent_podcast_general"
+        or fmt == "podcast"
+    ) else base + tags[:6] + _compact_title_words(title, limit=5)
     hashtags: list[str] = []
     for item in candidates:
         tag = _youtube_hashtag(item)
@@ -8154,6 +8177,11 @@ def _is_podcast_project(data: dict) -> bool:
     )
 
 
+def _is_archivos_prohibidos_project(data: dict) -> bool:
+    agent = data.get("agentId") or data.get("agent") or ""
+    return str(agent) == "agent_misterios_v2"
+
+
 def _is_youtube_shorts_project(data: dict) -> bool:
     fmt = data.get("format") or ""
     agent = data.get("agentId") or data.get("agent") or ""
@@ -8181,6 +8209,11 @@ def _youtube_base_description(data: dict, title: str) -> str:
     description = " ".join(str(seo.get("description") or "").split())
     if description:
         return description
+    if _is_archivos_prohibidos_project(data):
+        return (
+            f"Un expediente de Archivos Prohibidos - MX sobre {title}: "
+            "misterios sin resolver, hechos confirmados, contradicciones, teorias y preguntas que siguen abiertas."
+        )
     if _is_youtube_shorts_project(data):
         return (
             f"Un Short de Esto no es amor sobre {title}: apego emocional, "
@@ -8202,6 +8235,37 @@ def _youtube_description_for_project(
     chapters: list[str],
 ) -> str:
     hashtag_line = " ".join(hashtags)
+    if _is_archivos_prohibidos_project(data):
+        clean_title = " ".join(str(title or "este caso").split())
+        intro = " ".join(str(base_description or "").split())
+        parts = [
+            (
+                f"En este expediente de Archivos Prohibidos - MX investigamos {clean_title} "
+                "con una mirada documental: hechos confirmados, version oficial, contradicciones y teorias que todavia no cierran."
+            ),
+        ]
+        if intro and not intro.lower().startswith("nuevo video:"):
+            parts.append(intro)
+        parts.extend([
+            (
+                "No buscamos vender una respuesta facil. Buscamos ordenar las piezas: que se sabe, que no se pudo probar "
+                "y que detalle sigue haciendo que este caso no pueda cerrarse del todo."
+            ),
+            (
+                "Si te gustan los misterios sin resolver, los casos reales, las desapariciones inexplicables y los expedientes "
+                "donde la version oficial deja una pregunta abierta, suscribete al canal."
+            ),
+            (
+                "Pregunta para comentarios: que detalle de este caso te parece mas dificil de explicar? "
+                "Te leo abajo; tu teoria puede abrir el siguiente expediente."
+            ),
+        ])
+        if chapters:
+            parts.extend(["Capitulos:", *chapters[:20]])
+        if hashtag_line:
+            parts.append(hashtag_line)
+        return "\n\n".join(part for part in parts if part).strip()[:5000]
+
     if _is_youtube_shorts_project(data):
         parts = [
             base_description,
@@ -8267,6 +8331,11 @@ def _build_youtube_publish_pack(project_id: str, data: dict) -> dict:
         if data.get("format") != "podcast"
         else "¿Esto te sonó a amor o a apego? Cuéntame en comentarios qué parte te pegó más."
     )
+    if _is_archivos_prohibidos_project(data):
+        pinned_comment = (
+            "Que detalle de este expediente no te cuadra: la version oficial, la linea de tiempo o la teoria mas inquietante? "
+            "Te leo en comentarios. Suscribete a Archivos Prohibidos - MX para mas casos donde falta una pieza."
+        )
     if _is_youtube_shorts_project(data):
         pinned_comment = "Si esto te hizo pensar en alguien, mandaselo. Y cuentame que tema deberia ser el siguiente Short."
 

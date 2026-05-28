@@ -180,6 +180,26 @@ def test_youtube_publish_pack_has_native_shorts_cta():
     assert "siguiente Short" in pack["pinned_comment"]
 
 
+def test_mystery_v2_publish_pack_uses_archivos_prohibidos_metadata():
+    data = {
+        "title": "El vuelo MH370: el avion que siguio volando en silencio",
+        "agentId": "agent_misterios_v2",
+        "seo_metadata": {
+            "description": "Una investigacion sobre el misterio del vuelo MH370.",
+            "tags": ["MH370", "aviacion"],
+        },
+    }
+
+    pack = api._build_youtube_publish_pack("project-1", data)
+
+    assert "Archivos Prohibidos - MX" in pack["description"]
+    assert "misterios sin resolver" in pack["tags"]
+    assert "#ArchivosProhibidosMX" in pack["hashtags"]
+    assert "#MisteriosSinResolver" in pack["description"]
+    assert "Que detalle" in pack["pinned_comment"]
+    assert "Esto no es amor" not in pack["description"]
+
+
 def test_youtube_shorts_pack_includes_seo_hashtags_and_offsets():
     data = {
         "title": "Por qué te obsesionas con quien no te elige.",
