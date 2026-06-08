@@ -11,8 +11,30 @@
  * Devuelve null si el texto es muy corto (< 50 chars). Eso evita scores
  * ruidosos para guiones recién empezados o vacíos.
  */
-export function computeViralityScore(text) {
+function normalizeScoreText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function countPhraseMatches(text, phrases) {
+  const lower = normalizeScoreText(text);
+  return phrases.reduce((total, phrase) => {
+    const normalized = normalizeScoreText(phrase);
+    if (!normalized) return total;
+    return total + (lower.match(new RegExp(escapeRegExp(normalized), "g")) || []).length;
+  }, 0);
+}
+
+export function computeViralityScore(text, options = {}) {
   if (!text || text.length < 50) return null;
+  const agentId = typeof options === "string" ? options : options?.agentId || "";
+  const isMysteryV2 = agentId === "agent_misterios_v2";
   const words = text.split(/\s+/);
   const wordCount = words.length;
   const sentences = text.split(/[.!?]+/).filter(Boolean);
@@ -25,10 +47,28 @@ export function computeViralityScore(text) {
     "impactante", "descubre", "revelado", "sorprendente", "poderoso",
     "extraordinario", "fascinante",
   ];
-  const powerCount = powerPhrases.reduce(
-    (c, p) => c + (text.toLowerCase().match(new RegExp(p, "gi")) || []).length,
-    0,
-  );
+  if (isMysteryV2) {
+    powerPhrases.push(
+      "version oficial",
+      "no encaja",
+      "si no fuera",
+      "nadie pudo explicar",
+      "nadie sabe",
+      "hay un detalle",
+      "pero habia un problema",
+      "lo inquietante",
+      "lo que nunca",
+      "la pregunta sigue abierta",
+      "ultimo rastro",
+      "ultima llamada",
+      "el silencio",
+      "expediente",
+      "contradiccion",
+      "sin respuesta",
+      "sin cierre",
+    );
+  }
+  const powerCount = countPhraseMatches(text, powerPhrases);
   const hookScore = Math.min(
     100,
     hooks * 8 + exclamations * 3 + powerCount * 12,
@@ -40,12 +80,29 @@ export function computeViralityScore(text) {
     "traición", "venganza", "gloria", "destino", "guerra", "locura",
     "esperanza", "terror", "misterio", "oscuro", "prohibido", "peligro",
   ];
-  const emotionalCount = emotionalWords.reduce(
-    (c, w) =>
-      c + (text.toLowerCase().match(new RegExp(`\\b${w}`, "gi")) || []).length,
-    0,
-  );
-  const emotionScore = Math.min(100, emotionalCount * 10);
+  if (isMysteryV2) {
+    emotionalWords.push(
+      "familia",
+      "familias",
+      "madre",
+      "padre",
+      "hijo",
+      "hija",
+      "desaparecio",
+      "desaparicion",
+      "silencio",
+      "esperaban",
+      "llamada",
+      "ultimo",
+      "rastro",
+      "pregunta",
+      "angustia",
+      "testigo",
+      "victima",
+    );
+  }
+  const emotionalCount = countPhraseMatches(text, emotionalWords);
+  const emotionScore = Math.min(100, emotionalCount * (isMysteryV2 ? 7 : 10));
 
   // 3. Pacing (avg words per sentence — ideal 12-18)
   const avgWordsPerSentence = wordCount / Math.max(sentences.length, 1);
@@ -73,10 +130,20 @@ export function computeViralityScore(text) {
     "pero", "sin embargo", "lo que no sabían", "entonces", "de pronto",
     "hasta que", "lo peor", "lo mejor",
   ];
-  const cliffCount = cliffhangers.reduce(
-    (c, p) => c + (text.toLowerCase().match(new RegExp(p, "gi")) || []).length,
-    0,
-  );
+  if (isMysteryV2) {
+    cliffhangers.push(
+      "lo que no encaja",
+      "el problema",
+      "lo inquietante",
+      "y ahi",
+      "eso habria cerrado",
+      "si no fuera",
+      "lo que nunca pudo explicarse",
+      "una pieza fuera de lugar",
+      "la pregunta sigue abierta",
+    );
+  }
+  const cliffCount = countPhraseMatches(text, cliffhangers);
   const retentionScore = Math.min(
     100,
     cliffCount * 8 + (wordCount > 1000 ? 20 : 10),
@@ -93,7 +160,7 @@ export function computeViralityScore(text) {
   return {
     overall,
     hookScore: Math.round(hookScore),
-    hooks,
+    hooks: isMysteryV2 ? hooks + powerCount : hooks,
     emotionScore: Math.round(emotionScore),
     pacingScore: Math.round(pacingScore),
     structureScore: Math.round(structureScore),

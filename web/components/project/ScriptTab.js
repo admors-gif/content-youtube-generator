@@ -281,7 +281,13 @@ export default function ScriptTab({
           approved={!!project.script?.approved}
           format={project.format}
         />
-        {editedScript && <ViralityPanel text={editedScript} format={project.format} />}
+        {editedScript && (
+          <ViralityPanel
+            text={editedScript}
+            format={project.format}
+            agentId={project.agentId}
+          />
+        )}
       </div>
     </div>
   );

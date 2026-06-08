@@ -163,7 +163,7 @@ function getWellnessVerdict(overall) {
   return { label: "REVISAR", color: "var(--bad)" };
 }
 
-export default function ViralityPanel({ text, format }) {
+export default function ViralityPanel({ text, format, agentId }) {
   const isWellness = ["autohipnosis", "meditacion_larga"].includes(format);
   const isCarousel = format === "instagram_carousel";
   const isTikTok = String(format || "").startsWith("tiktok_");
@@ -176,7 +176,7 @@ export default function ViralityPanel({ text, format }) {
     ? computeVerticalShortScore(text, format)
     : isWellness
       ? computeWellnessScore(text)
-      : computeViralityScore(text);
+      : computeViralityScore(text, { agentId });
   if (!score) return null;
 
   const verdict = isWellness

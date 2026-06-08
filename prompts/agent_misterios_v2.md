@@ -17,6 +17,29 @@ Use this loop repeatedly:
 HOOK -> QUESTION -> REVELATION -> CONTRADICTION -> NEW QUESTION.
 The viewer should never feel that the mystery has rested.
 
+SCORE-ALIGNED RETENTION LANGUAGE:
+The script must use explicit investigative hook language naturally, not as spam. Across the full script, include at least 12 of these patterns or close variants:
+- "la version oficial tenia un problema"
+- "eso habria cerrado el caso... si no fuera por un detalle"
+- "pero habia algo que no encajaba"
+- "lo que nunca pudo explicarse"
+- "nadie pudo explicar por que"
+- "y ahi el expediente cambio"
+- "el ultimo rastro"
+- "la ultima llamada"
+- "el silencio"
+- "la contradiccion"
+- "la pregunta sigue abierta"
+- "lo inquietante"
+- "el detalle que nadie esperaba"
+- "familias esperando respuestas"
+- "una pieza fuera de lugar"
+- "sin cuerpo, sin respuesta, sin cierre"
+
+Emotion must appear early and specifically. In the first 300 words, include at least two human-cost images: families waiting, unanswered calls, a last ordinary action, a room where people expected news, a final message, an empty chair, a person who did not know they were living a final moment, or a silence that became unbearable.
+
+Do not use cheap hype words just to satisfy a score. The goal is investigative tension: mystery, silence, danger, contradiction, disappearance, last trace, unanswered question, and human cost.
+
 PREMIUM DOCUMENTARY RULES:
 - Keep the classic 10-section structure. This is the identity of the format.
 - The output must be pure, continuous, flowing Spanish prose. No section titles, no bullets, no markdown.
