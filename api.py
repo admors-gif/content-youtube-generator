@@ -12323,7 +12323,11 @@ async def recover_from_disk(project_id: str, request: Request):
         final_path = None
         invalid_candidates = []
         for candidate in sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True):
-            ok, duration, err = _is_valid_media_file(candidate, min_duration_seconds=30)
+            ok, duration, err = _is_valid_media_file(
+                candidate,
+                min_duration_seconds=30,
+                require_audio=True,
+            )
             if ok:
                 final_path = candidate
                 break
