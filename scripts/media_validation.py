@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 
 
-def _has_audio_stream(path: Path) -> tuple[bool, str]:
+def _has_audio_stream(path: Path, min_audio_bit_rate: int = 8000) -> tuple[bool, str]:
     """Return whether ffprobe can see at least one audio stream."""
     out = subprocess.run(
         [
@@ -13,7 +13,7 @@ def _has_audio_stream(path: Path) -> tuple[bool, str]:
             "-select_streams",
             "a:0",
             "-show_entries",
-            "stream=codec_type,codec_name",
+            "stream=codec_type,codec_name,bit_rate",
             "-of",
             "json",
             str(path),
@@ -30,6 +30,13 @@ def _has_audio_stream(path: Path) -> tuple[bool, str]:
         return False, "ffprobe audio stream output was not valid JSON"
     if not streams:
         return False, "missing audio stream"
+    stream = streams[0]
+    try:
+        bit_rate = int(stream.get("bit_rate") or 0)
+    except (TypeError, ValueError):
+        bit_rate = 0
+    if bit_rate and bit_rate < min_audio_bit_rate:
+        return False, f"audio bitrate {bit_rate} below minimum {min_audio_bit_rate}"
     return True, ""
 
 
@@ -37,6 +44,7 @@ def validate_media_file(
     path,
     min_duration_seconds: float = 1.0,
     require_audio: bool = False,
+    min_audio_bit_rate: int = 8000,
 ) -> tuple[bool, float, str]:
     """Validate that ffprobe can read a media file and that it has real duration."""
     media_path = Path(path)
@@ -66,7 +74,10 @@ def validate_media_file(
         if duration < min_duration_seconds:
             return False, duration, f"duration {duration:.2f}s below minimum"
         if require_audio:
-            has_audio, audio_error = _has_audio_stream(media_path)
+            has_audio, audio_error = _has_audio_stream(
+                media_path,
+                min_audio_bit_rate=min_audio_bit_rate,
+            )
             if not has_audio:
                 return False, duration, audio_error
         return True, duration, ""

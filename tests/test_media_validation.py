@@ -46,7 +46,38 @@ class MediaValidationTests(unittest.TestCase):
                 "-f",
                 "lavfi",
                 "-i",
-                "anullsrc=channel_layout=stereo:sample_rate=44100",
+                "sine=frequency=440:sample_rate=44100",
+                "-t",
+                str(seconds),
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-movflags",
+                "+faststart",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr[-500:])
+
+    def _make_silent_audio_video(self, path: Path, seconds: float = 2.0) -> None:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c=black:s=320x180:r=30:d={seconds}",
+                "-f",
+                "lavfi",
+                "-i",
+                "anullsrc=channel_layout=mono:sample_rate=44100",
                 "-t",
                 str(seconds),
                 "-c:v",
@@ -128,6 +159,21 @@ class MediaValidationTests(unittest.TestCase):
             self.assertFalse(ok)
             self.assertGreaterEqual(duration, 1)
             self.assertIn("audio", error)
+
+    def test_audio_required_rejects_extremely_low_bitrate_audio(self):
+        with self._tempdir() as tmp:
+            video = Path(tmp) / "FINAL_silent_audio.mp4"
+            self._make_silent_audio_video(video, seconds=2)
+
+            ok, duration, error = validate_media_file(
+                video,
+                min_duration_seconds=1,
+                require_audio=True,
+            )
+
+            self.assertFalse(ok)
+            self.assertGreaterEqual(duration, 1)
+            self.assertIn("bitrate", error)
 
     def test_picker_skips_newer_invalid_final(self):
         with self._tempdir() as tmp:
