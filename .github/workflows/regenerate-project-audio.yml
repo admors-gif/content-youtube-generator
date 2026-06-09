@@ -1,0 +1,117 @@
+name: Regenerate project audio
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: "Firestore project id"
+        required: true
+
+concurrency:
+  group: regenerate-project-audio-${{ github.event.inputs.project_id }}
+  cancel-in-progress: false
+
+jobs:
+  regenerate:
+    name: Regenerate voices and remount from existing images
+    runs-on: [self-hosted, linux, vps, docker]
+    timeout-minutes: 90
+
+    steps:
+      - name: Reset audio artifacts and run production
+        run: |
+          set -euo pipefail
+          PID="${{ github.event.inputs.project_id }}"
+          docker exec -i content-factory python - "$PID" <<'PY'
+          import json
+          import shutil
+          import sys
+          import time
+          from pathlib import Path
+
+          import api
+          from firebase_admin import firestore
+
+          project_id = sys.argv[1]
+          api._ensure_firebase_initialized()
+          db = firestore.client()
+          doc_ref = db.collection("projects").document(project_id)
+          snap = doc_ref.get()
+          if not snap.exists:
+              raise SystemExit(f"project not found: {project_id}")
+
+          project = snap.to_dict() or {}
+          title = project.get("title") or "video_sin_titulo"
+          safe_title = project.get("videoFolder") or api._project_output_slug(title, project_id)
+          video_dir = Path("/app/output/videos") / safe_title
+          if not video_dir.is_dir():
+              raise SystemExit(f"project folder not found: {video_dir}")
+
+          stamp = time.strftime("%Y%m%d_%H%M%S")
+          backup_dir = video_dir / f"_audio_repair_backup_{stamp}"
+          backup_dir.mkdir(parents=True, exist_ok=False)
+          moved = []
+
+          def move_path(path: Path):
+              if not path.exists():
+                  return
+              target = backup_dir / path.name
+              shutil.move(str(path), str(target))
+              moved.append(path.name)
+
+          for folder in ("audio", "kenburns", "composites", "luma_clips"):
+              move_path(video_dir / folder)
+
+          for pattern in (
+              "master_audio*.mp3",
+              "master_visual.mp4",
+              "FINAL*.mp4",
+              "transcript*.json",
+              "subtitles*.ass",
+              "_audio_list.txt",
+              "_visual_list.txt",
+          ):
+              for path in sorted(video_dir.glob(pattern)):
+                  if path.parent == backup_dir:
+                      continue
+                  move_path(path)
+
+          doc_ref.update({
+              "status": "script_ready",
+              "progress.percent": 0,
+              "progress.stepName": "Regenerando voz y montaje",
+              "audioRepairStartedAt": firestore.SERVER_TIMESTAMP,
+              "audioRepairBackupFolder": backup_dir.name,
+              "videoUrl": firestore.DELETE_FIELD,
+              "videoDurationSeconds": firestore.DELETE_FIELD,
+              "videoSizeMB": firestore.DELETE_FIELD,
+              "storagePath": firestore.DELETE_FIELD,
+              "recoveredFromDisk": firestore.DELETE_FIELD,
+              "recoveryInfo": firestore.DELETE_FIELD,
+          })
+
+          print(json.dumps({
+              "ok": True,
+              "projectId": project_id,
+              "videoFolder": safe_title,
+              "backupFolder": backup_dir.name,
+              "moved": moved,
+              "step": "starting_run_production",
+          }, ensure_ascii=False))
+
+          api.run_production(project_id)
+
+          updated = doc_ref.get().to_dict() or {}
+          result = {
+              "ok": updated.get("status") == "completed" and bool(updated.get("videoUrl")),
+              "projectId": project_id,
+              "status": updated.get("status"),
+              "durationSeconds": updated.get("videoDurationSeconds"),
+              "sizeMB": updated.get("videoSizeMB"),
+              "hasVideoUrl": bool(updated.get("videoUrl")),
+              "backupFolder": backup_dir.name,
+          }
+          print(json.dumps(result, ensure_ascii=False))
+          if not result["ok"]:
+              raise SystemExit(f"audio regeneration did not complete: {result}")
+          PY
