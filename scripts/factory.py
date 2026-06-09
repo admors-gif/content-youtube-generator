@@ -865,6 +865,45 @@ def generate_narration(scenes, audio_dir, agent_name=""):
     return stats
 
 
+def _expected_audio_scene_count(scenes) -> int:
+    expected = 0
+    for scene in scenes or []:
+        if scene.get("narration") or scene.get("dialogue_blocks"):
+            expected += 1
+    return expected
+
+
+def _validate_tts_generation_stats(stats: dict, scenes) -> tuple[bool, str]:
+    """Fail before montage if TTS produced missing blocks/scenes."""
+    stats = stats if isinstance(stats, dict) else {}
+    expected = _expected_audio_scene_count(scenes)
+    if expected <= 0:
+        return False, "el guion no contiene narraciones para generar voz"
+
+    failed = int(stats.get("failed") or 0)
+    failed_blocks = int(stats.get("failed_blocks") or 0)
+    failed_chunks = int(stats.get("failed_chunks") or 0)
+    scenes_failed = int(stats.get("scenes_failed") or 0)
+    if failed or failed_blocks or failed_chunks or scenes_failed:
+        return (
+            False,
+            "ElevenLabs dejo fallas de voz "
+            f"(failed={failed}, failed_blocks={failed_blocks}, "
+            f"failed_chunks={failed_chunks}, scenes_failed={scenes_failed})",
+        )
+
+    if "scenes_assembled" in stats:
+        assembled = int(stats.get("scenes_assembled") or 0)
+        if assembled < expected:
+            return False, f"voz incompleta: {assembled}/{expected} escenas ensambladas"
+    else:
+        ready = int(stats.get("generated") or 0) + int(stats.get("skipped") or 0)
+        if ready < expected:
+            return False, f"voz incompleta: {ready}/{expected} escenas generadas"
+
+    return True, ""
+
+
 # ============================================================
 # UTILIDAD: Obtener duración de audio
 # ============================================================
@@ -1464,7 +1503,7 @@ def assemble_final_video(
             "-filter_complex",
             f"[0:v]tpad=stop_mode=clone:stop_duration={pad_seconds:.3f}[v]",
             "-map", "[v]",
-            "-map", "1:a",
+            "-map", "1:a:0",
             "-c:v", "libx264",
             "-preset", "veryfast" if low_motion else "fast",
             "-crf", "24" if low_motion else "20",
@@ -1480,6 +1519,9 @@ def assemble_final_video(
             "ffmpeg", "-y",
             "-i", str(master_visual),
             "-i", str(master_audio),
+            "-map", "0:v:0",
+            "-map", "1:a:0",
+            "-sn",
             "-c:v", "copy",
             "-c:a", "aac", "-b:a", "192k",
             "-shortest",
@@ -1493,6 +1535,7 @@ def assemble_final_video(
         valid_final, final_dur, validation_error = validate_media_file(
             final_video,
             min_duration_seconds=min_duration_seconds,
+            require_audio=True,
         )
         if not valid_final:
             print(f"   [!] Video final invalido: {validation_error}")
@@ -1934,6 +1977,11 @@ if __name__ == "__main__":
         )
     else:
         tts_stats = generate_narration(scenes, audio_dir, agent_name)
+
+    tts_ok, tts_error = _validate_tts_generation_stats(tts_stats, scenes)
+    if not tts_ok:
+        print(f"   [!] Voz incompleta: {tts_error}")
+        sys.exit(2)
 
     playback_speed = _audio_playback_speed_from_payload(data)
     if playback_speed != 1.0:

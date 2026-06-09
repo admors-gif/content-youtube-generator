@@ -1891,15 +1891,24 @@ def _video_duration_seconds(video_path: Path) -> float:
         return 0.0
 
 
-def _is_valid_media_file(path: Path, min_duration_seconds: float = 1.0) -> tuple[bool, float, str]:
+def _is_valid_media_file(
+    path: Path,
+    min_duration_seconds: float = 1.0,
+    require_audio: bool = False,
+) -> tuple[bool, float, str]:
     """Valida un media file con ffprobe y retorna (ok, duration, error)."""
-    return _validate_media_file(path, min_duration_seconds=min_duration_seconds)
+    return _validate_media_file(
+        path,
+        min_duration_seconds=min_duration_seconds,
+        require_audio=require_audio,
+    )
 
 
 def _pick_valid_final_video(
     video_dir: Path,
     prefer_subtitles: bool = True,
     min_duration_seconds: float = 30.0,
+    require_audio: bool = True,
 ) -> tuple[Path | None, bool, list[dict]]:
     """
     Elige el FINAL_*.mp4 mas reciente y reproducible.
@@ -1912,6 +1921,7 @@ def _pick_valid_final_video(
         video_dir,
         prefer_subtitles=prefer_subtitles,
         min_duration_seconds=min_duration_seconds,
+        require_audio=require_audio,
     )
 
 
@@ -1975,7 +1985,7 @@ def _remux_recovered_final(video_dir: Path, safe_title: str) -> tuple[Path | Non
             "-i", str(master_visual),
             "-i", str(master_audio),
             "-filter_complex", f"[0:v]tpad=stop_mode=clone:stop_duration={pad_seconds:.3f}[v]",
-            "-map", "[v]", "-map", "1:a",
+            "-map", "[v]", "-map", "1:a:0",
             "-c:v", "libx264", "-preset", "fast", "-crf", "20",
             "-pix_fmt", "yuv420p", "-r", "30",
             "-c:a", "aac", "-b:a", "192k",
@@ -1988,6 +1998,9 @@ def _remux_recovered_final(video_dir: Path, safe_title: str) -> tuple[Path | Non
             "ffmpeg", "-y",
             "-i", str(master_visual),
             "-i", str(master_audio),
+            "-map", "0:v:0",
+            "-map", "1:a:0",
+            "-sn",
             "-c:v", "copy",
             "-c:a", "aac", "-b:a", "192k",
             "-shortest",
@@ -2000,7 +2013,7 @@ def _remux_recovered_final(video_dir: Path, safe_title: str) -> tuple[Path | Non
         info["reason"] = f"ffmpeg remux failed: {(result.stderr or '')[-300:]}"
         return None, info
 
-    final_ok, final_dur, final_err = _is_valid_media_file(output, min_duration_seconds=30)
+    final_ok, final_dur, final_err = _is_valid_media_file(output, min_duration_seconds=30, require_audio=True)
     if not final_ok:
         info["reason"] = f"recovered final invalid: {final_err or final_dur}"
         return None, info

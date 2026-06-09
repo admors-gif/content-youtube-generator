@@ -65,6 +65,30 @@ class MediaValidationTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr[-500:])
 
+    def _make_video_without_audio(self, path: Path, seconds: float = 2.0) -> None:
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c=black:s=320x180:r=30:d={seconds}",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-an",
+                "-movflags",
+                "+faststart",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr[-500:])
+
     def test_empty_mp4_is_invalid(self):
         with self._tempdir() as tmp:
             empty = Path(tmp) / "FINAL_empty.mp4"
@@ -90,6 +114,21 @@ class MediaValidationTests(unittest.TestCase):
             self.assertLess(duration, 30)
             self.assertIn("below minimum", error)
 
+    def test_audio_required_rejects_video_only_mp4(self):
+        with self._tempdir() as tmp:
+            video = Path(tmp) / "FINAL_no_audio.mp4"
+            self._make_video_without_audio(video, seconds=2)
+
+            ok, duration, error = validate_media_file(
+                video,
+                min_duration_seconds=1,
+                require_audio=True,
+            )
+
+            self.assertFalse(ok)
+            self.assertGreaterEqual(duration, 1)
+            self.assertIn("audio", error)
+
     def test_picker_skips_newer_invalid_final(self):
         with self._tempdir() as tmp:
             folder = Path(tmp)
@@ -107,6 +146,25 @@ class MediaValidationTests(unittest.TestCase):
             self.assertEqual(picked, valid)
             self.assertFalse(has_subtitles)
             self.assertEqual(invalid_candidates[0]["name"], invalid.name)
+
+    def test_picker_skips_newer_final_without_audio(self):
+        with self._tempdir() as tmp:
+            folder = Path(tmp)
+            valid = folder / "FINAL_podcast_valid.mp4"
+            self._make_video(valid, seconds=2)
+            time.sleep(0.05)
+            no_audio = folder / "FINAL_SUB_no_audio.mp4"
+            self._make_video_without_audio(no_audio, seconds=2)
+
+            picked, has_subtitles, invalid_candidates = pick_valid_final_video(
+                folder,
+                min_duration_seconds=1,
+            )
+
+            self.assertEqual(picked, valid)
+            self.assertFalse(has_subtitles)
+            self.assertEqual(invalid_candidates[0]["name"], no_audio.name)
+            self.assertIn("audio", invalid_candidates[0]["error"])
 
 
 if __name__ == "__main__":
