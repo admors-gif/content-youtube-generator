@@ -1402,7 +1402,11 @@ def _run_factory_subprocess(args, monitor_thread, stop_event, timeout=7200, log_
         )
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
-            return (proc.returncode, (stderr or "")[-500:])
+            stdout_tail = (stdout or "")[-1500:]
+            stderr_tail = (stderr or "")[-500:]
+            if proc.returncode != 0 and stdout_tail:
+                print(f"   [{log_label}] STDOUT tail:\n{stdout_tail}", flush=True)
+            return (proc.returncode, f"STDOUT:\n{stdout_tail}\nSTDERR:\n{stderr_tail}")
         except subprocess.TimeoutExpired:
             print(f"   ⏱️ [{log_label}] Subprocess excedió timeout={timeout}s. Matando process group {proc.pid}...")
             try:
