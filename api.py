@@ -7740,17 +7740,34 @@ def music_tracks(request: Request, limit: int = 40):
     try:
         _ensure_firebase_initialized()
         from firebase_admin import firestore
+        from datetime import datetime
         db = firestore.client()
         safe_limit = max(1, min(int(limit or 40), 100))
+        fetch_limit = max(safe_limit, min(250, safe_limit * 3))
         docs = (
             db.collection("musicTracks")
             .where("userId", "==", principal["uid"])
-            .order_by("createdAt", direction=firestore.Query.DESCENDING)
-            .limit(safe_limit)
+            .limit(fetch_limit)
             .stream()
         )
         items = [_power_music_public_track(doc.id, doc.to_dict() or {}) for doc in docs]
-        return {"ok": True, "items": items}
+
+        def _sort_value(item):
+            value = item.get("updatedAt") or item.get("createdAt") or (item.get("package") or {}).get("createdAtIso") or ""
+            if hasattr(value, "timestamp"):
+                try:
+                    return float(value.timestamp())
+                except Exception:
+                    return 0.0
+            if isinstance(value, str):
+                try:
+                    return float(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp())
+                except Exception:
+                    return 0.0
+            return 0.0
+
+        items.sort(key=_sort_value, reverse=True)
+        return {"ok": True, "items": items[:safe_limit]}
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": str(exc)[:220], "items": []})
 
