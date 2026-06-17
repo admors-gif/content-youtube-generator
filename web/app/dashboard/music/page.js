@@ -206,22 +206,46 @@ function formatDate(value) {
   }
 }
 
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    const text = value.map((item) => safeText(item)).filter(Boolean).join(", ");
+    return text || fallback;
+  }
+  if (typeof value === "object") {
+    return safeText(
+      value.prompt ||
+        value.visualPrompt ||
+        value.description ||
+        value.title ||
+        value.section ||
+        value.textOverlay ||
+        value.text ||
+        value.label,
+      fallback
+    );
+  }
+  return fallback;
+}
+
 function packageText(pkg, key) {
   if (!pkg) return "";
-  if (key === "lyrics") return pkg.lyrics || "";
-  if (key === "suno") return pkg.sunoPrompt || "";
-  if (key === "sunoAlt") return pkg.sunoPromptAlt || "";
-  if (key === "negative") return pkg.negativePrompt || "";
+  if (key === "lyrics") return safeText(pkg.lyrics);
+  if (key === "suno") return safeText(pkg.sunoPrompt);
+  if (key === "sunoAlt") return safeText(pkg.sunoPromptAlt);
+  if (key === "negative") return safeText(pkg.negativePrompt);
   if (key === "youtube") {
     const youtube = pkg.youtube || {};
     return [
-      youtube.title,
+      safeText(youtube.title),
       "",
-      youtube.description,
+      safeText(youtube.description),
       "",
-      Array.isArray(youtube.hashtags) ? youtube.hashtags.join(" ") : "",
-      Array.isArray(youtube.tags) ? `Tags: ${youtube.tags.join(", ")}` : "",
-      youtube.thumbnailText ? `Miniatura: ${youtube.thumbnailText}` : "",
+      Array.isArray(youtube.hashtags) ? youtube.hashtags.map((tag) => safeText(tag)).filter(Boolean).join(" ") : "",
+      Array.isArray(youtube.tags) ? `Tags: ${youtube.tags.map((tag) => safeText(tag)).filter(Boolean).join(", ")}` : "",
+      youtube.thumbnailText ? `Miniatura: ${safeText(youtube.thumbnailText)}` : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -277,22 +301,32 @@ function VisualSceneList({ scenes }) {
   if (!items.length) return <p className="cf-caption">El paquete aun no trae escenas visuales.</p>;
   return (
     <div style={{ display: "grid", gap: 10 }}>
-      {items.map((scene, index) => (
-        <div
-          key={`${scene.title || "scene"}-${index}`}
-          style={{
-            border: "1px solid var(--rule-1)",
-            borderRadius: "var(--r-2)",
-            padding: "var(--s-4)",
-            background: "var(--ink-2)",
-          }}
-        >
-          <div className="cf-mono-sm" style={{ color: "var(--ember)", marginBottom: 6 }}>
-            {String(index + 1).padStart(2, "0")} · {scene.title || "Escena"}
+      {items.map((scene, index) => {
+        const title = safeText(scene?.title || scene?.section, "Escena");
+        const prompt = safeText(scene?.prompt || scene?.visualPrompt || scene?.description || scene, "Direccion visual pendiente.");
+        const overlay = safeText(scene?.textOverlay);
+        return (
+          <div
+            key={`${title}-${index}`}
+            style={{
+              border: "1px solid var(--rule-1)",
+              borderRadius: "var(--r-2)",
+              padding: "var(--s-4)",
+              background: "var(--ink-2)",
+            }}
+          >
+            <div className="cf-mono-sm" style={{ color: "var(--ember)", marginBottom: 6 }}>
+              {String(index + 1).padStart(2, "0")} · {title}
+            </div>
+            <div style={{ color: "var(--paper-dim)", lineHeight: 1.55 }}>{prompt}</div>
+            {overlay && (
+              <div style={{ marginTop: 10 }}>
+                <span style={pillStyle("neutral")}>{overlay}</span>
+              </div>
+            )}
           </div>
-          <div style={{ color: "var(--paper-dim)", lineHeight: 1.55 }}>{scene.prompt || scene.description || scene}</div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -608,16 +642,16 @@ export default function MusicStudioPage() {
         <div style={{ display: "grid", gap: "var(--s-5)", marginTop: "var(--s-6)" }}>
           <Section
             label="Paquete listo"
-            title={packageData.title || "Cancion generada"}
+            title={safeText(packageData.title, "Cancion generada")}
             actions={
               <>
-                <span style={pillStyle("ember")}>{packageData.bpm || "--"} bpm</span>
-                <span style={pillStyle("neutral")}>{packageData.energy || "energia"}</span>
+                <span style={pillStyle("ember")}>{safeText(packageData.bpm, "--")} bpm</span>
+                <span style={pillStyle("neutral")}>{safeText(packageData.energy, "energia")}</span>
               </>
             }
           >
             <p style={{ font: "var(--t-lead)", color: "var(--paper-dim)", marginTop: 0 }}>
-              {packageData.subtitle || packageData.mainHook || "Lista para llevar a Suno."}
+              {safeText(packageData.subtitle || packageData.mainHook, "Lista para llevar a Suno.")}
             </p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: "var(--s-4)" }}>
               <CopyButton label="Copiar letra" value={packageText(packageData, "lyrics")} onCopy={copyText} />
@@ -706,36 +740,39 @@ export default function MusicStudioPage() {
                   overflow: "auto",
                 }}
               >
-                {packageData.lyrics}
+                {safeText(packageData.lyrics)}
               </pre>
             </Section>
 
             <div style={{ display: "grid", gap: "var(--s-5)" }}>
               <Section label="Suno" title="Prompt maestro">
-                <p style={{ color: "var(--paper-dim)", lineHeight: 1.6 }}>{packageData.sunoPrompt}</p>
+                <p style={{ color: "var(--paper-dim)", lineHeight: 1.6 }}>{safeText(packageData.sunoPrompt)}</p>
                 {packageData.sunoPromptAlt && (
                   <div style={{ marginTop: "var(--s-4)" }}>
                     <div className="cf-mono-sm">Alternativa</div>
-                    <p style={{ color: "var(--paper-dim)", lineHeight: 1.6 }}>{packageData.sunoPromptAlt}</p>
+                    <p style={{ color: "var(--paper-dim)", lineHeight: 1.6 }}>{safeText(packageData.sunoPromptAlt)}</p>
                   </div>
                 )}
                 {packageData.negativePrompt && (
                   <div style={{ marginTop: "var(--s-4)" }}>
                     <div className="cf-mono-sm">Evitar en Suno</div>
-                    <p style={{ color: "var(--paper-mute)", lineHeight: 1.6 }}>{packageData.negativePrompt}</p>
+                    <p style={{ color: "var(--paper-mute)", lineHeight: 1.6 }}>{safeText(packageData.negativePrompt)}</p>
                   </div>
                 )}
               </Section>
 
               <Section label="Video" title="Direccion visual">
                 <p style={{ color: "var(--paper-dim)", lineHeight: 1.6 }}>
-                  {packageData.videoConcept?.visualIdentity || packageData.coverPrompt || "Identidad visual pendiente."}
+                  {safeText(packageData.videoConcept?.visualIdentity || packageData.coverPrompt, "Identidad visual pendiente.")}
                 </p>
                 {Array.isArray(packageData.videoConcept?.palette) && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: "var(--s-4) 0" }}>
-                    {packageData.videoConcept.palette.map((color) => (
-                      <span key={color} style={pillStyle("neutral")}>{color}</span>
-                    ))}
+                    {packageData.videoConcept.palette.map((color, index) => {
+                      const label = safeText(color, "color");
+                      return (
+                        <span key={`${label}-${index}`} style={pillStyle("neutral")}>{label}</span>
+                      );
+                    })}
                   </div>
                 )}
                 <VisualSceneList scenes={packageData.videoConcept?.scenes} />
@@ -753,15 +790,15 @@ export default function MusicStudioPage() {
             >
               <div>
                 <div className="cf-mono-sm">Titulo</div>
-                <p style={{ color: "var(--paper)", lineHeight: 1.55 }}>{packageData.youtube?.title || packageData.title}</p>
+                <p style={{ color: "var(--paper)", lineHeight: 1.55 }}>{safeText(packageData.youtube?.title || packageData.title)}</p>
               </div>
               <div>
                 <div className="cf-mono-sm">Miniatura</div>
-                <p style={{ color: "var(--paper-dim)", lineHeight: 1.55 }}>{packageData.youtube?.thumbnailText || "Texto pendiente"}</p>
+                <p style={{ color: "var(--paper-dim)", lineHeight: 1.55 }}>{safeText(packageData.youtube?.thumbnailText, "Texto pendiente")}</p>
               </div>
               <div>
                 <div className="cf-mono-sm">Hook principal</div>
-                <p style={{ color: "var(--paper-dim)", lineHeight: 1.55 }}>{packageData.mainHook || packageData.mantra}</p>
+                <p style={{ color: "var(--paper-dim)", lineHeight: 1.55 }}>{safeText(packageData.mainHook || packageData.mantra)}</p>
               </div>
             </div>
             {Array.isArray(packageData.safetyNotes) && packageData.safetyNotes.length > 0 && (
@@ -769,7 +806,7 @@ export default function MusicStudioPage() {
                 <div className="cf-mono-sm">Guardrails</div>
                 <ul style={{ color: "var(--paper-mute)", lineHeight: 1.7, paddingLeft: 20 }}>
                   {packageData.safetyNotes.map((item, index) => (
-                    <li key={`${item}-${index}`}>{item}</li>
+                    <li key={`${safeText(item, "nota")}-${index}`}>{safeText(item)}</li>
                   ))}
                 </ul>
               </div>
