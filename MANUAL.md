@@ -642,7 +642,46 @@ Pasos generales:
 
 ---
 
-## 12. Troubleshooting común
+## 12. Power Music Studio
+
+Estado 2026-06-17: modulo admin para canciones de poder con render final en VPS.
+
+### Flujo operativo
+
+1. Abrir `/dashboard/music`.
+2. Generar paquete premium: letra, prompt Suno, prompt alterno, visuales y metadata.
+3. Copiar letra/prompt a Suno.
+4. Descargar audio final de Suno.
+5. Subir audio al track en Content Factory.
+6. Pulsar `Producir video musical`.
+7. El worker genera y sube:
+   - `FINAL_MUSIC.mp4`;
+   - `thumbnail.jpg`;
+   - `cover.jpg`;
+   - `metadata.json`;
+   - `lyrics.txt`;
+   - `suno_prompt.txt`.
+
+### Endpoints
+
+- `GET /music/presets`
+- `GET /music/tracks`
+- `GET /music/tracks/{trackId}`
+- `POST /music/generate`
+- `POST /music/tracks/{trackId}/audio`
+- `POST /music/tracks/{trackId}/produce`
+
+### Notas
+
+- No hay API de Suno integrada; Suno sigue siendo manual.
+- El render del video no depende de que la computadora este prendida.
+- No usa Luma por default.
+- Renderer v1 usa PIL + FFmpeg + Ken Burns con visuales generativos locales.
+- La futura mejora premium es conectar Comfy/Flux como proveedor opcional de imagenes.
+
+---
+
+## 13. Troubleshooting común
 
 > Esta sección se completa con problemas reales que aparezcan durante operación.
 
@@ -664,7 +703,7 @@ Pasos generales:
 
 ---
 
-## 13. Glosario
+## 14. Glosario
 
 | Término | Significado |
 |---|---|

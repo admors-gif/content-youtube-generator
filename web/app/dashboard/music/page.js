@@ -265,6 +265,15 @@ function TrackList({ tracks, selectedId, onSelect }) {
     <div style={{ display: "grid", gap: 10 }}>
       {tracks.map((track) => {
         const pkg = track.package || {};
+        const render = track.render || {};
+        const statusLabel =
+          render.status === "completed"
+            ? "video listo"
+            : render.status === "running" || render.status === "queued"
+              ? "render"
+              : track.audio?.url
+                ? "audio"
+                : track.status || "lyrics";
         const active = selectedId && selectedId === track.trackId;
         return (
           <button
@@ -284,7 +293,10 @@ function TrackList({ tracks, selectedId, onSelect }) {
                 <strong style={{ display: "block", color: "var(--paper)", fontSize: 16 }}>{pkg.title || "Sin titulo"}</strong>
                 <span className="cf-caption">{pkg.subtitle || track.status || "lyrics_ready"}</span>
               </div>
-              <span style={pillStyle("neutral")}>{pkg.bpm || "--"} bpm</span>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <span style={pillStyle(render.status === "completed" ? "ok" : "neutral")}>{statusLabel}</span>
+                <span style={pillStyle("neutral")}>{pkg.bpm || "--"} bpm</span>
+              </div>
             </div>
             <div className="cf-caption" style={{ marginTop: 8 }}>
               {formatDate(track.updatedAt || track.createdAt)}
@@ -341,6 +353,7 @@ export default function MusicStudioPage() {
   const [currentId, setCurrentId] = useState("");
   const [loading, setLoading] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [producingVideo, setProducingVideo] = useState(false);
   const [audioFile, setAudioFile] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -348,6 +361,7 @@ export default function MusicStudioPage() {
 
   const packageData = current?.package || null;
   const audioData = current?.audio || null;
+  const renderData = current?.render || null;
 
   const intentionMeta = useMemo(
     () => (presets.intentions || []).find((item) => item.id === form.intention),
@@ -384,6 +398,16 @@ export default function MusicStudioPage() {
     }
   }, [admin, apiFetch, user]);
 
+  const refreshCurrentTrack = useCallback(async () => {
+    if (!currentId) return null;
+    const data = await apiFetch(`/music/tracks/${encodeURIComponent(currentId)}`);
+    if (data.track) {
+      setCurrent(data.track);
+      setCurrentId(data.track.trackId || currentId);
+    }
+    return data.track || null;
+  }, [apiFetch, currentId]);
+
   useEffect(() => {
     if (!user || !admin || !MUSIC_STUDIO_ENABLED) return undefined;
     let cancelled = false;
@@ -405,6 +429,26 @@ export default function MusicStudioPage() {
       cancelled = true;
     };
   }, [admin, apiFetch, user]);
+
+  useEffect(() => {
+    const status = renderData?.status;
+    if (!currentId || !["queued", "running"].includes(status)) return undefined;
+    const timer = setInterval(() => {
+      refreshCurrentTrack()
+        .then((track) => {
+          if (track?.render?.status === "completed") {
+            setNotice("Video musical finalizado en el VPS.");
+            loadTracks();
+          }
+          if (track?.render?.status === "failed") {
+            setError(track.render.error || "El render musical fallo.");
+            loadTracks();
+          }
+        })
+        .catch((exc) => setError(exc.message));
+    }, 7000);
+    return () => clearInterval(timer);
+  }, [currentId, loadTracks, refreshCurrentTrack, renderData?.status]);
 
   async function generatePackage() {
     setError("");
@@ -468,12 +512,45 @@ export default function MusicStudioPage() {
       setCurrent(data.track);
       setCurrentId(data.track?.trackId || currentId);
       setAudioFile(null);
-      setNotice("Audio de Suno subido y conectado al track. Ya quedo listo para el render visual del siguiente bloque.");
+      setNotice("Audio de Suno subido y conectado al track. Ya puedes producir el video musical completo en el VPS.");
       await loadTracks();
     } catch (exc) {
       setError(exc.message);
     } finally {
       setUploadingAudio(false);
+    }
+  }
+
+  async function produceVideo() {
+    if (!currentId) {
+      setError("Primero genera o selecciona un track.");
+      return;
+    }
+    if (!audioData?.url && !audioData?.storagePath) {
+      setError("Primero sube el audio final descargado de Suno.");
+      return;
+    }
+    setError("");
+    setNotice("");
+    setProducingVideo(true);
+    try {
+      const data = await apiFetch(`/music/tracks/${encodeURIComponent(currentId)}/produce`, {
+        method: "POST",
+      });
+      if (data.track) {
+        setCurrent(data.track);
+        setCurrentId(data.track.trackId || currentId);
+      }
+      if (data.alreadyReady) {
+        setNotice("Este track ya tiene video final listo.");
+      } else {
+        setNotice("Render musical enviado al VPS. Puedes cerrar esta pantalla; el worker seguira produciendo.");
+      }
+      await loadTracks();
+    } catch (exc) {
+      setError(exc.message);
+    } finally {
+      setProducingVideo(false);
     }
   }
 
@@ -596,7 +673,7 @@ export default function MusicStudioPage() {
                 ["01", "Genera letra y prompt maestro en Content Factory."],
                 ["02", "Copia letra + prompt en Suno y crea la cancion final."],
                 ["03", "Descarga audio de Suno y subelo al track aqui mismo."],
-                ["04", "El siguiente bloque renderizara visuales, miniatura y video para YouTube."],
+                ["04", "Produce en el VPS el video, miniatura, portada y metadata final."],
               ].map(([step, text]) => (
                 <div key={step} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                   <span style={pillStyle("ember")}>{step}</span>
@@ -714,6 +791,115 @@ export default function MusicStudioPage() {
                 </div>
               </div>
             )}
+          </Section>
+
+          <Section
+            label="Render en VPS"
+            title={renderData?.status === "completed" ? "Video musical listo" : "Producir video final"}
+            actions={
+              renderData?.status === "completed" ? (
+                <span style={pillStyle("ok")}>video_ready</span>
+              ) : renderData?.status === "running" || renderData?.status === "queued" ? (
+                <span style={pillStyle("ember")}>{renderData.status}</span>
+              ) : (
+                <span style={pillStyle("neutral")}>vps worker</span>
+              )
+            }
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                gap: "var(--s-4)",
+                alignItems: "start",
+              }}
+            >
+              <div>
+                <p style={{ color: "var(--paper-dim)", lineHeight: 1.6, marginTop: 0 }}>
+                  {renderData?.status === "completed"
+                    ? "El video final, miniatura, portada y metadata ya quedaron generados y guardados."
+                    : audioData?.url || audioData?.storagePath
+                      ? "Renderiza el video completo en el VPS con visuales premium, Ken Burns, portada, miniatura y metadata."
+                      : "Sube primero el audio final descargado de Suno para habilitar el render."}
+                </p>
+                {(renderData?.status === "running" || renderData?.status === "queued") && (
+                  <div style={{ margin: "var(--s-4) 0" }}>
+                    <div
+                      style={{
+                        height: 8,
+                        borderRadius: 999,
+                        overflow: "hidden",
+                        background: "var(--ink-2)",
+                        border: "1px solid var(--rule-1)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${Math.max(2, Math.min(100, Number(renderData.progress || 2)))}%`,
+                          background: "var(--ember)",
+                        }}
+                      />
+                    </div>
+                    <div className="cf-caption" style={{ marginTop: 8 }}>
+                      {renderData.progress || 2}% · {renderData.stepName || "Procesando en worker"}
+                    </div>
+                  </div>
+                )}
+                {renderData?.status === "failed" && (
+                  <div className="cf-card" style={{ padding: "var(--s-4)", borderColor: "var(--bad)", color: "var(--bad)", marginBottom: "var(--s-4)" }}>
+                    {renderData.error || "El render fallo. Puedes reintentar sin volver a crear la letra."}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="cf-button cf-button--primary"
+                    onClick={produceVideo}
+                    disabled={
+                      producingVideo ||
+                      !currentId ||
+                      (!audioData?.url && !audioData?.storagePath) ||
+                      renderData?.status === "completed" ||
+                      renderData?.status === "running" ||
+                      renderData?.status === "queued"
+                    }
+                    style={{ minHeight: 52 }}
+                  >
+                    <Icon name={producingVideo || renderData?.status === "running" ? "refresh" : "clapperboard"} size={18} />
+                    {renderData?.status === "completed" ? "Regenerar no disponible" : producingVideo ? "Enviando al VPS..." : "Producir video musical"}
+                  </button>
+                  {renderData?.video?.url && (
+                    <a className="cf-button" href={renderData.video.url} target="_blank" rel="noreferrer" style={{ minHeight: 52, textDecoration: "none", color: "var(--paper)" }}>
+                      <Icon name="download" size={18} />
+                      Abrir MP4
+                    </a>
+                  )}
+                  {renderData?.thumbnail?.url && (
+                    <a className="cf-button" href={renderData.thumbnail.url} target="_blank" rel="noreferrer" style={{ minHeight: 52, textDecoration: "none", color: "var(--paper)" }}>
+                      <Icon name="image" size={18} />
+                      Miniatura
+                    </a>
+                  )}
+                </div>
+              </div>
+              <div>
+                {renderData?.video?.url ? (
+                  <video controls src={renderData.video.url} poster={renderData.thumbnail?.url || renderData.cover?.url} style={{ width: "100%", borderRadius: "var(--r-2)", border: "1px solid var(--rule-1)", background: "var(--ink-2)" }} />
+                ) : renderData?.thumbnail?.url || renderData?.cover?.url ? (
+                  <img src={renderData.thumbnail?.url || renderData.cover?.url} alt="Miniatura musical" style={{ width: "100%", borderRadius: "var(--r-2)", border: "1px solid var(--rule-1)" }} />
+                ) : (
+                  <div className="cf-card" style={{ padding: "var(--s-5)", minHeight: 180, display: "grid", placeItems: "center", color: "var(--paper-mute)" }}>
+                    Vista previa pendiente
+                  </div>
+                )}
+                {renderData?.durationSeconds && (
+                  <div className="cf-caption" style={{ marginTop: 8 }}>
+                    {Math.round(Number(renderData.durationSeconds))}s · {renderData.sceneCount || 0} escenas visuales
+                  </div>
+                )}
+              </div>
+            </div>
           </Section>
 
           <div

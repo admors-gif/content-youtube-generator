@@ -1,6 +1,6 @@
 # Power Music Studio
 
-Estado: 2026-06-16
+Estado: 2026-06-17
 
 ## Objetivo
 
@@ -15,8 +15,9 @@ Power Music Studio convierte una idea de crecimiento personal en un paquete crea
 - direccion visual para video;
 - metadata de YouTube.
 - upload del audio final descargado de Suno.
+- produccion de video final en VPS con visuales generativos locales, Ken Burns, thumbnail, cover y metadata.
 
-La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la cancion y la sube al track en Content Factory. El siguiente bloque producira video, miniatura y publicacion.
+La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la cancion y la sube al track en Content Factory. Desde ahi Content Factory ya puede mandar el render completo al VPS/worker para generar `FINAL_MUSIC.mp4`, miniatura y portada sin depender de que la computadora del usuario permanezca prendida.
 
 ## Decisiones
 
@@ -28,6 +29,9 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - No imita artistas reales ni canciones existentes.
 - Guarda paquetes en Firestore para reutilizarlos.
 - Guarda el audio final en Firebase Storage bajo `music/{uid}/{trackId}/audio/`.
+- Renderiza el video en worker/Celery con fallback a background task si la cola no esta disponible.
+- No usa Luma por default.
+- Renderer v1: imagenes locales premium con PIL + movimiento Ken Burns en FFmpeg.
 
 ## Variables
 
@@ -40,6 +44,7 @@ CONTENT_FACTORY_MUSIC_MODEL=claude-opus-4-7
 CONTENT_FACTORY_MUSIC_MAX_TOKENS=5200
 CONTENT_FACTORY_MUSIC_ALLOW_FALLBACK=false
 MUSIC_MAX_AUDIO_BYTES=167772160
+MUSIC_RENDER_DIR=/app/output/music_renders
 ANTHROPIC_API_KEY=...
 ```
 
@@ -58,6 +63,10 @@ Devuelve intenciones, estilos, usos recomendados y modelo activo.
 ### `GET /music/tracks`
 
 Lista paquetes recientes del usuario/admin desde `musicTracks`.
+
+### `GET /music/tracks/{trackId}`
+
+Devuelve un track individual con `package`, `audio` y `render`.
 
 ### `POST /music/generate`
 
@@ -109,6 +118,34 @@ Respuesta:
 }
 ```
 
+### `POST /music/tracks/{trackId}/produce`
+
+Encola el render musical completo en el VPS.
+
+Precondicion:
+
+- el track debe tener audio subido.
+
+Respuesta:
+
+```json
+{
+  "ok": true,
+  "status": "queued",
+  "dispatch": {
+    "queue": "celery",
+    "taskId": "..."
+  },
+  "track": {
+    "status": "video_queued",
+    "render": {
+      "status": "queued",
+      "progress": 2
+    }
+  }
+}
+```
+
 Respuesta:
 
 ```json
@@ -139,23 +176,28 @@ Campos principales:
 - `createdAt`
 - `updatedAt`
 - `audio`
+- `render`
 
 Estados v1:
 
 - `lyrics_ready`
 - `audio_uploaded`
+- `video_queued`
+- `video_rendering`
+- `video_ready`
+- `render_failed`
 
 Estados futuros:
 
-- `audio_uploaded`
-- `video_ready`
 - `published`
 - `archived`
 
 ## Archivos Principales
 
 - `scripts/power_music.py`: presets, prompt builder, normalizacion y fallback.
+- `scripts/power_music_video.py`: renderer local de video musical con PIL + FFmpeg.
 - `api.py`: endpoints `/music/*`.
+- `worker_tasks.py`: task Celery `content_factory.produce_music_video`.
 - `web/app/dashboard/music/page.js`: UI admin.
 - `web/components/Sidebar.js`: acceso en dashboard.
 - `prompts/agent_power_music.md`: prompt maestro documentado.
@@ -169,29 +211,22 @@ Estados futuros:
 5. Genera la cancion en Suno.
 6. Descarga el audio manualmente.
 7. Sube el audio al track en `/dashboard/music`.
-8. Reproduce el audio dentro de Content Factory para validar que quedo conectado.
+8. Pulsa "Producir video musical".
+9. El VPS/worker genera:
+   - `FINAL_MUSIC.mp4`;
+   - `thumbnail.jpg`;
+   - `cover.jpg`;
+   - `metadata.json`;
+   - `lyrics.txt`;
+   - `suno_prompt.txt`.
+10. La UI muestra progreso, video final, miniatura y enlaces.
 
-## Proximo Bloque
+## Proximos Bloques
 
-Implementar produccion visual con audio externo:
-
-1. Analisis del audio:
-   - extraer duracion;
-   - detectar BPM aproximado si es viable;
-   - generar waveform ligero para cortes/energia visual.
-
-2. Render visual:
-   - usar `videoConcept.scenes`;
-   - generar imagenes con Comfy/Flux;
-   - render estatico con movimiento leve o Ken Burns;
-   - no usar Luma por default.
-
-3. Miniatura:
-   - usar `coverPrompt` + `youtube.thumbnailText`;
-   - mantener estilo premium de canal.
-
-4. Publicacion:
-   - reutilizar centro de publicaciones y YouTube upload.
+1. Conectar Comfy/Flux como proveedor opcional de escenas reales.
+2. Agregar waveform visual reactivo al audio.
+3. Integrar publicacion directa a YouTube reutilizando el centro de publicaciones.
+4. Agregar ZIP de material musical completo.
 
 ## Handoff Para Otro Equipo
 
@@ -204,7 +239,7 @@ git pull origin master
 Validar:
 
 ```powershell
-python -m py_compile api.py scripts\power_music.py
+python -m py_compile api.py worker_tasks.py scripts\power_music.py scripts\power_music_video.py
 cd web
 npm run lint
 npm run build
@@ -218,6 +253,9 @@ Probar en produccion:
 - confirmar que aparece en tracks recientes;
 - subir un `.mp3` o `.wav` descargado de Suno;
 - reproducir el audio desde la UI;
+- pulsar "Producir video musical";
+- esperar `video_ready`;
+- reproducir `FINAL_MUSIC.mp4` y abrir la miniatura.
 - confirmar que no consume credito interno.
 
 ## Riesgos

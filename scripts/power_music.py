@@ -418,6 +418,7 @@ def stable_track_id(uid: str, package: dict) -> str:
 def public_track_doc(track_id: str, data: dict) -> dict:
     package = data.get("package") if isinstance(data.get("package"), dict) else {}
     audio = data.get("audio") if isinstance(data.get("audio"), dict) else {}
+    render = data.get("render") if isinstance(data.get("render"), dict) else {}
 
     def _public_value(value):
         if value is None or isinstance(value, (str, int, float, bool)):
@@ -440,5 +441,6 @@ def public_track_doc(track_id: str, data: dict) -> dict:
         "createdAt": _public_value(data.get("createdAt")),
         "updatedAt": _public_value(data.get("updatedAt")),
         "audio": _public_value(audio),
+        "render": _public_value(render),
         "package": package,
     }

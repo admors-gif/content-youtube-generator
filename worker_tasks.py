@@ -131,3 +131,35 @@ def ingest_knowledge_pdf(self, job_id: str):
     result = api_module._run_knowledge_ingest_job(job_id)
     print(f"[WORKER] ingest_knowledge_pdf finished | job_id={job_id}", flush=True)
     return result
+
+
+@celery_app.task(
+    bind=True,
+    name="content_factory.produce_music_video",
+    autoretry_for=(ConnectionError, TimeoutError),
+    max_retries=1,
+    retry_backoff=60,
+    retry_jitter=True,
+)
+def produce_music_video(self, track_id: str):
+    """Renderiza video final para un track de Power Music."""
+    try:
+        import sentry_sdk
+        sentry_sdk.set_tag("music_track_id", track_id)
+        sentry_sdk.set_tag("celery_task_id", self.request.id)
+        sentry_sdk.set_context(
+            "music_video_task",
+            {
+                "task_name": self.name,
+                "task_id": self.request.id,
+                "track_id": track_id,
+                "retry_count": self.request.retries,
+            },
+        )
+    except Exception:
+        pass
+
+    print(f"[WORKER] produce_music_video starting | track_id={track_id} | task_id={self.request.id}", flush=True)
+    result = api_module._run_music_video_job(track_id)
+    print(f"[WORKER] produce_music_video finished | track_id={track_id}", flush=True)
+    return result

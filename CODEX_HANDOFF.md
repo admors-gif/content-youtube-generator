@@ -183,6 +183,43 @@ Al 2026-05-04 el arbol ya muestra muchos archivos del rediseño modificados/crea
 - Actualizar `MANUAL.md` cuando se cierre un hito operativo o se cambie infraestructura.
 - Actualizar este archivo si cambia el estado actual, branch, bug activo o proximo paso.
 
+## Power Music Studio A-Z 2026-06-17
+
+Estado: implementado como pipeline admin de musica con render en VPS.
+
+Flujo:
+
+1. `/dashboard/music` genera letra, prompt Suno, direccion visual y metadata.
+2. El usuario crea la cancion en Suno y sube el audio final al track.
+3. Boton `Producir video musical` llama `POST /music/tracks/{trackId}/produce`.
+4. Backend encola `content_factory.produce_music_video` en Celery; si la cola no esta disponible usa background task de API como fallback.
+5. Worker descarga el audio desde Firebase Storage, renderiza assets locales con `scripts/power_music_video.py`, ensambla `FINAL_MUSIC.mp4` con FFmpeg y sube video/thumbnail/cover/metadata a Storage.
+6. Firestore `musicTracks/{trackId}.render` guarda estado, progreso, URLs y errores.
+
+Archivos clave:
+
+- `scripts/power_music.py`
+- `scripts/power_music_video.py`
+- `api.py`
+- `worker_tasks.py`
+- `web/app/dashboard/music/page.js`
+- `docs/power-music-studio.md`
+
+Estados de track:
+
+- `lyrics_ready`
+- `audio_uploaded`
+- `video_queued`
+- `video_rendering`
+- `video_ready`
+- `render_failed`
+
+Verificacion pasada en desarrollo:
+
+- Import renderer OK.
+- Smoke test local con audio sintetico genero `FINAL_MUSIC.mp4`.
+- Pendiente antes de darlo por cerrado en produccion: probar un MP3 real de Suno desde `/dashboard/music`, confirmar que el worker del VPS toma el job, validar MP4 final, miniatura y signed URLs.
+
 ## Como pedirle contexto a Claude
 
 Si Claude tiene una sesion mas reciente, pedirle esto y pegar la respuesta aqui antes de seguir:
