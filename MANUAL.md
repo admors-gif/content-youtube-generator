@@ -649,12 +649,14 @@ Estado 2026-06-17: modulo admin para canciones de poder con render final en VPS.
 ### Flujo operativo
 
 1. Abrir `/dashboard/music`.
-2. Generar paquete premium: letra, prompt Suno, prompt alterno, visuales y metadata.
+2. Generar paquete premium: letra, score, prompt Suno, prompt alterno, visuales y metadata.
 3. Copiar letra/prompt a Suno.
-4. Descargar audio final de Suno.
-5. Subir audio al track en Content Factory.
-6. Pulsar `Producir video musical`.
-7. El worker genera y sube:
+4. Probar prompt maestro y/o alternativo en Suno.
+5. Descargar las mejores versiones de audio.
+6. Subir cada audio al mismo track como toma/version.
+7. Escuchar versiones y seleccionar la activa.
+8. Pulsar `Producir video musical`.
+9. El worker genera y sube:
    - `FINAL_MUSIC.mp4`;
    - `thumbnail.jpg`;
    - `cover.jpg`;
@@ -669,11 +671,15 @@ Estado 2026-06-17: modulo admin para canciones de poder con render final en VPS.
 - `GET /music/tracks/{trackId}`
 - `POST /music/generate`
 - `POST /music/tracks/{trackId}/audio`
+- `POST /music/tracks/{trackId}/audio/{versionId}/activate`
 - `POST /music/tracks/{trackId}/produce`
 
 ### Notas
 
 - No hay API de Suno integrada; Suno sigue siendo manual.
+- Se pueden guardar multiples versiones de audio de una misma letra.
+- Solo la version activa se usa para renderizar el video final.
+- `package.lyricScore` califica la letra sin costo extra.
 - El render del video no depende de que la computadora este prendida.
 - No usa Luma por default.
 - Renderer v1 usa PIL + FFmpeg + Ken Burns con visuales generativos locales.

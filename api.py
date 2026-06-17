@@ -5565,6 +5565,38 @@ def _music_asset_content_type(path: Path) -> str:
     }.get(path.suffix.lower(), "application/octet-stream")
 
 
+def _music_audio_version_id(filename: str, total: int) -> str:
+    raw = f"{filename}:{total}:{time.time_ns()}".encode("utf-8", errors="ignore")
+    return "take_" + hashlib.sha1(raw).hexdigest()[:12]
+
+
+def _music_audio_versions(data: dict) -> list:
+    versions = data.get("audioVersions") if isinstance(data.get("audioVersions"), list) else []
+    clean = [item for item in versions if isinstance(item, dict)]
+    legacy_audio = data.get("audio") if isinstance(data.get("audio"), dict) else {}
+    if legacy_audio and not clean:
+        legacy = {
+            **legacy_audio,
+            "versionId": legacy_audio.get("versionId") or "take_legacy",
+            "label": legacy_audio.get("label") or "Version principal",
+            "promptKind": legacy_audio.get("promptKind") or "unknown",
+        }
+        clean.append(legacy)
+    return clean
+
+
+def _music_active_audio(data: dict) -> dict:
+    active_id = str(data.get("activeAudioVersionId") or "").strip()
+    versions = _music_audio_versions(data)
+    if active_id:
+        for item in versions:
+            if str(item.get("versionId") or "") == active_id:
+                return item
+    if versions:
+        return versions[-1]
+    return data.get("audio") if isinstance(data.get("audio"), dict) else {}
+
+
 def _music_upload_asset(local_path: Path, uid: str, track_id: str, bucket, subdir: str) -> dict:
     name = Path(local_path).name
     blob_name = f"music/{uid}/{track_id}/{subdir}/{name}"
@@ -5580,9 +5612,10 @@ def _music_upload_asset(local_path: Path, uid: str, track_id: str, bucket, subdi
     }
 
 
-def _music_download_audio_to_render_dir(track_id: str, uid: str, audio: dict, bucket) -> Path:
+def _music_download_audio_to_render_dir(track_id: str, uid: str, audio: dict, bucket, version_id: str = "active") -> Path:
     file_name = Path(str(audio.get("fileName") or "audio.mp3")).name
-    local_audio = MUSIC_RENDER_DIR / uid / track_id / "source_audio" / file_name
+    safe_version = re.sub(r"[^a-zA-Z0-9_-]", "", str(version_id or "active")) or "active"
+    local_audio = MUSIC_RENDER_DIR / uid / track_id / "source_audio" / safe_version / file_name
     local_audio.parent.mkdir(parents=True, exist_ok=True)
 
     blob_name = _music_storage_blob_name(audio.get("storagePath"))
@@ -5625,7 +5658,9 @@ def _run_music_video_job(track_id: str) -> dict:
     if not uid:
         raise RuntimeError("music track missing owner")
     package = data.get("package") if isinstance(data.get("package"), dict) else {}
-    audio = data.get("audio") if isinstance(data.get("audio"), dict) else {}
+    audio = _music_active_audio(data)
+    audio_version_id = str(audio.get("versionId") or data.get("activeAudioVersionId") or "active").strip() or "active"
+    safe_audio_version = re.sub(r"[^a-zA-Z0-9_-]", "", audio_version_id) or "active"
     if not audio.get("storagePath") and not audio.get("fileName"):
         ref.set(
             {
@@ -5633,6 +5668,7 @@ def _run_music_video_job(track_id: str) -> dict:
                 "render": {
                     "status": "failed",
                     "error": "audio_required",
+                    "audioVersionId": audio_version_id,
                     "updatedAt": firestore.SERVER_TIMESTAMP,
                 },
                 "updatedAt": firestore.SERVER_TIMESTAMP,
@@ -5648,6 +5684,7 @@ def _run_music_video_job(track_id: str) -> dict:
                 "status": "running",
                 "stepName": "Preparando audio y visuales",
                 "progress": 8,
+                "audioVersionId": audio_version_id,
                 "startedAt": firestore.SERVER_TIMESTAMP,
                 "updatedAt": firestore.SERVER_TIMESTAMP,
             },
@@ -5658,8 +5695,8 @@ def _run_music_video_job(track_id: str) -> dict:
 
     try:
         bucket = storage.bucket(FIREBASE_STORAGE_BUCKET)
-        audio_path = _music_download_audio_to_render_dir(clean_track_id, uid, audio, bucket)
-        render_dir = MUSIC_RENDER_DIR / uid / clean_track_id / "render"
+        audio_path = _music_download_audio_to_render_dir(clean_track_id, uid, audio, bucket, safe_audio_version)
+        render_dir = MUSIC_RENDER_DIR / uid / clean_track_id / "render" / safe_audio_version
         render_dir.mkdir(parents=True, exist_ok=True)
 
         ref.set(
@@ -5668,6 +5705,7 @@ def _run_music_video_job(track_id: str) -> dict:
                     "status": "running",
                     "stepName": "Renderizando video musical",
                     "progress": 32,
+                    "audioVersionId": audio_version_id,
                     "updatedAt": firestore.SERVER_TIMESTAMP,
                 },
                 "updatedAt": firestore.SERVER_TIMESTAMP,
@@ -5683,6 +5721,7 @@ def _run_music_video_job(track_id: str) -> dict:
                     "status": "running",
                     "stepName": "Subiendo video y miniatura",
                     "progress": 84,
+                    "audioVersionId": audio_version_id,
                     "updatedAt": firestore.SERVER_TIMESTAMP,
                 },
                 "updatedAt": firestore.SERVER_TIMESTAMP,
@@ -5691,14 +5730,16 @@ def _run_music_video_job(track_id: str) -> dict:
         )
 
         upload_payload = {
-            "video": _music_upload_asset(outputs["video"], uid, clean_track_id, bucket, "video"),
-            "thumbnail": _music_upload_asset(outputs["thumbnail"], uid, clean_track_id, bucket, "images"),
-            "cover": _music_upload_asset(outputs["cover"], uid, clean_track_id, bucket, "images"),
-            "metadata": _music_upload_asset(outputs["metadata"], uid, clean_track_id, bucket, "metadata"),
-            "lyrics": _music_upload_asset(outputs["lyrics"], uid, clean_track_id, bucket, "metadata"),
-            "sunoPrompt": _music_upload_asset(outputs["sunoPrompt"], uid, clean_track_id, bucket, "metadata"),
+            "video": _music_upload_asset(outputs["video"], uid, clean_track_id, bucket, f"video/{safe_audio_version}"),
+            "thumbnail": _music_upload_asset(outputs["thumbnail"], uid, clean_track_id, bucket, f"images/{safe_audio_version}"),
+            "cover": _music_upload_asset(outputs["cover"], uid, clean_track_id, bucket, f"images/{safe_audio_version}"),
+            "metadata": _music_upload_asset(outputs["metadata"], uid, clean_track_id, bucket, f"metadata/{safe_audio_version}"),
+            "lyrics": _music_upload_asset(outputs["lyrics"], uid, clean_track_id, bucket, f"metadata/{safe_audio_version}"),
+            "sunoPrompt": _music_upload_asset(outputs["sunoPrompt"], uid, clean_track_id, bucket, f"metadata/{safe_audio_version}"),
             "durationSeconds": outputs.get("durationSeconds"),
             "sceneCount": outputs.get("sceneCount"),
+            "audioVersionId": audio_version_id,
+            "audioLabel": audio.get("label") or "",
             "renderer": "power_music_video_v1",
         }
 
@@ -5727,6 +5768,7 @@ def _run_music_video_job(track_id: str) -> dict:
                     "status": "failed",
                     "error": str(exc)[:500],
                     "stepName": "Render fallido",
+                    "audioVersionId": audio_version_id,
                     "updatedAt": firestore.SERVER_TIMESTAMP,
                 },
                 "updatedAt": firestore.SERVER_TIMESTAMP,
@@ -8016,6 +8058,8 @@ async def music_track_upload_audio(
     track_id: str,
     request: Request,
     file: UploadFile = File(...),
+    label: str = Form(""),
+    promptKind: str = Form(""),
 ):
     principal = _require_music_studio_admin(request)
     clean_track_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(track_id or "")).strip()
@@ -8070,7 +8114,14 @@ async def music_track_upload_audio(
         blob.upload_from_filename(str(local_path), content_type=content_type)
         signed_url = blob.generate_signed_url(version="v4", expiration=timedelta(days=7), method="GET")
 
+        version_id = _music_audio_version_id(safe_name_base, total)
+        clean_label = re.sub(r"\s+", " ", str(label or "")).strip()[:80]
+        clean_prompt_kind = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(promptKind or "")).strip("_")[:40] or "suno"
+        uploaded_at_iso = datetime.now(timezone.utc).isoformat()
         audio_payload = {
+            "versionId": version_id,
+            "label": clean_label or f"Toma {len(_music_audio_versions(data)) + 1}",
+            "promptKind": clean_prompt_kind,
             "fileName": safe_name_base,
             "originalFileName": filename,
             "contentType": content_type,
@@ -8080,10 +8131,86 @@ async def music_track_upload_audio(
             "uploadedAt": firestore.SERVER_TIMESTAMP,
             "stage": "suno_audio",
         }
+        version_payload = {**audio_payload, "uploadedAt": uploaded_at_iso}
+        versions = _music_audio_versions(data)
+        next_versions = []
+        for item in versions:
+            next_versions.append({**item, "isActive": False})
+        next_versions.append({**version_payload, "isActive": True})
         ref.set(
             {
                 "status": "audio_uploaded",
-                "audio": audio_payload,
+                "audio": {**version_payload, "uploadedAt": firestore.SERVER_TIMESTAMP},
+                "audioVersions": next_versions,
+                "activeAudioVersionId": version_id,
+                "render": {
+                    "status": "pending",
+                    "stepName": "Audio nuevo seleccionado",
+                    "progress": 0,
+                    "audioVersionId": version_id,
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                },
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        updated = ref.get().to_dict() or {}
+        return {"ok": True, "track": _power_music_public_track(clean_track_id, updated)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/music/tracks/{track_id}/audio/{version_id}/activate")
+async def music_track_activate_audio(track_id: str, version_id: str, request: Request):
+    principal = _require_music_studio_admin(request)
+    clean_track_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(track_id or "")).strip()
+    clean_version_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(version_id or "")).strip()
+    if not clean_track_id or clean_track_id != track_id:
+        raise HTTPException(status_code=400, detail="invalid track id")
+    if not clean_version_id or clean_version_id != version_id:
+        raise HTTPException(status_code=400, detail="invalid audio version id")
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        ref = db.collection("musicTracks").document(clean_track_id)
+        snap = ref.get()
+        if not snap.exists:
+            raise HTTPException(status_code=404, detail="track not found")
+        data = snap.to_dict() or {}
+        if data.get("userId") != principal["uid"]:
+            raise HTTPException(status_code=403, detail="track owner mismatch")
+        versions = _music_audio_versions(data)
+        selected = None
+        next_versions = []
+        for item in versions:
+            is_active = str(item.get("versionId") or "") == clean_version_id
+            if is_active:
+                selected = {**item, "isActive": True}
+                next_versions.append(selected)
+            else:
+                next_versions.append({**item, "isActive": False})
+        if not selected:
+            raise HTTPException(status_code=404, detail="audio version not found")
+        current_render = data.get("render") if isinstance(data.get("render"), dict) else {}
+        render_payload = current_render
+        if current_render.get("audioVersionId") != clean_version_id:
+            render_payload = {
+                "status": "pending",
+                "stepName": "Version activa cambiada",
+                "progress": 0,
+                "audioVersionId": clean_version_id,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            }
+        ref.set(
+            {
+                "status": "audio_uploaded",
+                "audio": selected,
+                "audioVersions": next_versions,
+                "activeAudioVersionId": clean_version_id,
+                "render": render_payload,
                 "updatedAt": firestore.SERVER_TIMESTAMP,
             },
             merge=True,
@@ -8114,7 +8241,8 @@ async def music_track_produce_video(track_id: str, request: Request, background_
         data = snap.to_dict() or {}
         if data.get("userId") != principal["uid"]:
             raise HTTPException(status_code=403, detail="track owner mismatch")
-        audio = data.get("audio") if isinstance(data.get("audio"), dict) else {}
+        audio = _music_active_audio(data)
+        audio_version_id = str(audio.get("versionId") or data.get("activeAudioVersionId") or "active").strip() or "active"
         if not audio.get("storagePath") and not audio.get("fileName"):
             raise HTTPException(status_code=400, detail="sube primero el audio final de Suno")
 
@@ -8126,7 +8254,8 @@ async def music_track_produce_video(track_id: str, request: Request, background_
                 "duplicateBlocked": True,
                 "track": _power_music_public_track(clean_track_id, data),
             }
-        if render.get("status") == "completed" and render.get("video", {}).get("url"):
+        render_video = render.get("video") if isinstance(render.get("video"), dict) else {}
+        if render.get("status") == "completed" and render.get("audioVersionId") == audio_version_id and render_video.get("url"):
             return {
                 "ok": True,
                 "status": "completed",
@@ -8141,6 +8270,8 @@ async def music_track_produce_video(track_id: str, request: Request, background_
                     "status": "queued",
                     "stepName": "Esperando worker de video musical",
                     "progress": 2,
+                    "audioVersionId": audio_version_id,
+                    "audioLabel": audio.get("label") or "",
                     "queuedAt": firestore.SERVER_TIMESTAMP,
                     "updatedAt": firestore.SERVER_TIMESTAMP,
                 },

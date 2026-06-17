@@ -264,6 +264,99 @@ def _as_list(value, limit=12):
     return out
 
 
+def _word_list(text: str) -> list[str]:
+    return re.findall(r"[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ0-9]+", str(text or "").lower())
+
+
+def _clamp_score(value: float) -> int:
+    return max(0, min(100, int(round(value))))
+
+
+def _score_power_music_package(package: dict) -> dict:
+    lyrics = str(package.get("lyrics") or "")
+    title = compact_text(package.get("title"), 160)
+    hook = compact_text(package.get("mainHook") or package.get("mantra") or title, 160)
+    prompt = compact_text(package.get("sunoPrompt"), 1200)
+    words = _word_list(lyrics)
+    lines = [line.strip() for line in lyrics.splitlines() if line.strip() and not line.strip().startswith("[")]
+    section_count = len(re.findall(r"\[[^\]]+\]", lyrics))
+    line_lengths = [len(_word_list(line)) for line in lines if _word_list(line)]
+    avg_line = sum(line_lengths) / max(1, len(line_lengths))
+    balance = 100 - min(70, (max(line_lengths or [0]) - min(line_lengths or [0])) * 4)
+    hook_words = _word_list(hook)
+    hook_hits = sum(1 for line in lines if hook and hook.lower() in line.lower())
+    identity_hits = sum(lyrics.lower().count(term) for term in ["soy ", "elijo", "cumplo", "avanzo", "construyo", "promesa", "camino"])
+    motion_hits = sum(lyrics.lower().count(term) for term in ["corro", "respiro", "levanto", "paso", "fuego", "hierro", "sudor", "amanece", "entreno"])
+    last_words = [line.split()[-1] for line in lines if line.split()]
+    rhyme_endings = [word[-3:] for word in _word_list("\n".join(last_words)) if len(word) >= 4]
+    repeated_endings = len(rhyme_endings) - len(set(rhyme_endings))
+    prompt_terms = sum(prompt.lower().count(term) for term in ["bpm", "bass", "drum", "hook", "chorus", "vocal", "mix", "master", "energy"])
+
+    melody = _clamp_score(45 + min(25, section_count * 4) + min(20, hook_hits * 7) + min(10, repeated_endings * 2))
+    lirica = _clamp_score(45 + min(20, identity_hits * 2.5) + min(15, motion_hits * 2) + min(20, len(set(words)) / max(1, len(words)) * 80))
+    ritmo = _clamp_score(40 + min(25, balance * 0.25) + (20 if 5 <= avg_line <= 11 else 8) + min(15, section_count * 2))
+    viralidad = _clamp_score(42 + min(24, hook_hits * 8) + (15 if 3 <= len(hook_words) <= 8 else 4) + min(19, identity_hits * 1.5))
+    musica = _clamp_score(45 + min(35, prompt_terms * 4) + (10 if package.get("bpm") else 0) + (10 if package.get("sunoPromptAlt") else 0))
+    coherencia = _clamp_score(48 + min(22, section_count * 3) + min(15, len(set(_word_list(title)) & set(words)) * 4) + (15 if package.get("intention") else 0))
+    impacto = _clamp_score(45 + min(30, identity_hits * 3) + min(15, motion_hits * 2) + (10 if hook_hits >= 2 else 0))
+    poder = _clamp_score(46 + min(30, identity_hits * 3) + min(14, prompt.lower().count("power") * 4 + prompt.lower().count("hero") * 3) + min(10, motion_hits))
+
+    dimensions = {
+        "melodia": melody,
+        "lirica": lirica,
+        "ritmo": ritmo,
+        "viralidad": viralidad,
+        "musica": musica,
+        "coherencia": coherencia,
+        "impacto": impacto,
+        "poder": poder,
+    }
+    weights = {
+        "melodia": 0.12,
+        "lirica": 0.14,
+        "ritmo": 0.13,
+        "viralidad": 0.16,
+        "musica": 0.12,
+        "coherencia": 0.12,
+        "impacto": 0.11,
+        "poder": 0.10,
+    }
+    total = _clamp_score(sum(dimensions[key] * weights[key] for key in dimensions))
+    strengths = []
+    if hook_hits >= 2:
+        strengths.append("Hook repetible dentro de la letra.")
+    if identity_hits >= 6:
+        strengths.append("Identidad fuerte: soy/elijo/cumplo/avanzo.")
+    if prompt_terms >= 5:
+        strengths.append("Prompt Suno bien armado para produccion musical.")
+    if section_count >= 5:
+        strengths.append("Estructura cantable con secciones claras.")
+    risks = []
+    if hook_hits < 2:
+        risks.append("El hook podria repetirse mas para mejorar recordacion.")
+    if avg_line > 13:
+        risks.append("Algunas lineas pueden sentirse largas para Suno.")
+    if section_count < 4:
+        risks.append("Faltan secciones claras para guiar la cancion.")
+    suggestions = []
+    if viralidad < 75:
+        suggestions.append("Repetir el mantra exacto al menos dos veces en coro/final.")
+    if ritmo < 75:
+        suggestions.append("Acortar lineas largas y mantener frases de 6 a 10 palabras.")
+    if melody < 75:
+        suggestions.append("Agregar un pre-coro con frase ascendente antes del hook.")
+
+    return {
+        "version": "power_music_lyric_score_v1",
+        "total": total,
+        "dimensions": dimensions,
+        "strengths": strengths[:5],
+        "risks": risks[:5],
+        "suggestions": suggestions[:5],
+        "calibration": "heuristic_zero_cost",
+    }
+
+
 def normalize_package(data: dict, payload: dict | None = None) -> dict:
     payload = payload or {}
     style = style_by_id(str(payload.get("style") or data.get("style") or DEFAULT_STYLE))
@@ -326,6 +419,7 @@ def normalize_package(data: dict, payload: dict | None = None) -> dict:
         package["mainHook"] = title
     if not package["mantra"]:
         package["mantra"] = intention["seed"]
+    package["lyricScore"] = _score_power_music_package(package)
     return package
 
 
@@ -418,6 +512,14 @@ def stable_track_id(uid: str, package: dict) -> str:
 def public_track_doc(track_id: str, data: dict) -> dict:
     package = data.get("package") if isinstance(data.get("package"), dict) else {}
     audio = data.get("audio") if isinstance(data.get("audio"), dict) else {}
+    audio_versions = data.get("audioVersions") if isinstance(data.get("audioVersions"), list) else []
+    if audio and not audio_versions:
+        audio_versions = [{
+            **audio,
+            "versionId": audio.get("versionId") or "take_legacy",
+            "label": audio.get("label") or "Version principal",
+            "promptKind": audio.get("promptKind") or "unknown",
+        }]
     render = data.get("render") if isinstance(data.get("render"), dict) else {}
 
     def _public_value(value):
@@ -441,6 +543,8 @@ def public_track_doc(track_id: str, data: dict) -> dict:
         "createdAt": _public_value(data.get("createdAt")),
         "updatedAt": _public_value(data.get("updatedAt")),
         "audio": _public_value(audio),
+        "audioVersions": _public_value(audio_versions),
+        "activeAudioVersionId": _public_value(data.get("activeAudioVersionId") or audio.get("versionId") or ""),
         "render": _public_value(render),
         "package": package,
     }

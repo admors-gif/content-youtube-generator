@@ -59,8 +59,10 @@ Implementado en la sesion 2026-06-16:
 - Prompt maestro documentado: `prompts/agent_power_music.md`.
 - Documentacion operativa: `docs/power-music-studio.md`.
 - V1 genera letra, prompt Suno, prompt alternativo, negative prompt, portada, direccion visual y metadata YouTube.
-- V1 permite subir el audio final descargado de Suno a `musicTracks/{trackId}.audio` y Firebase Storage.
-- V1 no usa API de Suno y no renderiza video todavia.
+- V1 permite subir multiples tomas de audio descargadas de Suno a `musicTracks/{trackId}.audioVersions` y Firebase Storage.
+- `musicTracks/{trackId}.audio` conserva la version activa para compatibilidad.
+- V1 renderiza video final en VPS/worker desde la version activa de audio.
+- V1 incluye `package.lyricScore` heuristico sin costo extra.
 - No consume creditos internos; el usuario copia a Suno manualmente.
 
 Flags:
@@ -71,8 +73,8 @@ Flags:
 Siguiente bloque recomendado:
 
 - Analizar audio subido: duracion, waveform y energia aproximada.
-- Generar imagenes con Comfy/Flux usando `videoConcept.scenes`.
-- Render estatico/Ken Burns sin Luma por default.
+- Crear comparador subjetivo de tomas: energia, mezcla, claridad vocal, hook.
+- Conectar Comfy/Flux como proveedor opcional usando `videoConcept.scenes`.
 - Miniatura y publicacion YouTube reutilizando el centro actual.
 
 ### Radar editorial v1
@@ -189,12 +191,13 @@ Estado: implementado como pipeline admin de musica con render en VPS.
 
 Flujo:
 
-1. `/dashboard/music` genera letra, prompt Suno, direccion visual y metadata.
-2. El usuario crea la cancion en Suno y sube el audio final al track.
-3. Boton `Producir video musical` llama `POST /music/tracks/{trackId}/produce`.
-4. Backend encola `content_factory.produce_music_video` en Celery; si la cola no esta disponible usa background task de API como fallback.
-5. Worker descarga el audio desde Firebase Storage, renderiza assets locales con `scripts/power_music_video.py`, ensambla `FINAL_MUSIC.mp4` con FFmpeg y sube video/thumbnail/cover/metadata a Storage.
-6. Firestore `musicTracks/{trackId}.render` guarda estado, progreso, URLs y errores.
+1. `/dashboard/music` genera letra, score, prompt Suno, direccion visual y metadata.
+2. El usuario crea la cancion en Suno con prompt maestro/alterno y puede subir varias tomas al mismo track.
+3. La UI permite seleccionar `activeAudioVersionId`.
+4. Boton `Producir video musical` llama `POST /music/tracks/{trackId}/produce`.
+5. Backend encola `content_factory.produce_music_video` en Celery; si la cola no esta disponible usa background task de API como fallback.
+6. Worker descarga el audio activo desde Firebase Storage, renderiza assets locales con `scripts/power_music_video.py`, ensambla `FINAL_MUSIC.mp4` con FFmpeg y sube video/thumbnail/cover/metadata a Storage.
+7. Firestore `musicTracks/{trackId}.render` guarda estado, progreso, URLs, errores y `audioVersionId`.
 
 Archivos clave:
 
@@ -218,6 +221,8 @@ Verificacion pasada en desarrollo:
 
 - Import renderer OK.
 - Smoke test local con audio sintetico genero `FINAL_MUSIC.mp4`.
+- Smoke test posterior valido que el MP4 final respeta la duracion exacta del audio.
+- UI soporta boton rapido de copia en Lyrics, score de letra y versiones de audio.
 - Pendiente antes de darlo por cerrado en produccion: probar un MP3 real de Suno desde `/dashboard/music`, confirmar que el worker del VPS toma el job, validar MP4 final, miniatura y signed URLs.
 
 ## Como pedirle contexto a Claude

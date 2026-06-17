@@ -308,6 +308,143 @@ function TrackList({ tracks, selectedId, onSelect }) {
   );
 }
 
+function ScoreBar({ label, value }) {
+  const safeValue = Math.max(0, Math.min(100, Number(value || 0)));
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 6 }}>
+        <span className="cf-mono-sm">{label}</span>
+        <span className="cf-mono-sm" style={{ color: "var(--paper)" }}>{Math.round(safeValue)}</span>
+      </div>
+      <div
+        style={{
+          height: 7,
+          borderRadius: 999,
+          overflow: "hidden",
+          background: "var(--ink-2)",
+          border: "1px solid var(--rule-1)",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            width: `${safeValue}%`,
+            background: safeValue >= 78 ? "var(--ok)" : safeValue >= 62 ? "var(--ember)" : "var(--bad)",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function LyricScoreCard({ score }) {
+  if (!score || typeof score !== "object") return null;
+  const dimensions = score.dimensions || {};
+  const entries = [
+    ["Melodia", dimensions.melodia],
+    ["Lirica", dimensions.lirica],
+    ["Ritmo", dimensions.ritmo],
+    ["Viralidad", dimensions.viralidad],
+    ["Musica", dimensions.musica],
+    ["Coherencia", dimensions.coherencia],
+    ["Impacto", dimensions.impacto],
+    ["Poder", dimensions.poder],
+  ];
+  return (
+    <Section
+      label="Calificador"
+      title="Score de letra"
+      actions={<span style={pillStyle(Number(score.total || 0) >= 78 ? "ok" : "ember")}>{Math.round(Number(score.total || 0))}/100</span>}
+    >
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: "var(--s-4)",
+        }}
+      >
+        {entries.map(([label, value]) => (
+          <ScoreBar key={label} label={label} value={value} />
+        ))}
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+          gap: "var(--s-4)",
+          marginTop: "var(--s-4)",
+        }}
+      >
+        <div>
+          <div className="cf-mono-sm">Fortalezas</div>
+          <ul style={{ color: "var(--paper-dim)", lineHeight: 1.65, paddingLeft: 18 }}>
+            {(score.strengths || ["Calificacion generada sin costo extra."]).map((item, index) => (
+              <li key={`${safeText(item)}-${index}`}>{safeText(item)}</li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <div className="cf-mono-sm">Mejoras sugeridas</div>
+          <ul style={{ color: "var(--paper-mute)", lineHeight: 1.65, paddingLeft: 18 }}>
+            {(score.suggestions || score.risks || ["Lista para probar en Suno."]).map((item, index) => (
+              <li key={`${safeText(item)}-${index}`}>{safeText(item)}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+function AudioVersionList({ versions, activeId, onActivate, activating }) {
+  const items = Array.isArray(versions) ? versions : [];
+  if (!items.length) {
+    return <p className="cf-caption" style={{ marginTop: "var(--s-4)" }}>Todavia no hay versiones de audio subidas.</p>;
+  }
+  return (
+    <div style={{ display: "grid", gap: 10, marginTop: "var(--s-4)" }}>
+      {items.map((version, index) => {
+        const versionId = safeText(version.versionId || `take_${index + 1}`);
+        const active = activeId ? activeId === versionId : version.isActive;
+        return (
+          <div
+            key={`${versionId}-${index}`}
+            className="cf-card"
+            style={{
+              padding: "var(--s-4)",
+              borderColor: active ? "var(--ok)" : "var(--rule-1)",
+              background: active ? "rgba(116,201,154,0.07)" : "var(--ink-1)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <div>
+                <strong style={{ color: "var(--paper)" }}>{safeText(version.label, `Toma ${index + 1}`)}</strong>
+                <div className="cf-caption">
+                  {safeText(version.promptKind, "suno")} · {safeText(version.originalFileName || version.fileName, "audio")}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {active && <span style={pillStyle("ok")}>activa</span>}
+                <button
+                  type="button"
+                  className="cf-button"
+                  onClick={() => onActivate(versionId)}
+                  disabled={active || activating}
+                  style={{ minHeight: 40, color: "var(--paper)" }}
+                >
+                  <Icon name="check" size={16} />
+                  Usar esta version
+                </button>
+              </div>
+            </div>
+            {version.url && <audio controls src={version.url} style={{ width: "100%", marginTop: 12 }} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function VisualSceneList({ scenes }) {
   const items = Array.isArray(scenes) ? scenes : [];
   if (!items.length) return <p className="cf-caption">El paquete aun no trae escenas visuales.</p>;
@@ -354,14 +491,20 @@ export default function MusicStudioPage() {
   const [loading, setLoading] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
   const [producingVideo, setProducingVideo] = useState(false);
+  const [activatingAudio, setActivatingAudio] = useState(false);
   const [audioFile, setAudioFile] = useState(null);
+  const [audioVersionLabel, setAudioVersionLabel] = useState("");
+  const [audioPromptKind, setAudioPromptKind] = useState("original");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [copied, setCopied] = useState("");
 
   const packageData = current?.package || null;
   const audioData = current?.audio || null;
+  const audioVersions = current?.audioVersions || [];
+  const activeAudioVersionId = current?.activeAudioVersionId || audioData?.versionId || "";
   const renderData = current?.render || null;
+  const lyricScore = packageData?.lyricScore || null;
 
   const intentionMeta = useMemo(
     () => (presets.intentions || []).find((item) => item.id === form.intention),
@@ -505,6 +648,8 @@ export default function MusicStudioPage() {
     try {
       const body = new FormData();
       body.append("file", audioFile);
+      body.append("label", audioVersionLabel || `Toma ${audioVersions.length + 1}`);
+      body.append("promptKind", audioPromptKind || "suno");
       const data = await apiFetch(`/music/tracks/${encodeURIComponent(currentId)}/audio`, {
         method: "POST",
         body,
@@ -512,7 +657,8 @@ export default function MusicStudioPage() {
       setCurrent(data.track);
       setCurrentId(data.track?.trackId || currentId);
       setAudioFile(null);
-      setNotice("Audio de Suno subido y conectado al track. Ya puedes producir el video musical completo en el VPS.");
+      setAudioVersionLabel("");
+      setNotice("Version de audio subida y seleccionada. Ya puedes producir el video musical completo en el VPS.");
       await loadTracks();
     } catch (exc) {
       setError(exc.message);
@@ -551,6 +697,28 @@ export default function MusicStudioPage() {
       setError(exc.message);
     } finally {
       setProducingVideo(false);
+    }
+  }
+
+  async function activateAudioVersion(versionId) {
+    if (!currentId || !versionId) return;
+    setError("");
+    setNotice("");
+    setActivatingAudio(true);
+    try {
+      const data = await apiFetch(`/music/tracks/${encodeURIComponent(currentId)}/audio/${encodeURIComponent(versionId)}/activate`, {
+        method: "POST",
+      });
+      if (data.track) {
+        setCurrent(data.track);
+        setCurrentId(data.track.trackId || currentId);
+      }
+      setNotice("Version de audio seleccionada. El siguiente render usara esta toma.");
+      await loadTracks();
+    } catch (exc) {
+      setError(exc.message);
+    } finally {
+      setActivatingAudio(false);
     }
   }
 
@@ -722,6 +890,7 @@ export default function MusicStudioPage() {
             title={safeText(packageData.title, "Cancion generada")}
             actions={
               <>
+                {lyricScore?.total && <span style={pillStyle(Number(lyricScore.total) >= 78 ? "ok" : "ember")}>score {Math.round(Number(lyricScore.total))}</span>}
                 <span style={pillStyle("ember")}>{safeText(packageData.bpm, "--")} bpm</span>
                 <span style={pillStyle("neutral")}>{safeText(packageData.energy, "energia")}</span>
               </>
@@ -738,12 +907,14 @@ export default function MusicStudioPage() {
             </div>
           </Section>
 
+          <LyricScoreCard score={lyricScore} />
+
           <Section
             label="Audio de Suno"
-            title={audioData?.url ? "Audio conectado" : "Subir cancion final"}
+            title={audioVersions.length ? "Versiones de audio" : "Subir cancion final"}
             actions={
               audioData?.url ? (
-                <span style={pillStyle("ok")}>audio_uploaded</span>
+                <span style={pillStyle("ok")}>{audioVersions.length || 1} toma(s)</span>
               ) : (
                 <span style={pillStyle("neutral")}>mp3 wav m4a</span>
               )
@@ -757,6 +928,23 @@ export default function MusicStudioPage() {
                 alignItems: "end",
               }}
             >
+              <Field
+                label="Nombre de version"
+                value={audioVersionLabel}
+                onChange={setAudioVersionLabel}
+                placeholder={`Toma ${audioVersions.length + 1} - prompt ${audioPromptKind}`}
+              />
+              <SelectField
+                label="Prompt usado en Suno"
+                value={audioPromptKind}
+                onChange={setAudioPromptKind}
+                options={[
+                  { id: "original", label: "Prompt maestro" },
+                  { id: "alternate", label: "Prompt alterno" },
+                  { id: "retry", label: "Otro intento" },
+                  { id: "manual", label: "Ajuste manual" },
+                ]}
+              />
               <label style={{ display: "block" }}>
                 <span style={labelStyle()}>Archivo descargado de Suno</span>
                 <input
@@ -778,19 +966,16 @@ export default function MusicStudioPage() {
                 style={{ minHeight: 54, justifyContent: "center" }}
               >
                 <Icon name={uploadingAudio ? "refresh" : "uploadCloud"} size={18} />
-                {uploadingAudio ? "Subiendo audio..." : "Subir audio al track"}
+                {uploadingAudio ? "Subiendo audio..." : "Subir como nueva version"}
               </button>
             </div>
 
-            {audioData?.url && (
-              <div style={{ marginTop: "var(--s-4)" }}>
-                <audio controls src={audioData.url} style={{ width: "100%" }} />
-                <div className="cf-caption" style={{ marginTop: 8 }}>
-                  {audioData.fileName || "audio"} · {audioData.contentType || "audio"} ·{" "}
-                  {audioData.sizeBytes ? `${(Number(audioData.sizeBytes) / (1024 * 1024)).toFixed(1)} MB` : "tamano listo"}
-                </div>
-              </div>
-            )}
+            <AudioVersionList
+              versions={audioVersions}
+              activeId={activeAudioVersionId}
+              onActivate={activateAudioVersion}
+              activating={activatingAudio}
+            />
           </Section>
 
           <Section
@@ -819,7 +1004,7 @@ export default function MusicStudioPage() {
                   {renderData?.status === "completed"
                     ? "El video final, miniatura, portada y metadata ya quedaron generados y guardados."
                     : audioData?.url || audioData?.storagePath
-                      ? "Renderiza el video completo en el VPS con visuales premium, Ken Burns, portada, miniatura y metadata."
+                      ? `Renderiza el video completo en el VPS usando la version activa: ${safeText(audioData?.label, "toma seleccionada")}.`
                       : "Sube primero el audio final descargado de Suno para habilitar el render."}
                 </p>
                 {(renderData?.status === "running" || renderData?.status === "queued") && (
@@ -910,7 +1095,11 @@ export default function MusicStudioPage() {
               alignItems: "start",
             }}
           >
-            <Section label="Letra" title="Lyrics">
+            <Section
+              label="Letra"
+              title="Lyrics"
+              actions={<CopyButton label="Copiar letra para Suno" value={packageText(packageData, "lyrics")} onCopy={copyText} />}
+            >
               <pre
                 style={{
                   whiteSpace: "pre-wrap",

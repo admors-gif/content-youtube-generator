@@ -16,6 +16,8 @@ Power Music Studio convierte una idea de crecimiento personal en un paquete crea
 - metadata de YouTube.
 - upload del audio final descargado de Suno.
 - produccion de video final en VPS con visuales generativos locales, Ken Burns, thumbnail, cover y metadata.
+- multiples tomas/versiones de audio por una misma letra.
+- calificador de letra sin costo extra.
 
 La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la cancion y la sube al track en Content Factory. Desde ahi Content Factory ya puede mandar el render completo al VPS/worker para generar `FINAL_MUSIC.mp4`, miniatura y portada sin depender de que la computadora del usuario permanezca prendida.
 
@@ -28,10 +30,12 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - No permite subliminal oculto; usa afirmaciones conscientes y sanas.
 - No imita artistas reales ni canciones existentes.
 - Guarda paquetes en Firestore para reutilizarlos.
-- Guarda el audio final en Firebase Storage bajo `music/{uid}/{trackId}/audio/`.
+- Guarda cada version de audio en Firebase Storage bajo `music/{uid}/{trackId}/audio/`.
+- Permite seleccionar una version activa antes de producir el video.
 - Renderiza el video en worker/Celery con fallback a background task si la cola no esta disponible.
 - No usa Luma por default.
 - Renderer v1: imagenes locales premium con PIL + movimiento Ken Burns en FFmpeg.
+- El score de letra es heuristico: no llama otro modelo ni consume API adicional.
 
 ## Variables
 
@@ -67,6 +71,7 @@ Lista paquetes recientes del usuario/admin desde `musicTracks`.
 ### `GET /music/tracks/{trackId}`
 
 Devuelve un track individual con `package`, `audio` y `render`.
+Tambien devuelve `audioVersions` y `activeAudioVersionId`.
 
 ### `POST /music/generate`
 
@@ -90,7 +95,12 @@ Payload principal:
 
 ### `POST /music/tracks/{trackId}/audio`
 
-Sube el audio final descargado de Suno al track.
+Sube una version de audio descargada de Suno al track. Cada upload se guarda como una toma nueva y queda seleccionada como activa.
+
+Form fields opcionales:
+
+- `label`: nombre visible, por ejemplo `Prompt maestro A`, `Prompt alterno B`.
+- `promptKind`: `original`, `alternate`, `retry` o `manual`.
 
 Formatos v1:
 
@@ -107,7 +117,12 @@ Respuesta:
   "track": {
     "trackId": "...",
     "status": "audio_uploaded",
+    "activeAudioVersionId": "take_...",
+    "audioVersions": [],
     "audio": {
+      "versionId": "take_...",
+      "label": "Prompt maestro A",
+      "promptKind": "original",
       "fileName": "...",
       "contentType": "audio/mpeg",
       "sizeBytes": 123,
@@ -118,13 +133,17 @@ Respuesta:
 }
 ```
 
+### `POST /music/tracks/{trackId}/audio/{versionId}/activate`
+
+Selecciona una toma de audio como version activa. Si el render anterior era de otra toma, queda marcado como pendiente para evitar confundir MP4 viejo con audio nuevo.
+
 ### `POST /music/tracks/{trackId}/produce`
 
 Encola el render musical completo en el VPS.
 
 Precondicion:
 
-- el track debe tener audio subido.
+- el track debe tener una version activa de audio.
 
 Respuesta:
 
@@ -140,7 +159,8 @@ Respuesta:
     "status": "video_queued",
     "render": {
       "status": "queued",
-      "progress": 2
+      "progress": 2,
+      "audioVersionId": "take_..."
     }
   }
 }
@@ -176,7 +196,24 @@ Campos principales:
 - `createdAt`
 - `updatedAt`
 - `audio`
+- `audioVersions`
+- `activeAudioVersionId`
 - `render`
+
+`package.lyricScore` contiene:
+
+- `total`
+- `dimensions.melodia`
+- `dimensions.lirica`
+- `dimensions.ritmo`
+- `dimensions.viralidad`
+- `dimensions.musica`
+- `dimensions.coherencia`
+- `dimensions.impacto`
+- `dimensions.poder`
+- `strengths`
+- `risks`
+- `suggestions`
 
 Estados v1:
 
@@ -208,18 +245,19 @@ Estados futuros:
 2. Llena intencion, estilo, tema, energia y notas.
 3. Pulsa "Generar paquete premium".
 4. Copia letra y prompt a Suno.
-5. Genera la cancion en Suno.
-6. Descarga el audio manualmente.
-7. Sube el audio al track en `/dashboard/music`.
-8. Pulsa "Producir video musical".
-9. El VPS/worker genera:
+5. Genera la cancion en Suno con prompt maestro y/o alternativo.
+6. Descarga las versiones buenas.
+7. Sube cada audio al mismo track en `/dashboard/music`.
+8. Escucha y selecciona la version activa.
+9. Pulsa "Producir video musical".
+10. El VPS/worker genera:
    - `FINAL_MUSIC.mp4`;
    - `thumbnail.jpg`;
    - `cover.jpg`;
    - `metadata.json`;
    - `lyrics.txt`;
    - `suno_prompt.txt`.
-10. La UI muestra progreso, video final, miniatura y enlaces.
+11. La UI muestra progreso, video final, miniatura y enlaces.
 
 ## Proximos Bloques
 
@@ -227,6 +265,7 @@ Estados futuros:
 2. Agregar waveform visual reactivo al audio.
 3. Integrar publicacion directa a YouTube reutilizando el centro de publicaciones.
 4. Agregar ZIP de material musical completo.
+5. Calificador LLM opcional para comparar letras con mayor criterio artistico.
 
 ## Handoff Para Otro Equipo
 
@@ -252,7 +291,9 @@ Probar en produccion:
 - copiar prompt a Suno;
 - confirmar que aparece en tracks recientes;
 - subir un `.mp3` o `.wav` descargado de Suno;
-- reproducir el audio desde la UI;
+- subir varias tomas si Suno devuelve mas de una version;
+- reproducir audios desde la UI;
+- seleccionar la version activa;
 - pulsar "Producir video musical";
 - esperar `video_ready`;
 - reproducir `FINAL_MUSIC.mp4` y abrir la miniatura.
