@@ -5530,6 +5530,16 @@ KNOWLEDGE_SYNC_MAX_POINTS = int(os.environ.get("KNOWLEDGE_SYNC_MAX_POINTS", "300
 KNOWLEDGE_MAX_BOOKS_RESPONSE = int(os.environ.get("KNOWLEDGE_MAX_BOOKS_RESPONSE", "1000"))
 KNOWLEDGE_ALLOWED_EXTENSIONS = {".pdf", ".epub"}
 
+MUSIC_UPLOAD_DIR = Path(os.environ.get("MUSIC_UPLOAD_DIR", str(BASE_DIR / "output" / "music_uploads")))
+MUSIC_MAX_AUDIO_BYTES = int(os.environ.get("MUSIC_MAX_AUDIO_BYTES", str(160 * 1024 * 1024)))
+MUSIC_ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac"}
+MUSIC_AUDIO_CONTENT_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+}
+
 
 def _knowledge_is_enabled() -> bool:
     return _flag_enabled("CONTENT_FACTORY_KNOWLEDGE_ENABLED", default=True)
@@ -7770,6 +7780,91 @@ def music_tracks(request: Request, limit: int = 40):
         return {"ok": True, "items": items[:safe_limit]}
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": str(exc)[:220], "items": []})
+
+
+@app.post("/music/tracks/{track_id}/audio")
+async def music_track_upload_audio(
+    track_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+):
+    principal = _require_music_studio_admin(request)
+    clean_track_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(track_id or "")).strip()
+    if not clean_track_id or clean_track_id != track_id:
+        raise HTTPException(status_code=400, detail="invalid track id")
+
+    filename = Path(file.filename or "audio.mp3").name
+    suffix = Path(filename).suffix.lower()
+    if suffix not in MUSIC_ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="solo audio mp3, wav, m4a o aac")
+
+    safe_name_base = re.sub(r"[^a-zA-Z0-9._-]+", "_", filename).strip("._") or f"{clean_track_id}{suffix}"
+    content_type = MUSIC_AUDIO_CONTENT_TYPES.get(suffix, "application/octet-stream")
+
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore, storage
+
+        db = firestore.client()
+        ref = db.collection("musicTracks").document(clean_track_id)
+        snap = ref.get()
+        if not snap.exists:
+            raise HTTPException(status_code=404, detail="track not found")
+        data = snap.to_dict() or {}
+        if data.get("userId") != principal["uid"]:
+            raise HTTPException(status_code=403, detail="track owner mismatch")
+
+        folder = MUSIC_UPLOAD_DIR / principal["uid"] / clean_track_id
+        folder.mkdir(parents=True, exist_ok=True)
+        local_path = folder / safe_name_base
+        total = 0
+        with local_path.open("wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MUSIC_MAX_AUDIO_BYTES:
+                    try:
+                        local_path.unlink()
+                    except Exception:
+                        pass
+                    raise HTTPException(status_code=413, detail="audio demasiado grande")
+                out.write(chunk)
+
+        if total <= 0:
+            raise HTTPException(status_code=400, detail="audio vacio")
+
+        bucket = storage.bucket(FIREBASE_STORAGE_BUCKET)
+        blob_name = f"music/{principal['uid']}/{clean_track_id}/audio/{safe_name_base}"
+        blob = bucket.blob(blob_name)
+        blob.upload_from_filename(str(local_path), content_type=content_type)
+        signed_url = blob.generate_signed_url(version="v4", expiration=timedelta(days=7), method="GET")
+
+        audio_payload = {
+            "fileName": safe_name_base,
+            "originalFileName": filename,
+            "contentType": content_type,
+            "sizeBytes": total,
+            "storagePath": f"gs://{bucket.name}/{blob_name}",
+            "url": signed_url,
+            "uploadedAt": firestore.SERVER_TIMESTAMP,
+            "stage": "suno_audio",
+        }
+        ref.set(
+            {
+                "status": "audio_uploaded",
+                "audio": audio_payload,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        updated = ref.get().to_dict() or {}
+        return {"ok": True, "track": _power_music_public_track(clean_track_id, updated)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
 
 
 @app.post("/music/generate")

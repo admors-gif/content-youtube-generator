@@ -306,11 +306,14 @@ export default function MusicStudioPage() {
   const [current, setCurrent] = useState(null);
   const [currentId, setCurrentId] = useState("");
   const [loading, setLoading] = useState(false);
+  const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [audioFile, setAudioFile] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [copied, setCopied] = useState("");
 
   const packageData = current?.package || null;
+  const audioData = current?.audio || null;
 
   const intentionMeta = useMemo(
     () => (presets.intentions || []).find((item) => item.id === form.intention),
@@ -406,6 +409,37 @@ export default function MusicStudioPage() {
       setNotice(`${label} copiado al portapapeles.`);
     } catch {
       setError("No pude copiar automaticamente. Selecciona el texto manualmente.");
+    }
+  }
+
+  async function uploadAudio() {
+    if (!currentId) {
+      setError("Primero genera o selecciona un track.");
+      return;
+    }
+    if (!audioFile) {
+      setError("Selecciona el archivo de audio descargado de Suno.");
+      return;
+    }
+    setError("");
+    setNotice("");
+    setUploadingAudio(true);
+    try {
+      const body = new FormData();
+      body.append("file", audioFile);
+      const data = await apiFetch(`/music/tracks/${encodeURIComponent(currentId)}/audio`, {
+        method: "POST",
+        body,
+      });
+      setCurrent(data.track);
+      setCurrentId(data.track?.trackId || currentId);
+      setAudioFile(null);
+      setNotice("Audio de Suno subido y conectado al track. Ya quedo listo para el render visual del siguiente bloque.");
+      await loadTracks();
+    } catch (exc) {
+      setError(exc.message);
+    } finally {
+      setUploadingAudio(false);
     }
   }
 
@@ -527,8 +561,8 @@ export default function MusicStudioPage() {
               {[
                 ["01", "Genera letra y prompt maestro en Content Factory."],
                 ["02", "Copia letra + prompt en Suno y crea la cancion final."],
-                ["03", "Descarga audio. El siguiente bloque permitira subirlo aqui."],
-                ["04", "Content Factory generara visuales, miniatura y video para YouTube."],
+                ["03", "Descarga audio de Suno y subelo al track aqui mismo."],
+                ["04", "El siguiente bloque renderizara visuales, miniatura y video para YouTube."],
               ].map(([step, text]) => (
                 <div key={step} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                   <span style={pillStyle("ember")}>{step}</span>
@@ -591,6 +625,61 @@ export default function MusicStudioPage() {
               <CopyButton label="Prompt alterno" value={packageText(packageData, "sunoAlt")} onCopy={copyText} icon="copy" />
               <CopyButton label="YouTube" value={packageText(packageData, "youtube")} onCopy={copyText} icon="fileText" />
             </div>
+          </Section>
+
+          <Section
+            label="Audio de Suno"
+            title={audioData?.url ? "Audio conectado" : "Subir cancion final"}
+            actions={
+              audioData?.url ? (
+                <span style={pillStyle("ok")}>audio_uploaded</span>
+              ) : (
+                <span style={pillStyle("neutral")}>mp3 wav m4a</span>
+              )
+            }
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                gap: "var(--s-4)",
+                alignItems: "end",
+              }}
+            >
+              <label style={{ display: "block" }}>
+                <span style={labelStyle()}>Archivo descargado de Suno</span>
+                <input
+                  type="file"
+                  accept=".mp3,.wav,.m4a,.aac,audio/mpeg,audio/wav,audio/mp4,audio/aac"
+                  onChange={(event) => setAudioFile(event.target.files?.[0] || null)}
+                  style={{
+                    ...fieldBase(),
+                    paddingTop: 12,
+                    color: "var(--paper-dim)",
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="cf-button cf-button--primary"
+                onClick={uploadAudio}
+                disabled={uploadingAudio || !currentId || !audioFile}
+                style={{ minHeight: 54, justifyContent: "center" }}
+              >
+                <Icon name={uploadingAudio ? "refresh" : "uploadCloud"} size={18} />
+                {uploadingAudio ? "Subiendo audio..." : "Subir audio al track"}
+              </button>
+            </div>
+
+            {audioData?.url && (
+              <div style={{ marginTop: "var(--s-4)" }}>
+                <audio controls src={audioData.url} style={{ width: "100%" }} />
+                <div className="cf-caption" style={{ marginTop: 8 }}>
+                  {audioData.fileName || "audio"} · {audioData.contentType || "audio"} ·{" "}
+                  {audioData.sizeBytes ? `${(Number(audioData.sizeBytes) / (1024 * 1024)).toFixed(1)} MB` : "tamano listo"}
+                </div>
+              </div>
+            )}
           </Section>
 
           <div

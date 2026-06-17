@@ -14,8 +14,9 @@ Power Music Studio convierte una idea de crecimiento personal en un paquete crea
 - portada;
 - direccion visual para video;
 - metadata de YouTube.
+- upload del audio final descargado de Suno.
 
-La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la cancion y en una fase posterior subira el audio a Content Factory para producir video, miniatura y publicacion.
+La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la cancion y la sube al track en Content Factory. El siguiente bloque producira video, miniatura y publicacion.
 
 ## Decisiones
 
@@ -26,6 +27,7 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - No permite subliminal oculto; usa afirmaciones conscientes y sanas.
 - No imita artistas reales ni canciones existentes.
 - Guarda paquetes en Firestore para reutilizarlos.
+- Guarda el audio final en Firebase Storage bajo `music/{uid}/{trackId}/audio/`.
 
 ## Variables
 
@@ -37,6 +39,7 @@ CONTENT_FACTORY_MUSIC_STUDIO_ADMIN_ONLY=true
 CONTENT_FACTORY_MUSIC_MODEL=claude-opus-4-7
 CONTENT_FACTORY_MUSIC_MAX_TOKENS=5200
 CONTENT_FACTORY_MUSIC_ALLOW_FALLBACK=false
+MUSIC_MAX_AUDIO_BYTES=167772160
 ANTHROPIC_API_KEY=...
 ```
 
@@ -76,6 +79,36 @@ Payload principal:
 }
 ```
 
+### `POST /music/tracks/{trackId}/audio`
+
+Sube el audio final descargado de Suno al track.
+
+Formatos v1:
+
+- `.mp3`
+- `.wav`
+- `.m4a`
+- `.aac`
+
+Respuesta:
+
+```json
+{
+  "ok": true,
+  "track": {
+    "trackId": "...",
+    "status": "audio_uploaded",
+    "audio": {
+      "fileName": "...",
+      "contentType": "audio/mpeg",
+      "sizeBytes": 123,
+      "storagePath": "gs://...",
+      "url": "https://..."
+    }
+  }
+}
+```
+
 Respuesta:
 
 ```json
@@ -105,10 +138,12 @@ Campos principales:
 - `generationMode`
 - `createdAt`
 - `updatedAt`
+- `audio`
 
 Estados v1:
 
 - `lyrics_ready`
+- `audio_uploaded`
 
 Estados futuros:
 
@@ -133,15 +168,17 @@ Estados futuros:
 4. Copia letra y prompt a Suno.
 5. Genera la cancion en Suno.
 6. Descarga el audio manualmente.
+7. Sube el audio al track en `/dashboard/music`.
+8. Reproduce el audio dentro de Content Factory para validar que quedo conectado.
 
 ## Proximo Bloque
 
-Implementar produccion con audio externo:
+Implementar produccion visual con audio externo:
 
-1. `POST /music/tracks/{trackId}/audio`
-   - subir `.mp3` o `.wav`;
-   - guardar en Storage;
-   - extraer duracion, waveform y energia aproximada.
+1. Analisis del audio:
+   - extraer duracion;
+   - detectar BPM aproximado si es viable;
+   - generar waveform ligero para cortes/energia visual.
 
 2. Render visual:
    - usar `videoConcept.scenes`;
@@ -179,6 +216,8 @@ Probar en produccion:
 - generar paquete;
 - copiar prompt a Suno;
 - confirmar que aparece en tracks recientes;
+- subir un `.mp3` o `.wav` descargado de Suno;
+- reproducir el audio desde la UI;
 - confirmar que no consume credito interno.
 
 ## Riesgos

@@ -59,7 +59,8 @@ Implementado en la sesion 2026-06-16:
 - Prompt maestro documentado: `prompts/agent_power_music.md`.
 - Documentacion operativa: `docs/power-music-studio.md`.
 - V1 genera letra, prompt Suno, prompt alternativo, negative prompt, portada, direccion visual y metadata YouTube.
-- V1 no usa API de Suno, no sube audio y no renderiza video todavia.
+- V1 permite subir el audio final descargado de Suno a `musicTracks/{trackId}.audio` y Firebase Storage.
+- V1 no usa API de Suno y no renderiza video todavia.
 - No consume creditos internos; el usuario copia a Suno manualmente.
 
 Flags:
@@ -69,7 +70,7 @@ Flags:
 
 Siguiente bloque recomendado:
 
-- Upload de audio `.mp3/.wav` a un `musicTrack`.
+- Analizar audio subido: duracion, waveform y energia aproximada.
 - Generar imagenes con Comfy/Flux usando `videoConcept.scenes`.
 - Render estatico/Ken Burns sin Luma por default.
 - Miniatura y publicacion YouTube reutilizando el centro actual.
