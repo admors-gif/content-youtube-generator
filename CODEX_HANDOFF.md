@@ -45,6 +45,35 @@ Infra principal:
 
 ## Estado operativo importante
 
+### Power Music Studio v1
+
+Implementado en la sesion 2026-06-16:
+
+- Backend admin-only:
+  - `GET /music/presets`
+  - `GET /music/tracks`
+  - `POST /music/generate`
+- Modulo puro: `scripts/power_music.py` con presets, prompt builder, normalizacion, fallback opcional y hash estable de track.
+- Frontend admin-only: `/dashboard/music`, sidebar "Musica" si `NEXT_PUBLIC_CONTENT_FACTORY_MUSIC_STUDIO_ENABLED !== "false"`.
+- Firestore: `musicTracks`.
+- Prompt maestro documentado: `prompts/agent_power_music.md`.
+- Documentacion operativa: `docs/power-music-studio.md`.
+- V1 genera letra, prompt Suno, prompt alternativo, negative prompt, portada, direccion visual y metadata YouTube.
+- V1 no usa API de Suno, no sube audio y no renderiza video todavia.
+- No consume creditos internos; el usuario copia a Suno manualmente.
+
+Flags:
+
+- Backend: `CONTENT_FACTORY_MUSIC_STUDIO_ENABLED`, `CONTENT_FACTORY_MUSIC_STUDIO_ADMIN_ONLY`, `CONTENT_FACTORY_MUSIC_MODEL`, `CONTENT_FACTORY_MUSIC_ALLOW_FALLBACK`.
+- Frontend: `NEXT_PUBLIC_CONTENT_FACTORY_MUSIC_STUDIO_ENABLED`.
+
+Siguiente bloque recomendado:
+
+- Upload de audio `.mp3/.wav` a un `musicTrack`.
+- Generar imagenes con Comfy/Flux usando `videoConcept.scenes`.
+- Render estatico/Ken Burns sin Luma por default.
+- Miniatura y publicacion YouTube reutilizando el centro actual.
+
 ### Radar editorial v1
 
 Implementado en la sesion 2026-05-09:

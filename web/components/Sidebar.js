@@ -34,6 +34,7 @@ const RADAR_ENABLED = process.env.NEXT_PUBLIC_CONTENT_FACTORY_RADAR_ENABLED !== 
 const KNOWLEDGE_ENABLED = process.env.NEXT_PUBLIC_CONTENT_FACTORY_KNOWLEDGE_ENABLED !== "false";
 const CUSTOM_AGENTS_ENABLED = process.env.NEXT_PUBLIC_CONTENT_FACTORY_CUSTOM_AGENTS_ENABLED !== "false";
 const SOURCE_VIDEO_ENABLED = process.env.NEXT_PUBLIC_CONTENT_FACTORY_SOURCE_VIDEO_ENABLED !== "false";
+const MUSIC_STUDIO_ENABLED = process.env.NEXT_PUBLIC_CONTENT_FACTORY_MUSIC_STUDIO_ENABLED !== "false";
 
 const PLAN_LABELS = {
   free:    { label: "FREE",    badgeClass: "cf-badge--free" },
@@ -305,8 +306,9 @@ export default function Sidebar() {
     ? [
         ...NAV.slice(0, 2),
         ...(CUSTOM_AGENTS_ENABLED ? [{ id: "agents", icon: "settings", label: "Agentes", href: "/dashboard/agents" }] : []),
-        ...(SOURCE_VIDEO_ENABLED ? [{ id: "inspiration", icon: "clapperboard", label: "Inspiración", href: "/dashboard/inspiration" }] : []),
-        ...(RADAR_ENABLED ? [{ id: "radar", icon: "trendingUp", label: "Radar", href: "/dashboard/radar" }] : []),
+          ...(SOURCE_VIDEO_ENABLED ? [{ id: "inspiration", icon: "clapperboard", label: "Inspiración", href: "/dashboard/inspiration" }] : []),
+          ...(MUSIC_STUDIO_ENABLED ? [{ id: "music", icon: "flame", label: "Música", href: "/dashboard/music" }] : []),
+          ...(RADAR_ENABLED ? [{ id: "radar", icon: "trendingUp", label: "Radar", href: "/dashboard/radar" }] : []),
         ...(KNOWLEDGE_ENABLED ? [{ id: "knowledge", icon: "bookOpen", label: "Conocimiento", href: "/dashboard/knowledge" }] : []),
         { id: "topics", icon: "fileText", label: "Temas", href: "/dashboard/topics" },
         ...NAV.slice(2),

@@ -7739,6 +7739,7 @@ def music_tracks(request: Request, limit: int = 40):
     principal = _require_music_studio_admin(request)
     try:
         _ensure_firebase_initialized()
+        from firebase_admin import firestore
         db = firestore.client()
         safe_limit = max(1, min(int(limit or 40), 100))
         docs = (
@@ -7800,6 +7801,7 @@ async def music_generate(request: Request):
         saved = False
         if save:
             _ensure_firebase_initialized()
+            from firebase_admin import firestore
             db = firestore.client()
             db.collection("musicTracks").document(track_id).set({
                 "userId": principal["uid"],
