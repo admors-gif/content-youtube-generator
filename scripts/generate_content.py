@@ -4621,6 +4621,10 @@ def run_full_pipeline(
             tagged_script = script
         elif is_vertical_short and tiktok_format in {"tiktok_autohypnosis", "tiktok_meditation"}:
             tagged_script = _normalize_autohypnosis_delivery(script)
+        elif is_vertical_short and tiktok_format in {YOUTUBE_SHORTS_DOCUMENTARY_FORMAT, "tiktok_documentary"}:
+            # Documentary shorts use Salvatore/Eleven multilingual, which reads
+            # bracketed direction tags literally. Keep the narration clean.
+            tagged_script = script
         elif is_autohypnosis or is_long_meditation:
             tagged_script = _normalize_autohypnosis_delivery(script)
         else:

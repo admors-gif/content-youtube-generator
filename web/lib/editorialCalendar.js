@@ -1,6 +1,8 @@
 const LONG_AGENT_ID = "agent_podcast_general_v2_largo";
 const SHORTS_AGENT_ID = "agent_youtube_shorts_esto_no_es_amor";
 const CAROUSEL_AGENT_ID = "agent_instagram_carousel_esto_no_es_amor";
+const MYSTERY_LONG_AGENT_ID = "agent_misterios_v2";
+const MYSTERY_SHORTS_AGENT_ID = "agent_youtube_shorts_archivos_prohibidos";
 
 const LONG_VIDEO_ROWS = [
   ["2026-06-02", "¿El enamoramiento es una elección o simplemente pasa?", "Junio 2026", "Enamoramiento, amor y elección"],
@@ -138,6 +140,262 @@ const SHORT_ROWS = [
   ["2026-07-14", "Cuando alguien dice \"sí puedo\" pero sus acciones dicen otra cosa", "Si sus acciones no llegan, las palabras no alcanzan"],
 ];
 
+const MYSTERY_TOPIC_GROUPS = [
+  {
+    pillar: "Desapariciones",
+    topics: [
+      "El caso de Elisa Lam",
+      "El vuelo de Malaysia Airlines Flight 370",
+      "La desaparición de Madeleine McCann",
+      "El misterio del Triángulo de las Bermudas",
+      "El caso Dyatlov Pass",
+      "Personas desaparecidas en parques nacionales",
+      "El barco fantasma Mary Celeste",
+      "El niño de Somerton",
+      "El caso del hombre de Taured",
+      "La colonia perdida de Roanoke",
+    ],
+  },
+  {
+    pillar: "Casos perturbadores",
+    topics: [
+      "El asesino Zodiac",
+      "Jack el Destripador",
+      "El caso Black Dahlia",
+      "El culto Heaven's Gate",
+      "La familia que desapareció sin dejar rastro",
+      "El experimento ruso del sueño",
+      "La señal UVB-76",
+      "El caso de los cuerpos de Isdal",
+      "El hotel más embrujado de Japón",
+      "El misterio de Hinterkaifeck",
+    ],
+  },
+  {
+    pillar: "Internet y deep web",
+    topics: [
+      "Cicada 3301",
+      "La web más perturbadora encontrada en la deep web",
+      "Videos imposibles de explicar en internet",
+      "El canal extraño de Local58",
+      "El caso de Webdriver Torso",
+      "El misterio de Erratas",
+      "Transmisiones pirata más perturbadoras",
+      "El video I Feel Fantastic",
+      "La creepypasta que asustó internet",
+      "El juego Sad Satan",
+    ],
+  },
+  {
+    pillar: "Misterios espaciales",
+    topics: [
+      "La señal Wow!",
+      "El astronauta perdido de la URSS",
+      "Sonidos extraños captados en el espacio",
+      "El lado oscuro de la Luna",
+      "El objeto Oumuamua",
+      "El planeta nueve",
+      "Señales extraterrestres reales",
+      "El misterio de Marte y Cydonia",
+      "Satélites fantasmas orbitando la Tierra",
+      "El cosmonauta desaparecido",
+    ],
+  },
+  {
+    pillar: "Expedientes y conspiraciones",
+    topics: [
+      "MK Ultra",
+      "El Área 51",
+      "El Proyecto Montauk",
+      "Archivos secretos desclasificados por la CIA",
+      "Experimentos humanos secretos",
+      "La conspiración de Philadelphia Experiment",
+      "Operación Paperclip",
+      "El misterio de los Hombres de Negro",
+      "La conspiración del alunizaje",
+      "El caso Roswell",
+    ],
+  },
+  {
+    pillar: "Misterios históricos",
+    topics: [
+      "La Atlántida",
+      "¿Quién construyó las pirámides realmente?",
+      "El manuscrito Voynich",
+      "La máquina de Anticitera",
+      "Civilizaciones perdidas bajo el océano",
+      "Los gigantes de Patagonia",
+      "El misterio de Göbekli Tepe",
+      "El fuego griego perdido",
+      "La espada imposible encontrada en roca",
+      "La biblioteca perdida de Alejandría",
+    ],
+  },
+  {
+    pillar: "Fenómenos extraños",
+    topics: [
+      "Personas que desaparecieron en niebla",
+      "Luces inexplicables en el cielo",
+      "El bosque suicida de Aokigahara",
+      "Sonidos del cielo escuchados en todo el mundo",
+      "Las sombras captadas por cámaras",
+      "Objetos encontrados fuera de tiempo",
+      "El fenómeno Mandela",
+      "Gente que afirma venir del futuro",
+      "El misterio de Skinwalker Ranch",
+      "Las backrooms",
+    ],
+  },
+  {
+    pillar: "Casos psicológicos",
+    topics: [
+      "El experimento Stanford",
+      "El caso de la sonrisa de Glasgow",
+      "Personas que despertaron en lugares desconocidos",
+      "El síndrome de París",
+      "El experimento Milgram",
+      "El misterio de los sueños compartidos",
+      "La mujer que no podía olvidar nada",
+      "El pueblo donde nadie dormía",
+      "Personas que desaparecieron de su propia vida",
+      "La epidemia de baile de 1518",
+    ],
+  },
+  {
+    pillar: "Misterios modernos",
+    topics: [
+      "Señales misteriosas en Google Maps",
+      "El iceberg negro fotografiado en el océano",
+      "Videos de TikTok imposibles de explicar",
+      "Misterios encontrados en Reddit",
+      "Las coordenadas más perturbadoras de internet",
+      "Inteligencias artificiales que actuaron extraño",
+      "Robots que dijeron cosas perturbadoras",
+      "El experimento de Facebook que salió mal",
+      "El misterio de los NPC streamers",
+      "Grabaciones extrañas captadas por Alexa",
+    ],
+  },
+  {
+    pillar: "Finales potentes",
+    topics: [
+      "Los lugares donde la gente desaparece más",
+      "Misterios que el FBI nunca resolvió",
+      "Los videos más perturbadores jamás grabados",
+      "Fotografías imposibles de explicar",
+      "Audios aterradores reales",
+      "Los secretos ocultos en la Antártida",
+      "Casos donde el tiempo se rompió",
+      "Las llamadas telefónicas más misteriosas",
+      "Las últimas palabras más perturbadoras",
+      "Misterios que siguen ocurriendo hoy",
+    ],
+  },
+];
+
+const MYSTERY_SHORT_SEO_TITLES = {
+  "El caso de Elisa Lam": "El caso Elisa Lam: el video del elevador que nadie pudo explicar",
+  "El vuelo de Malaysia Airlines Flight 370": "Vuelo MH370: la desaparición aérea que sigue sin respuesta",
+  "La desaparición de Madeleine McCann": "Madeleine McCann: la desaparición que obsesionó al mundo",
+  "El misterio del Triángulo de las Bermudas": "Triángulo de las Bermudas: barcos y aviones que desaparecieron",
+  "El caso Dyatlov Pass": "Dyatlov Pass: la noche donde nada encaja",
+  "Personas desaparecidas en parques nacionales": "Personas desaparecidas en parques nacionales: el patrón inquietante",
+  "El barco fantasma Mary Celeste": "Mary Celeste: el barco fantasma encontrado sin tripulación",
+  "El niño de Somerton": "El niño de Somerton: el cadáver que tardó décadas en tener nombre",
+  "El caso del hombre de Taured": "El hombre de Taured: el viajero de un país que no existe",
+  "La colonia perdida de Roanoke": "Roanoke: la colonia perdida y la palabra que quedó",
+  "El asesino Zodiac": "Asesino Zodiac: las cartas cifradas que aún inquietan al FBI",
+  "Jack el Destripador": "Jack el Destripador: el asesino que Londres nunca identificó",
+  "El caso Black Dahlia": "Black Dahlia: el crimen que Hollywood nunca pudo olvidar",
+  "El culto Heaven's Gate": "Heaven's Gate: el culto que terminó mirando al cielo",
+  "La familia que desapareció sin dejar rastro": "La familia que desapareció sin dejar rastro: el caso sin cierre",
+  "El experimento ruso del sueño": "El experimento ruso del sueño: la historia que internet volvió pesadilla",
+  "La señal UVB-76": "UVB-76: la señal de radio que nunca deja de transmitir",
+  "El caso de los cuerpos de Isdal": "Los cuerpos de Isdal: el misterio noruego que no encaja",
+  "El hotel más embrujado de Japón": "El hotel más embrujado de Japón: historias difíciles de comprobar",
+  "El misterio de Hinterkaifeck": "Hinterkaifeck: el crimen rural más inquietante de Alemania",
+  "Cicada 3301": "Cicada 3301: el acertijo de internet que reclutaba genios",
+  "La web más perturbadora encontrada en la deep web": "La web más perturbadora de la deep web: mito, evidencia y miedo",
+  "Videos imposibles de explicar en internet": "Videos imposibles de explicar: casos que internet no pudo cerrar",
+  "El canal extraño de Local58": "Local58: el canal analógico que convirtió la señal en terror",
+  "El caso de Webdriver Torso": "Webdriver Torso: los videos extraños que escondían una explicación",
+  "El misterio de Erratas": "El misterio de Erratas: el caso viral que nadie entiende",
+  "Transmisiones pirata más perturbadoras": "Transmisiones pirata perturbadoras: mensajes que interrumpieron la TV",
+  "El video I Feel Fantastic": "I Feel Fantastic: el video extraño que internet nunca olvidó",
+  "La creepypasta que asustó internet": "La creepypasta que asustó internet: cuando una historia se volvió leyenda",
+  "El juego Sad Satan": "Sad Satan: el juego prohibido que aterrorizó a la deep web",
+  "La señal Wow!": "La señal Wow!: el mensaje espacial que nunca se repitió",
+  "El astronauta perdido de la URSS": "El astronauta perdido de la URSS: mito espacial o encubrimiento",
+  "Sonidos extraños captados en el espacio": "Sonidos extraños del espacio: señales que parecen imposibles",
+  "El lado oscuro de la Luna": "El lado oscuro de la Luna: misterios que siguen circulando",
+  "El objeto Oumuamua": "Oumuamua: el objeto interestelar que dividió a los científicos",
+  "El planeta nueve": "Planeta Nueve: el planeta oculto que podría estar ahí afuera",
+  "Señales extraterrestres reales": "Señales extraterrestres reales: las detecciones más extrañas",
+  "El misterio de Marte y Cydonia": "Marte y Cydonia: la cara que encendió teorías durante décadas",
+  "Satélites fantasmas orbitando la Tierra": "Satélites fantasmas: objetos que no deberían orbitar la Tierra",
+  "El cosmonauta desaparecido": "El cosmonauta desaparecido: la transmisión que nadie pudo confirmar",
+  "MK Ultra": "MK Ultra: el experimento mental secreto de la CIA",
+  "El Área 51": "Área 51: qué se sabe realmente de la base más famosa",
+  "El Proyecto Montauk": "Proyecto Montauk: el experimento que mezcló ciencia y paranoia",
+  "Archivos secretos desclasificados por la CIA": "Archivos desclasificados de la CIA: secretos que sí fueron reales",
+  "Experimentos humanos secretos": "Experimentos humanos secretos: casos reales que salieron a la luz",
+  "La conspiración de Philadelphia Experiment": "Philadelphia Experiment: el buque que supuestamente desapareció",
+  "Operación Paperclip": "Operación Paperclip: científicos nazis dentro de Estados Unidos",
+  "El misterio de los Hombres de Negro": "Hombres de Negro: el origen real de la leyenda",
+  "La conspiración del alunizaje": "Conspiración del alunizaje: por qué algunos aún dudan",
+  "El caso Roswell": "Roswell: el caso ovni que nunca dejó de crecer",
+  "La Atlántida": "La Atlántida: mito antiguo o civilización perdida",
+  "¿Quién construyó las pirámides realmente?": "Quién construyó las pirámides: lo que sí dice la evidencia",
+  "El manuscrito Voynich": "Manuscrito Voynich: el libro que nadie ha logrado leer",
+  "La máquina de Anticitera": "Máquina de Anticitera: tecnología antigua imposible de ignorar",
+  "Civilizaciones perdidas bajo el océano": "Civilizaciones bajo el océano: ruinas que cambiaron preguntas",
+  "Los gigantes de Patagonia": "Gigantes de Patagonia: el mito que recorrió el mundo",
+  "El misterio de Göbekli Tepe": "Göbekli Tepe: el templo que reescribió la historia",
+  "El fuego griego perdido": "Fuego griego: el arma perdida que nadie pudo recrear",
+  "La espada imposible encontrada en roca": "La espada en la roca: hallazgos que parecen imposibles",
+  "La biblioteca perdida de Alejandría": "Biblioteca de Alejandría: lo que perdimos para siempre",
+  "Personas que desaparecieron en niebla": "Personas desaparecidas en niebla: relatos que parecen imposibles",
+  "Luces inexplicables en el cielo": "Luces inexplicables en el cielo: fenómenos reales sin respuesta simple",
+  "El bosque suicida de Aokigahara": "Bosque de Aokigahara: el lugar más oscuro de Japón",
+  "Sonidos del cielo escuchados en todo el mundo": "Sonidos del cielo: grabaciones extrañas escuchadas en el mundo",
+  "Las sombras captadas por cámaras": "Sombras captadas por cámaras: evidencia o ilusión",
+  "Objetos encontrados fuera de tiempo": "Objetos fuera de tiempo: hallazgos que no deberían existir",
+  "El fenómeno Mandela": "Efecto Mandela: por qué recordamos cosas que no pasaron",
+  "Gente que afirma venir del futuro": "Viajeros del tiempo: personas que afirmaron venir del futuro",
+  "El misterio de Skinwalker Ranch": "Skinwalker Ranch: el rancho donde todo parece ocurrir",
+  "Las backrooms": "Backrooms: la leyenda que convirtió internet en laberinto",
+  "El experimento Stanford": "Experimento Stanford: cuando el poder cambió a personas normales",
+  "El caso de la sonrisa de Glasgow": "La sonrisa de Glasgow: el origen de una marca perturbadora",
+  "Personas que despertaron en lugares desconocidos": "Personas que despertaron en lugares desconocidos: casos imposibles",
+  "El síndrome de París": "Síndrome de París: cuando un viaje rompe la realidad",
+  "El experimento Milgram": "Experimento Milgram: hasta dónde obedecería una persona",
+  "El misterio de los sueños compartidos": "Sueños compartidos: el misterio de soñar lo mismo",
+  "La mujer que no podía olvidar nada": "La mujer que no podía olvidar nada: vivir con memoria perfecta",
+  "El pueblo donde nadie dormía": "El pueblo donde nadie dormía: epidemia, miedo y explicación",
+  "Personas que desaparecieron de su propia vida": "Personas que desaparecieron de su propia vida: empezar de cero",
+  "La epidemia de baile de 1518": "Epidemia de baile de 1518: cuando bailar se volvió mortal",
+  "Señales misteriosas en Google Maps": "Señales misteriosas en Google Maps: coordenadas que inquietan",
+  "El iceberg negro fotografiado en el océano": "El iceberg negro: la fotografía que parece de otro planeta",
+  "Videos de TikTok imposibles de explicar": "Videos de TikTok imposibles de explicar: misterio moderno",
+  "Misterios encontrados en Reddit": "Misterios encontrados en Reddit: hilos que nadie pudo cerrar",
+  "Las coordenadas más perturbadoras de internet": "Coordenadas perturbadoras de internet: lugares que dan miedo",
+  "Inteligencias artificiales que actuaron extraño": "IA que actuó extraño: casos que encendieron alarmas",
+  "Robots que dijeron cosas perturbadoras": "Robots que dijeron cosas perturbadoras: frases que inquietaron al mundo",
+  "El experimento de Facebook que salió mal": "El experimento de Facebook que salió mal: cuando las máquinas aprendieron",
+  "El misterio de los NPC streamers": "NPC streamers: el fenómeno más extraño de TikTok",
+  "Grabaciones extrañas captadas por Alexa": "Grabaciones extrañas de Alexa: audios que nadie esperaba escuchar",
+  "Los lugares donde la gente desaparece más": "Lugares donde la gente desaparece más: patrones que asustan",
+  "Misterios que el FBI nunca resolvió": "Misterios que el FBI nunca resolvió: casos abiertos",
+  "Los videos más perturbadores jamás grabados": "Videos perturbadores jamás grabados: lo que muestran",
+  "Fotografías imposibles de explicar": "Fotografías imposibles de explicar: imágenes que no encajan",
+  "Audios aterradores reales": "Audios aterradores reales: grabaciones que siguen circulando",
+  "Los secretos ocultos en la Antártida": "Secretos ocultos en la Antártida: teorías, mapas y evidencia",
+  "Casos donde el tiempo se rompió": "Casos donde el tiempo se rompió: historias imposibles",
+  "Las llamadas telefónicas más misteriosas": "Llamadas telefónicas misteriosas: voces que no deberían estar",
+  "Las últimas palabras más perturbadoras": "Últimas palabras perturbadoras: frases antes del misterio",
+  "Misterios que siguen ocurriendo hoy": "Misterios que siguen ocurriendo hoy: casos sin cierre",
+};
+
 export const EDITORIAL_STATUS = [
   { id: "pending", label: "Pendiente" },
   { id: "creating", label: "En creación" },
@@ -161,6 +419,7 @@ function longVideoEvent(row, index) {
     id: `long-${String(index + 1).padStart(3, "0")}`,
     sourceOrder: index + 1,
     channel: "Esto no es amor",
+    channelSlug: "esto-no-es-amor",
     type: "long",
     typeLabel: "Video largo",
     date,
@@ -183,6 +442,7 @@ function shortEvents(row, index) {
       id: `short-${String(dayNumber).padStart(3, "0")}-1500`,
       sourceOrder: dayNumber,
       channel: "Esto no es amor",
+      channelSlug: "esto-no-es-amor",
       type: "short",
       typeLabel: "Short",
       date,
@@ -199,6 +459,7 @@ function shortEvents(row, index) {
       id: `short-${String(dayNumber).padStart(3, "0")}-1800`,
       sourceOrder: dayNumber,
       channel: "Esto no es amor",
+      channelSlug: "esto-no-es-amor",
       type: "short",
       typeLabel: "Short",
       date,
@@ -223,9 +484,107 @@ function monthFromDate(date) {
   return `${month.replace(/^\w/, (letter) => letter.toUpperCase())} ${year}`;
 }
 
+function isoDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function mysteryDateForIndex(index) {
+  const startDate = new Date("2026-06-17T12:00:00");
+  const weekdayOffsets = [0, 2, 5];
+  const week = Math.floor(index / weekdayOffsets.length);
+  const position = index % weekdayOffsets.length;
+  return isoDate(addDays(startDate, week * 7 + weekdayOffsets[position]));
+}
+
+function mysteryShortDateForIndex(index) {
+  const startDate = new Date("2026-06-17T12:00:00");
+  return isoDate(addDays(startDate, Math.floor(index / 2)));
+}
+
+function buildMysteryTopicEntries() {
+  const maxTopics = Math.max(...MYSTERY_TOPIC_GROUPS.map((group) => group.topics.length));
+  const entries = [];
+  for (let topicIndex = 0; topicIndex < maxTopics; topicIndex += 1) {
+    MYSTERY_TOPIC_GROUPS.forEach((group) => {
+      const title = group.topics[topicIndex];
+      if (!title) return;
+      entries.push({
+        title,
+        pillar: group.pillar,
+        date: mysteryDateForIndex(entries.length),
+      });
+    });
+  }
+  return entries;
+}
+
+function mysteryLongVideoEvent(entry, index) {
+  return {
+    id: `mystery-long-${String(index + 1).padStart(3, "0")}`,
+    sourceOrder: index + 1,
+    channel: "La última evidencia",
+    channelSlug: "la-ultima-evidencia",
+    type: "long",
+    typeLabel: "Video largo",
+    date: entry.date,
+    time: "21:00",
+    displayTime: "9:00 p.m.",
+    title: entry.title,
+    monthLabel: monthFromDate(entry.date),
+    pillar: entry.pillar,
+    agentId: MYSTERY_LONG_AGENT_ID,
+    durationProfile: "long",
+    derivativeAgentIds: [MYSTERY_SHORTS_AGENT_ID],
+  };
+}
+
+function seoKeywordsForMysteryTopic(title, pillar) {
+  const cleanTitle = title.replace(/[¿?"]/g, "").replace(/\s+/g, " ").trim();
+  return `${cleanTitle}, ${pillar.toLowerCase()}, misterio real, caso sin resolver, documental corto`;
+}
+
+function mysteryShortEvent(entry, index) {
+  const firstSlot = index % 2 === 0;
+  const date = mysteryShortDateForIndex(index);
+  return {
+    id: `mystery-short-${String(index + 1).padStart(3, "0")}`,
+    sourceOrder: index + 1,
+    channel: "La última evidencia",
+    channelSlug: "la-ultima-evidencia",
+    type: "short",
+    typeLabel: "Short",
+    date,
+    time: firstSlot ? "15:00" : "18:00",
+    displayTime: firstSlot ? "3:00 p.m." : "6:00 p.m.",
+    title: MYSTERY_SHORT_SEO_TITLES[entry.title] || entry.title,
+    parentTopic: entry.title,
+    monthLabel: monthFromDate(date),
+    pillar: `${entry.pillar} · SEO Shorts`,
+    agentId: MYSTERY_SHORTS_AGENT_ID,
+    durationProfile: "shorts90",
+    seoKeywords: seoKeywordsForMysteryTopic(entry.title, entry.pillar),
+    derivativeAgentIds: [MYSTERY_LONG_AGENT_ID],
+  };
+}
+
+const MYSTERY_TOPIC_ENTRIES = buildMysteryTopicEntries();
+const MYSTERY_VIDEO_ROWS = MYSTERY_TOPIC_ENTRIES;
+const MYSTERY_SHORT_ROWS = MYSTERY_TOPIC_ENTRIES;
+
 export const EDITORIAL_CALENDAR_ITEMS = [
   ...SHORT_ROWS.flatMap(shortEvents),
   ...LONG_VIDEO_ROWS.map(longVideoEvent),
+  ...MYSTERY_VIDEO_ROWS.map(mysteryLongVideoEvent),
+  ...MYSTERY_SHORT_ROWS.map(mysteryShortEvent),
 ].sort((a, b) => {
   const left = `${a.date}T${a.time || "23:59"}:00`;
   const right = `${b.date}T${b.time || "23:59"}:00`;
@@ -246,29 +605,57 @@ export function buildCreateContentHref(item, overrides = {}) {
 }
 
 export function derivativeOptionsForItem(item) {
-  const options = [];
-  if (item.type === "long") {
-    options.push({
+  const derivativeConfig = {
+    [SHORTS_AGENT_ID]: {
       label: "Crear Short derivado",
-      agentId: SHORTS_AGENT_ID,
       durationProfile: "shorts75",
-    });
-    options.push({
+    },
+    [CAROUSEL_AGENT_ID]: {
       label: "Crear carrusel",
-      agentId: CAROUSEL_AGENT_ID,
       durationProfile: "carousel8",
-    });
-  } else {
-    options.push({
+    },
+    [LONG_AGENT_ID]: {
       label: "Crear largo relacionado",
-      agentId: LONG_AGENT_ID,
       durationProfile: "long",
-    });
-    options.push({
-      label: "Crear carrusel",
-      agentId: CAROUSEL_AGENT_ID,
-      durationProfile: "carousel8",
-    });
+    },
+    [MYSTERY_SHORTS_AGENT_ID]: {
+      label: "Crear Short del caso",
+      durationProfile: "shorts90",
+    },
+    [MYSTERY_LONG_AGENT_ID]: {
+      label: "Crear expediente largo",
+      durationProfile: "long",
+    },
+  };
+
+  if (item.derivativeAgentIds?.length) {
+    return item.derivativeAgentIds
+      .map((agentId) => {
+        const config = derivativeConfig[agentId];
+        if (!config) return null;
+        return {
+          ...config,
+          agentId,
+        };
+      })
+      .filter(Boolean);
   }
-  return options;
+
+  if (item.channelSlug === "la-ultima-evidencia") {
+    return item.type === "long"
+      ? [{ ...derivativeConfig[MYSTERY_SHORTS_AGENT_ID], agentId: MYSTERY_SHORTS_AGENT_ID }]
+      : [{ ...derivativeConfig[MYSTERY_LONG_AGENT_ID], agentId: MYSTERY_LONG_AGENT_ID }];
+  }
+
+  if (item.type === "long") {
+    return [
+      { ...derivativeConfig[SHORTS_AGENT_ID], agentId: SHORTS_AGENT_ID },
+      { ...derivativeConfig[CAROUSEL_AGENT_ID], agentId: CAROUSEL_AGENT_ID },
+    ];
+  }
+
+  return [
+    { ...derivativeConfig[LONG_AGENT_ID], agentId: LONG_AGENT_ID },
+    { ...derivativeConfig[CAROUSEL_AGENT_ID], agentId: CAROUSEL_AGENT_ID },
+  ];
 }

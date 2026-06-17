@@ -406,7 +406,7 @@ V3_PAUSE_TAGS = {"pausa", "pause", "silencio", "silence"}
 
 def _prepare_tts_text(text: str, model: str) -> str:
     """Normaliza tags para que la voz no lea instrucciones literales."""
-    if model != "eleven_v3" or "[" not in (text or ""):
+    if "[" not in (text or ""):
         return text
 
     def replace_tag(match):
@@ -414,6 +414,8 @@ def _prepare_tts_text(text: str, model: str) -> str:
         key = raw.lower()
         if key in V3_PAUSE_TAGS:
             return "... "
+        if model != "eleven_v3":
+            return ""
         key = V3_TAG_ALIASES.get(key, key)
         if key in V3_AUDIO_TAGS:
             return f"[{key}]"

@@ -277,6 +277,11 @@ function AgendaItem({ item, today, updateItem }) {
             <span>·</span>
             <span>{item.pillar}</span>
           </div>
+          {item.seoKeywords && (
+            <div className="cf-caption" style={{ margin: "-6px 0 16px", color: "var(--paper-dim)" }}>
+              SEO: {item.seoKeywords}
+            </div>
+          )}
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Link className="cf-btn cf-btn--primary cf-btn--sm" href={createHref} style={{ textDecoration: "none" }}>
@@ -408,6 +413,7 @@ export default function EditorialAgendaPage() {
   const today = todayIso();
   const [overrides, setOverrides] = useState({});
   const [scope, setScope] = useState(() => getDefaultScope(EDITORIAL_CALENDAR_ITEMS, today));
+  const [channelFilter, setChannelFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -433,16 +439,30 @@ export default function EditorialAgendaPage() {
       });
   }, [items]);
 
+  const channelOptions = useMemo(() => {
+    const seen = new Map();
+    items.forEach((item) => {
+      seen.set(item.channelSlug || item.channel, item.channel);
+    });
+    return [
+      { id: "all", label: "Todos los canales" },
+      ...Array.from(seen, ([id, label]) => ({ id, label })),
+    ];
+  }, [items]);
+
   const scoped = useMemo(() => {
     const q = search.trim().toLowerCase();
     return createScopedItems(items, scope, today).filter((item) => {
+      if (channelFilter !== "all" && (item.channelSlug || item.channel) !== channelFilter) return false;
       if (typeFilter !== "all" && item.type !== typeFilter) return false;
       if (statusFilter === "winner" && item.signal !== "winner") return false;
       if (statusFilter !== "all" && statusFilter !== "winner" && item.status !== statusFilter) return false;
       if (!q) return true;
-      return `${item.title} ${item.pillar} ${item.typeLabel}`.toLowerCase().includes(q);
+      return `${item.title} ${item.parentTopic || ""} ${item.pillar} ${item.typeLabel} ${item.channel} ${item.seoKeywords || ""}`
+        .toLowerCase()
+        .includes(q);
     });
-  }, [items, scope, search, statusFilter, today, typeFilter]);
+  }, [channelFilter, items, scope, search, statusFilter, today, typeFilter]);
 
   const grouped = useMemo(() => buildGroupedItems(scoped), [scoped]);
   const dayKeys = useMemo(() => Object.keys(grouped).sort(), [grouped]);
@@ -507,11 +527,11 @@ export default function EditorialAgendaPage() {
         >
           <div>
             <h1 className="cf-display" style={{ margin: 0, maxWidth: 840 }}>
-              Esto no es amor,{" "}
-              <em style={{ color: "var(--ember)", fontStyle: "italic" }}>día por día.</em>
+              Agenda editorial,{" "}
+              <em style={{ color: "var(--ember)", fontStyle: "italic" }}>canal por canal.</em>
             </h1>
             <p className="cf-body-lg" style={{ maxWidth: 760, margin: "var(--s-4) 0 0" }}>
-              Calendario operativo de largos y Shorts: creación, publicación, medición y derivados.
+              Calendario operativo de largos, Shorts y derivados: creación, publicación, medición y próximos temas.
             </p>
           </div>
           <button className="cf-btn cf-btn--secondary" type="button" onClick={resetAgenda}>
@@ -533,6 +553,7 @@ export default function EditorialAgendaPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--s-3)" }}>
           <SegmentedControl label="VISTA" options={scopeOptions} value={scope} onChange={setScope} />
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <SegmentedControl label="CANAL" options={channelOptions} value={channelFilter} onChange={setChannelFilter} />
             <SegmentedControl label="FORMATO" options={TYPE_FILTERS} value={typeFilter} onChange={setTypeFilter} />
             <SegmentedControl label="ESTADO" options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
             <div style={{ flex: 1 }} />
@@ -553,7 +574,7 @@ export default function EditorialAgendaPage() {
                 className="cf-input"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Buscar tema, pilar o formato"
+                placeholder="Buscar tema, canal o pilar"
                 style={{ paddingLeft: 36 }}
               />
             </div>
