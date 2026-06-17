@@ -1,0 +1,430 @@
+import hashlib
+import json
+import re
+from datetime import datetime, timezone
+
+
+DEFAULT_LANGUAGE = "es"
+DEFAULT_STYLE = "latin_trap_anthem"
+DEFAULT_INTENTION = "disciplina"
+
+
+INTENTION_PRESETS = [
+    {
+        "id": "disciplina",
+        "label": "Disciplina imparable",
+        "description": "No negociar contigo, cumplir incluso cuando nadie mira.",
+        "seed": "Hoy no negocio conmigo. Mi palabra pesa mas que mi excusa.",
+    },
+    {
+        "id": "autoconfianza",
+        "label": "Autoconfianza",
+        "description": "Seguridad, presencia, voz interna fuerte y estable.",
+        "seed": "Camino como alguien que ya recordo quien es.",
+    },
+    {
+        "id": "entrenamiento",
+        "label": "Entrenamiento / correr",
+        "description": "Energia fisica, resistencia, fuego, ritmo de movimiento.",
+        "seed": "Cada paso confirma que mi cuerpo obedece a mi vision.",
+    },
+    {
+        "id": "manifestacion",
+        "label": "Manifestacion presente",
+        "description": "Identidad futura hablada en presente, logro con calma y poder.",
+        "seed": "Ya vivo desde la version que antes imaginaba.",
+    },
+    {
+        "id": "yo_nino",
+        "label": "Mensaje a mi yo de niño",
+        "description": "Proteccion, orgullo, promesa cumplida, ternura con garra.",
+        "seed": "Vine por el niño que fui. Nadie lo vuelve a dejar atras.",
+    },
+    {
+        "id": "yo_futuro",
+        "label": "Mensaje de mi yo futuro",
+        "description": "Vision, direccion, certeza y responsabilidad emocional.",
+        "seed": "Te escribo desde la cima que hoy todavia parece lejos.",
+    },
+    {
+        "id": "hambre_emocional",
+        "label": "Control de impulsos",
+        "description": "Elegir lo que construye, calmar ansiedad sin castigo corporal.",
+        "seed": "Mi impulso no decide mi destino. Respiro, elijo, avanzo.",
+    },
+    {
+        "id": "exito",
+        "label": "Historia de mi exito",
+        "description": "Narrativa de ascenso, enfoque, dinero, calma y vision.",
+        "seed": "No fue suerte: fue enfoque repetido cuando nadie aplaudia.",
+    },
+]
+
+
+STYLE_PRESETS = [
+    {
+        "id": "latin_trap_anthem",
+        "label": "Latin trap anthem",
+        "suno": "Spanish motivational Latin trap anthem, deep 808 bass, punchy drums, cinematic dark heroic atmosphere, confident male vocal, catchy hook, gym energy, premium radio quality",
+        "bpm": "92-104",
+    },
+    {
+        "id": "rap_garra",
+        "label": "Rap con garra",
+        "suno": "Spanish motivational rap, aggressive but elegant delivery, hard drums, powerful chorus, cinematic brass hits, disciplined warrior energy, modern mix, no romantic theme",
+        "bpm": "88-98",
+    },
+    {
+        "id": "house_running",
+        "label": "House para correr",
+        "suno": "Spanish empowerment house track, driving bassline, sunrise running energy, uplifting synths, euphoric drop, emotional chorus, clean modern club production",
+        "bpm": "122-128",
+    },
+    {
+        "id": "reggaeton_power",
+        "label": "Reggaeton de poder",
+        "suno": "Spanish motivational reggaeton, strong dembow rhythm, confident vocal, catchy chorus, urban premium production, empowering workout energy, no romantic dependency",
+        "bpm": "92-100",
+    },
+    {
+        "id": "electronic_cinematic",
+        "label": "Electronica cinematica",
+        "suno": "Spanish cinematic electronic anthem, massive synths, pulsing bass, emotional build up, powerful spoken-sung hook, futuristic confidence, epic drop",
+        "bpm": "118-132",
+    },
+    {
+        "id": "sax_power",
+        "label": "Saxofon con poder",
+        "suno": "Spanish motivational sax house anthem, powerful saxophone lead, deep bass, energetic percussion, luxury night drive feeling, triumphant chorus, premium mix",
+        "bpm": "120-126",
+    },
+]
+
+
+TARGET_USE_PRESETS = [
+    "correr por la mañana",
+    "entrenar fuerza",
+    "caminar con enfoque",
+    "empezar el dia",
+    "trabajar profundo",
+    "manejar de noche",
+    "visualizar metas",
+]
+
+
+POWER_MUSIC_SYSTEM_PROMPT = """AI AGENT: POWER MUSIC ARCHITECT
+
+ROLE
+Eres un compositor premium de musica motivacional en español, experto en hooks, rap/trap/house/reggaeton/electronica, afirmaciones conscientes, narrativa de identidad y prompts para Suno.
+
+CORE FORMULA
+La cancion debe hacer que la persona quiera moverse, entrenar, correr, volver a intentar y actuar como su version mas fuerte. No escribes poesia plana: escribes canciones cantables, recordables, con coro viral y frases repetibles.
+
+SAFETY AND ETHICS
+- No uses mensajes ocultos ni manipulacion subliminal. Todo mensaje de autoprogramacion debe ser consciente, explicito y saludable.
+- No prometas curacion medica, perdida de peso garantizada, riqueza garantizada ni resultados magicos.
+- Si el tema toca comida, cuerpo o impulsos, enfocalo en autocuidado, calma, eleccion y fuerza; evita castigo, hambre extrema, culpa corporal o lenguaje de trastornos alimenticios.
+- No imites artistas reales, voces reales, letras existentes ni estilos demasiado identificables de una persona especifica.
+- No incluyas instrucciones ilegales, odio, violencia glorificada, humillacion corporal ni misoginia.
+
+OUTPUT
+Devuelve SOLO JSON valido. Sin markdown. Sin texto fuera del JSON.
+"""
+
+
+def compact_text(value, limit=400):
+    text = " ".join(str(value or "").replace("\x00", " ").split()).strip()
+    return text[:limit]
+
+
+def style_by_id(style_id: str) -> dict:
+    return next((item for item in STYLE_PRESETS if item["id"] == style_id), STYLE_PRESETS[0])
+
+
+def intention_by_id(intention_id: str) -> dict:
+    return next((item for item in INTENTION_PRESETS if item["id"] == intention_id), INTENTION_PRESETS[0])
+
+
+def parse_json_object(text: str) -> dict:
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", raw, re.S)
+    if not match:
+        return {}
+    try:
+        data = json.loads(match.group(0))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def build_generation_prompt(payload: dict) -> str:
+    intention = intention_by_id(str(payload.get("intention") or DEFAULT_INTENTION))
+    style = style_by_id(str(payload.get("style") or DEFAULT_STYLE))
+    theme = compact_text(payload.get("theme"), 180) or intention["label"]
+    personal_angle = compact_text(payload.get("personalAngle") or payload.get("personal_angle"), 700)
+    target_use = compact_text(payload.get("targetUse") or payload.get("target_use"), 120) or TARGET_USE_PRESETS[0]
+    energy = compact_text(payload.get("energy"), 80) or "alta, elegante, determinada"
+    vocal_perspective = compact_text(payload.get("vocalPerspective") or payload.get("vocal_perspective"), 80) or "primera persona"
+    must_include = compact_text(payload.get("mustInclude") or payload.get("must_include"), 500)
+    must_avoid = compact_text(payload.get("mustAvoid") or payload.get("must_avoid"), 500)
+    language = compact_text(payload.get("language"), 20) or DEFAULT_LANGUAGE
+
+    contract = {
+        "language": language,
+        "theme": theme,
+        "intention": intention,
+        "style": style,
+        "targetUse": target_use,
+        "energy": energy,
+        "vocalPerspective": vocal_perspective,
+        "personalAngle": personal_angle,
+        "mustInclude": must_include,
+        "mustAvoid": must_avoid,
+    }
+
+    return f"""
+CONTRATO CREATIVO:
+{json.dumps(contract, ensure_ascii=False, indent=2)}
+
+Genera un paquete premium para crear una cancion en Suno y luego producir un video en Content Factory.
+
+REQUISITOS DE CALIDAD:
+- Letra completa en español, con estructura real de cancion.
+- Debe sentirse moderna, fisica, repetible y emocionalmente poderosa.
+- Crea un hook/coro que se pueda repetir corriendo o entrenando.
+- Usa frases de identidad: soy, elijo, cumplo, avanzo, construyo.
+- Incluye un mantra principal corto y memorable.
+- Evita sonar generico, religioso obligatorio o coach barato.
+- La letra debe estar optimizada para Suno: secciones claras entre corchetes.
+- El prompt Suno debe ser copiables y en ingles, porque Suno suele responder mejor a descripciones musicales en ingles.
+- Crea visuales premium sin depender de Luma: Comfy/Flux + Ken Burns + texto cinetico.
+
+JSON SCHEMA EXACTO:
+{{
+  "title": "titulo de la cancion",
+  "subtitle": "promesa corta",
+  "intention": "intencion",
+  "style": "estilo",
+  "bpm": "rango bpm",
+  "energy": "energia",
+  "durationTarget": "2:30-3:30",
+  "lyrics": "[Intro]...",
+  "mainHook": "coro o frase principal",
+  "mantra": "frase corta repetible",
+  "sunoPrompt": "English Suno prompt...",
+  "sunoPromptAlt": "English alternate prompt...",
+  "negativePrompt": "English negative style prompt...",
+  "coverPrompt": "prompt visual 1:1 premium para portada",
+  "videoConcept": {{
+    "visualIdentity": "identidad visual",
+    "palette": ["color 1", "color 2", "color 3"],
+    "scenes": [
+      {{"section": "Intro", "visualPrompt": "prompt 16:9", "textOverlay": "texto corto"}},
+      {{"section": "Verse 1", "visualPrompt": "prompt 16:9", "textOverlay": "texto corto"}},
+      {{"section": "Chorus", "visualPrompt": "prompt 16:9", "textOverlay": "texto corto"}},
+      {{"section": "Bridge", "visualPrompt": "prompt 16:9", "textOverlay": "texto corto"}},
+      {{"section": "Final", "visualPrompt": "prompt 16:9", "textOverlay": "texto corto"}}
+    ],
+    "motionDirection": "Ken Burns, glow, particles, waveform, lyric punches"
+  }},
+  "youtube": {{
+    "title": "titulo SEO YouTube",
+    "description": "descripcion lista para publicar",
+    "hashtags": ["#tag"],
+    "tags": ["tag"],
+    "thumbnailText": "texto corto para miniatura"
+  }},
+  "productionNotes": [
+    "nota operativa"
+  ],
+  "safetyNotes": [
+    "nota de seguridad editorial"
+  ]
+}}
+"""
+
+
+def _as_list(value, limit=12):
+    if not isinstance(value, list):
+        return []
+    out = []
+    for item in value:
+        text = compact_text(item, 160)
+        if text:
+            out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def normalize_package(data: dict, payload: dict | None = None) -> dict:
+    payload = payload or {}
+    style = style_by_id(str(payload.get("style") or data.get("style") or DEFAULT_STYLE))
+    intention = intention_by_id(str(payload.get("intention") or data.get("intention") or DEFAULT_INTENTION))
+    title = compact_text(data.get("title"), 120) or f"{intention['label']}: no negocio conmigo"
+    subtitle = compact_text(data.get("subtitle"), 180) or intention["description"]
+    lyrics = str(data.get("lyrics") or "").strip()
+    if not lyrics:
+        lyrics = fallback_package(payload)["lyrics"]
+
+    video = data.get("videoConcept") if isinstance(data.get("videoConcept"), dict) else {}
+    scenes = video.get("scenes") if isinstance(video.get("scenes"), list) else []
+    normalized_scenes = []
+    for scene in scenes[:8]:
+        if not isinstance(scene, dict):
+            continue
+        normalized_scenes.append({
+            "section": compact_text(scene.get("section"), 60),
+            "visualPrompt": compact_text(scene.get("visualPrompt"), 900),
+            "textOverlay": compact_text(scene.get("textOverlay"), 60),
+        })
+    if not normalized_scenes:
+        normalized_scenes = fallback_package(payload)["videoConcept"]["scenes"]
+
+    youtube = data.get("youtube") if isinstance(data.get("youtube"), dict) else {}
+    package = {
+        "title": title,
+        "subtitle": subtitle,
+        "intention": compact_text(data.get("intention"), 80) or intention["label"],
+        "style": compact_text(data.get("style"), 80) or style["label"],
+        "bpm": compact_text(data.get("bpm"), 40) or style["bpm"],
+        "energy": compact_text(data.get("energy"), 120) or compact_text(payload.get("energy"), 120) or "alta, enfocada, poderosa",
+        "durationTarget": compact_text(data.get("durationTarget"), 40) or "2:30-3:30",
+        "lyrics": lyrics,
+        "mainHook": compact_text(data.get("mainHook"), 260),
+        "mantra": compact_text(data.get("mantra"), 160),
+        "sunoPrompt": compact_text(data.get("sunoPrompt"), 900) or style["suno"],
+        "sunoPromptAlt": compact_text(data.get("sunoPromptAlt"), 900),
+        "negativePrompt": compact_text(data.get("negativePrompt"), 500) or "no imitation of real artists, no copyrighted melody, no sad ending, no romantic dependency, no medical claims",
+        "coverPrompt": compact_text(data.get("coverPrompt"), 900),
+        "videoConcept": {
+            "visualIdentity": compact_text(video.get("visualIdentity"), 260) or "premium motivational cinematic identity",
+            "palette": _as_list(video.get("palette"), limit=6) or ["deep black", "electric gold", "crimson ember"],
+            "scenes": normalized_scenes,
+            "motionDirection": compact_text(video.get("motionDirection"), 360) or "Ken Burns, glow, particles, waveform and lyric punches.",
+        },
+        "youtube": {
+            "title": compact_text(youtube.get("title"), 120) or title,
+            "description": compact_text(youtube.get("description"), 1800),
+            "hashtags": _as_list(youtube.get("hashtags"), limit=12),
+            "tags": _as_list(youtube.get("tags"), limit=20),
+            "thumbnailText": compact_text(youtube.get("thumbnailText"), 40) or title[:40],
+        },
+        "productionNotes": _as_list(data.get("productionNotes"), limit=10),
+        "safetyNotes": _as_list(data.get("safetyNotes"), limit=10),
+        "source": "power_music_studio",
+        "createdAtIso": datetime.now(timezone.utc).isoformat(),
+    }
+    if not package["mainHook"]:
+        package["mainHook"] = title
+    if not package["mantra"]:
+        package["mantra"] = intention["seed"]
+    return package
+
+
+def fallback_package(payload: dict | None = None) -> dict:
+    payload = payload or {}
+    intention = intention_by_id(str(payload.get("intention") or DEFAULT_INTENTION))
+    style = style_by_id(str(payload.get("style") or DEFAULT_STYLE))
+    theme = compact_text(payload.get("theme"), 100) or intention["label"]
+    title = f"{theme}: hoy no negocio conmigo"
+    return {
+        "title": title,
+        "subtitle": intention["description"],
+        "intention": intention["label"],
+        "style": style["label"],
+        "bpm": style["bpm"],
+        "energy": "alta, enfocada, poderosa",
+        "durationTarget": "2:30-3:30",
+        "lyrics": (
+            "[Intro]\n"
+            "Hoy me levanto con fuego tranquilo\n"
+            "no le pido permiso al miedo\n\n"
+            "[Verse 1]\n"
+            "Yo se de donde vengo, se lo que costo\n"
+            "cada noche en silencio tambien me entreno\n"
+            "si mi mente me prueba, no me voy a romper\n"
+            "soy la voz que responde: lo vuelvo a hacer\n\n"
+            "[Pre-Chorus]\n"
+            "Respiro, me ordeno, camino de frente\n"
+            "mi futuro me mira y me pide presente\n\n"
+            "[Chorus]\n"
+            "Hoy no negocio conmigo\n"
+            "hoy no abandono mi plan\n"
+            "si tiembla la voz, sigo vivo\n"
+            "si pesa la vida, doy mas\n\n"
+            "[Bridge]\n"
+            "No soy mi impulso, no soy mi excusa\n"
+            "soy lo que elijo cuando nadie me escucha\n\n"
+            "[Final Chorus]\n"
+            "Hoy no negocio conmigo\n"
+            "lo dije y lo voy a cumplir\n"
+            "mi historia cambio desde el dia\n"
+            "que decidi volver por mi\n"
+        ),
+        "mainHook": "Hoy no negocio conmigo",
+        "mantra": intention["seed"],
+        "sunoPrompt": style["suno"],
+        "sunoPromptAlt": f"{style['suno']}, stronger chorus, more cinematic build up, motivational anthem in Spanish",
+        "negativePrompt": "no imitation of real artists, no copyrighted melody, no sad ending, no romantic dependency, no medical claims",
+        "coverPrompt": "Premium cinematic motivational cover art, lone runner silhouette at sunrise, black and gold palette, electric ember glow, powerful discipline identity, no readable text, no logos",
+        "videoConcept": {
+            "visualIdentity": "premium discipline anthem, dark heroic sunrise, gold ember energy",
+            "palette": ["deep black", "electric gold", "crimson ember"],
+            "scenes": [
+                {"section": "Intro", "visualPrompt": "cinematic dark room before sunrise, athletic shoes on floor, gold light line entering, premium motivational mood, 16:9", "textOverlay": "HOY EMPIEZA"},
+                {"section": "Verse 1", "visualPrompt": "runner silhouette on empty street at dawn, cinematic mist, gold highlights, disciplined solitude, 16:9", "textOverlay": "SIN EXCUSAS"},
+                {"section": "Chorus", "visualPrompt": "powerful abstract heart and fire waveform, black gold crimson, premium anthem energy, 16:9", "textOverlay": "NO NEGOCIO"},
+                {"section": "Bridge", "visualPrompt": "mirror reflection transforming into stronger self, cinematic shadows, gold rim light, no readable text, 16:9", "textOverlay": "ELIJO"},
+                {"section": "Final", "visualPrompt": "sunrise mountain road, triumphant lone figure, cinematic golden sky, premium victory mood, 16:9", "textOverlay": "CUMPLO"},
+            ],
+            "motionDirection": "Ken Burns slow push, lyric punches on chorus, subtle waveform, ember particles.",
+        },
+        "youtube": {
+            "title": title,
+            "description": "Cancion motivacional para entrenar disciplina, enfoque y autoconfianza. Escuchala cuando necesites volver a elegirte.",
+            "hashtags": ["#motivacion", "#disciplina", "#entrenamiento", "#autoconfianza"],
+            "tags": ["musica motivacional", "disciplina", "gym motivation", "cancion para correr"],
+            "thumbnailText": "NO NEGOCIO",
+        },
+        "productionNotes": ["Pegar lyrics + Suno prompt en Suno; descargar audio y volver a Content Factory para video."],
+        "safetyNotes": ["Mensajes conscientes, no subliminales ocultos; no contiene promesas medicas."],
+        "source": "power_music_studio_fallback",
+        "createdAtIso": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def stable_track_id(uid: str, package: dict) -> str:
+    base = json.dumps(
+        {
+            "uid": uid or "anonymous",
+            "title": package.get("title"),
+            "lyrics": package.get("lyrics"),
+            "sunoPrompt": package.get("sunoPrompt"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return "music_" + hashlib.sha256(base.encode("utf-8")).hexdigest()[:24]
+
+
+def public_track_doc(track_id: str, data: dict) -> dict:
+    package = data.get("package") if isinstance(data.get("package"), dict) else {}
+    return {
+        "trackId": track_id,
+        "title": package.get("title") or data.get("title") or "",
+        "subtitle": package.get("subtitle") or "",
+        "style": package.get("style") or "",
+        "intention": package.get("intention") or "",
+        "status": data.get("status") or "lyrics_ready",
+        "createdAt": data.get("createdAt"),
+        "updatedAt": data.get("updatedAt"),
+        "package": package,
+    }

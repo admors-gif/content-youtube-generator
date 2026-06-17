@@ -109,6 +109,18 @@ from scripts.source_video import (
     transcript_hash as _source_video_transcript_hash,
     youtube_video_url as _source_video_youtube_url,
 )
+from scripts.power_music import (
+    INTENTION_PRESETS as POWER_MUSIC_INTENTIONS,
+    STYLE_PRESETS as POWER_MUSIC_STYLES,
+    TARGET_USE_PRESETS as POWER_MUSIC_TARGET_USES,
+    POWER_MUSIC_SYSTEM_PROMPT,
+    build_generation_prompt as _power_music_generation_prompt,
+    fallback_package as _power_music_fallback_package,
+    normalize_package as _power_music_normalize_package,
+    parse_json_object as _power_music_parse_json,
+    public_track_doc as _power_music_public_track,
+    stable_track_id as _power_music_track_id,
+)
 
 FIREBASE_STORAGE_BUCKET = os.environ.get(
     "FIREBASE_STORAGE_BUCKET",
@@ -838,6 +850,18 @@ def _require_source_video_admin(request: Request) -> dict:
     if not _source_video_enabled():
         raise HTTPException(status_code=404, detail="source video inspiration disabled")
     if _flag_enabled("CONTENT_FACTORY_SOURCE_VIDEO_ADMIN_ONLY", default=True):
+        return _require_admin(request)
+    return _require_principal(request)
+
+
+def _music_studio_enabled() -> bool:
+    return _flag_enabled("CONTENT_FACTORY_MUSIC_STUDIO_ENABLED", default=True)
+
+
+def _require_music_studio_admin(request: Request) -> dict:
+    if not _music_studio_enabled():
+        raise HTTPException(status_code=404, detail="music studio disabled")
+    if _flag_enabled("CONTENT_FACTORY_MUSIC_STUDIO_ADMIN_ONLY", default=True):
         return _require_admin(request)
     return _require_principal(request)
 
@@ -7690,6 +7714,123 @@ async def source_videos_prepare_project(source_video_id: str, request: Request):
             },
             "preparedUrl": prepared_url,
             "creditCharged": False,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.get("/music/presets")
+def music_presets(request: Request):
+    _require_music_studio_admin(request)
+    return {
+        "ok": True,
+        "intentions": POWER_MUSIC_INTENTIONS,
+        "styles": POWER_MUSIC_STYLES,
+        "targetUses": POWER_MUSIC_TARGET_USES,
+        "model": os.environ.get("CONTENT_FACTORY_MUSIC_MODEL", "claude-opus-4-7"),
+        "creditCharged": False,
+    }
+
+
+@app.get("/music/tracks")
+def music_tracks(request: Request, limit: int = 40):
+    principal = _require_music_studio_admin(request)
+    try:
+        _ensure_firebase_initialized()
+        db = firestore.client()
+        safe_limit = max(1, min(int(limit or 40), 100))
+        docs = (
+            db.collection("musicTracks")
+            .where("userId", "==", principal["uid"])
+            .order_by("createdAt", direction=firestore.Query.DESCENDING)
+            .limit(safe_limit)
+            .stream()
+        )
+        items = [_power_music_public_track(doc.id, doc.to_dict() or {}) for doc in docs]
+        return {"ok": True, "items": items}
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220], "items": []})
+
+
+@app.post("/music/generate")
+async def music_generate(request: Request):
+    principal = _require_music_studio_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    body = body if isinstance(body, dict) else {}
+    save = body.get("save", True) is not False
+    model = os.environ.get("CONTENT_FACTORY_MUSIC_MODEL", "claude-opus-4-7")
+    prompt = _power_music_generation_prompt(body)
+    allow_fallback = _flag_enabled("CONTENT_FACTORY_MUSIC_ALLOW_FALLBACK", default=False)
+
+    try:
+        from anthropic import Anthropic
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            if not allow_fallback:
+                raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
+            raw_package = _power_music_fallback_package(body)
+            generation_mode = "fallback_no_anthropic"
+        else:
+            client = Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model=model,
+                max_tokens=max(2500, min(_safe_int(body.get("maxTokens"), 5200), 8000)),
+                temperature=0.88,
+                system=POWER_MUSIC_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = "".join(getattr(part, "text", "") for part in response.content)
+            parsed = _power_music_parse_json(text)
+            if not parsed:
+                if not allow_fallback:
+                    raise HTTPException(status_code=502, detail="music model returned invalid JSON")
+                parsed = _power_music_fallback_package(body)
+                generation_mode = "fallback_invalid_json"
+            else:
+                generation_mode = "llm"
+            raw_package = parsed
+
+        package = _power_music_normalize_package(raw_package, body)
+        track_id = _power_music_track_id(principal["uid"], package)
+        saved = False
+        if save:
+            _ensure_firebase_initialized()
+            db = firestore.client()
+            db.collection("musicTracks").document(track_id).set({
+                "userId": principal["uid"],
+                "email": ((principal.get("token") or {}).get("email") or "").strip().lower(),
+                "status": "lyrics_ready",
+                "package": package,
+                "input": {
+                    "intention": body.get("intention") or "",
+                    "style": body.get("style") or "",
+                    "theme": body.get("theme") or "",
+                    "targetUse": body.get("targetUse") or body.get("target_use") or "",
+                    "energy": body.get("energy") or "",
+                },
+                "model": model,
+                "generationMode": generation_mode,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+                "createdAt": firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+            saved = True
+        return {
+            "ok": True,
+            "trackId": track_id,
+            "package": package,
+            "saved": saved,
+            "model": model,
+            "generationMode": generation_mode,
+            "creditCharged": False,
+            "notes": [
+                "Content Factory genera letra y prompt. La cancion final se crea manualmente en Suno.",
+                "No se consumen creditos internos de produccion hasta un futuro render/publicacion.",
+            ],
         }
     except HTTPException:
         raise
