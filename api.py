@@ -7893,7 +7893,6 @@ async def music_generate(request: Request):
             response = client.messages.create(
                 model=model,
                 max_tokens=max(2500, min(_safe_int(body.get("maxTokens"), 5200), 8000)),
-                temperature=0.88,
                 system=POWER_MUSIC_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": prompt}],
             )
