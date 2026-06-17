@@ -1080,7 +1080,9 @@ export default function MusicStudioPage() {
                 )}
                 {renderData?.durationSeconds && (
                   <div className="cf-caption" style={{ marginTop: 8 }}>
-                    {Math.round(Number(renderData.durationSeconds))}s · {renderData.sceneCount || 0} escenas visuales
+                    {Math.round(Number(renderData.durationSeconds))}s · {renderData.visualBeatCount || renderData.sceneCount || 0} beats visuales
+                    {renderData.visualProvider ? ` · ${renderData.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local"}` : ""}
+                    {renderData.visualIntervalSeconds ? ` · cada ${Math.round(Number(renderData.visualIntervalSeconds))}s` : ""}
                   </div>
                 )}
               </div>

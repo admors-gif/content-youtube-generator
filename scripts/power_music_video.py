@@ -1,5 +1,6 @@
 import json
 import math
+import os
 import random
 import re
 import subprocess
@@ -12,6 +13,31 @@ VIDEO_SIZE = (1920, 1080)
 THUMB_SIZE = (1280, 720)
 COVER_SIZE = (1080, 1080)
 FPS = 30
+DEFAULT_VISUAL_INTERVAL_SECONDS = 5.0
+DEFAULT_MAX_VISUAL_BEATS = 72
+DEFAULT_MAX_COMFY_IMAGES = 72
+_VIGNETTE_CACHE = {}
+
+
+def _env_bool(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+
+def _env_float(name, default):
+    try:
+        return max(1.0, float(os.getenv(name, default)))
+    except Exception:
+        return default
+
+
+def _env_int(name, default):
+    try:
+        return max(1, int(float(os.getenv(name, default))))
+    except Exception:
+        return default
 
 
 def compact_text(value, limit=240):
@@ -182,10 +208,6 @@ def _draw_frame(size, palette, title, subtitle, overlay, prompt, seed, square=Fa
     if subtitle:
         _draw_centered_text(draw, subtitle, (margin + 90, int(h * 0.76), w - margin - 90, int(h * 0.84)), subtitle_font, dim, spacing=8)
 
-    if prompt and not square:
-        caption = compact_text(prompt, 110)
-        _draw_centered_text(draw, caption, (margin + 120, int(h * 0.86), w - margin - 120, int(h * 0.93)), small_font, dim, spacing=6)
-
     glow = Image.new("RGBA", size, (0, 0, 0, 0))
     gdraw = ImageDraw.Draw(glow)
     for i in range(12):
@@ -193,6 +215,84 @@ def _draw_frame(size, palette, title, subtitle, overlay, prompt, seed, square=Fa
         gdraw.ellipse((w * 0.5 - 80 - i * 20, h * 0.5 - 80 - i * 20, w * 0.5 + 80 + i * 20, h * 0.5 + 80 + i * 20), outline=(*palette[1], alpha), width=3)
     img = Image.alpha_composite(img, glow)
     return img.convert("RGB")
+
+
+def _resize_cover(img, size):
+    target_w, target_h = size
+    src_w, src_h = img.size
+    scale = max(target_w / max(1, src_w), target_h / max(1, src_h))
+    new_size = (int(src_w * scale), int(src_h * scale))
+    img = img.resize(new_size, Image.LANCZOS)
+    left = max(0, (new_size[0] - target_w) // 2)
+    top = max(0, (new_size[1] - target_h) // 2)
+    return img.crop((left, top, left + target_w, top + target_h))
+
+
+def _add_vignette(img, palette):
+    w, h = img.size
+    cache_key = (w, h)
+    overlay = _VIGNETTE_CACHE.get(cache_key)
+    if overlay is None:
+        overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        px = overlay.load()
+        for y in range(h):
+            for x in range(w):
+                dx = abs((x / max(1, w - 1)) - 0.5) * 2
+                dy = abs((y / max(1, h - 1)) - 0.5) * 2
+                distance = min(1.0, math.sqrt(dx * dx + dy * dy) / 1.05)
+                alpha = int(max(0, distance - 0.24) * 118)
+                px[x, y] = (0, 0, 0, alpha)
+        _VIGNETTE_CACHE[cache_key] = overlay
+    accent = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(accent)
+    draw.rectangle((0, 0, w, int(h * 0.16)), fill=(0, 0, 0, 70))
+    draw.rectangle((0, int(h * 0.78), w, h), fill=(0, 0, 0, 82))
+    draw.line((0, h - 3, w, h - 3), fill=(*palette[2], 150), width=4)
+    return Image.alpha_composite(Image.alpha_composite(img.convert("RGBA"), overlay), accent)
+
+
+def _compose_generated_frame(source_path, output_path, palette, beat):
+    """Post-process a generated image into the final music-video frame.
+
+    Comfy/Flux is asked to generate clean, text-free imagery. This layer adds
+    only lightweight branding and the current lyric as a small cinematic cue,
+    never the raw prompt.
+    """
+    try:
+        img = Image.open(source_path).convert("RGB")
+        img = _resize_cover(img, VIDEO_SIZE).convert("RGBA")
+    except Exception:
+        return False
+
+    img = _add_vignette(img, palette)
+    draw = ImageDraw.Draw(img, "RGBA")
+    w, h = VIDEO_SIZE
+    paper = (246, 242, 232, 248)
+    dim = (215, 208, 194, 218)
+    ember = (*palette[2], 245)
+    small_font = load_font(28, bold=False)
+    lyric_font = load_font(44, bold=True)
+    section_font = load_font(24, bold=False)
+    margin = 74
+
+    draw.text((margin, 48), "POWER MUSIC", font=small_font, fill=paper)
+    section = compact_text(beat.get("section"), 36).upper()
+    if section:
+        draw.rounded_rectangle((margin, h - 145, margin + 220, h - 104), radius=20, fill=(0, 0, 0, 120), outline=ember, width=1)
+        draw.text((margin + 24, h - 136), section, font=section_font, fill=dim)
+
+    lyric = compact_text(beat.get("lyric") or beat.get("overlay"), 96)
+    if lyric:
+        lines = _wrap_text(draw, lyric, lyric_font, w - margin * 2 - 40)[:2]
+        total_h = len(lines) * 52
+        y = h - 92 - total_h
+        for line in lines:
+            draw.text((margin, y), line, font=lyric_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 180))
+            y += 52
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    img.convert("RGB").save(output_path, quality=93)
+    return output_path.exists() and output_path.stat().st_size > 5000
 
 
 def _run(cmd, timeout=900):
@@ -253,6 +353,173 @@ def _scene_list(package):
     return clean
 
 
+def _clean_lyric_line(value):
+    text = compact_text(value, 180)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _lyric_units(lyrics):
+    """Extract singable lyric lines with their current song section."""
+    units = []
+    current_section = "Intro"
+    for raw_line in str(lyrics or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        section_match = re.fullmatch(r"\[([^\]]{1,80})\]", line)
+        if section_match:
+            current_section = compact_text(section_match.group(1), 60) or current_section
+            continue
+        clean = _clean_lyric_line(line)
+        if clean:
+            units.append({"section": current_section, "line": clean})
+    return units
+
+
+def _match_scene_for_section(scenes, section, index):
+    normalized = compact_text(section, 80).lower()
+    for scene in scenes:
+        scene_section = compact_text(scene.get("section"), 80).lower()
+        if scene_section and (scene_section in normalized or normalized in scene_section):
+            return scene
+    if not scenes:
+        return {"section": section or "Scene", "visualPrompt": "", "textOverlay": ""}
+    return scenes[index % len(scenes)]
+
+
+def _visual_mood_from_line(line):
+    text = str(line or "").lower()
+    signals = []
+    if any(word in text for word in ["miedo", "excusa", "duda", "tiembla", "cans", "caer"]):
+        signals.append("inner resistance turning into controlled strength")
+    if any(word in text for word in ["cumplo", "promesa", "disciplina", "plan", "paso"]):
+        signals.append("discipline, commitment, forward motion")
+    if any(word in text for word in ["fuego", "hierro", "sudor", "entreno", "levanto"]):
+        signals.append("physical power, gym energy, sweat, metal, sunrise")
+    if any(word in text for word in ["niño", "futuro", "historia", "version"]):
+        signals.append("identity transformation, memory and future self")
+    if any(word in text for word in ["respiro", "calma", "silencio", "mente"]):
+        signals.append("breath, focus, quiet confidence")
+    return ", ".join(signals) or "premium emotional motivation, identity, momentum"
+
+
+def _build_music_visual_prompt(package, beat, scene, palette):
+    video = _video_concept(package)
+    title = compact_text(package.get("title"), 120)
+    identity = compact_text(video.get("visualIdentity"), 260) or "premium cinematic motivational music-video identity"
+    style = compact_text(package.get("style"), 80) or "motivational anthem"
+    intention = compact_text(package.get("intention"), 90) or "discipline and identity"
+    lyric = compact_text(beat.get("line"), 180)
+    section = compact_text(beat.get("section"), 60)
+    scene_prompt = compact_text(scene.get("visualPrompt"), 520)
+    mood = _visual_mood_from_line(lyric)
+    colors = ", ".join(str(c) for c in (video.get("palette") or [])[:4]) or f"deep black, gold, ember red, {palette[0]}"
+
+    return compact_text(
+        (
+            "16:9 cinematic music video still for a Spanish empowerment song, "
+            "Flux Krea photoreal editorial quality, premium composition, high emotional clarity. "
+            f"Song: {title}. Section: {section}. Style: {style}. Intention: {intention}. "
+            f"Current lyric meaning: {lyric}. Mood to visualize: {mood}. "
+            f"Visual identity: {identity}. Palette: {colors}. "
+            f"Scene direction: {scene_prompt}. "
+            "Create a concrete cinematic image that supports the lyric's emotion: modern athlete, dawn, city, mirror, road, iron, breath, focused eyes, "
+            "or symbolic transformation depending on the lyric. Powerful but elegant, not cheesy, no random abstract template. "
+            "No readable text, no lyrics, no captions, no subtitles, no logos, no watermark, no UI, no frame border, no misspelled letters."
+        ),
+        1600,
+    )
+
+
+def _build_visual_beats(package, duration, interval_seconds, max_beats):
+    scenes = _scene_list(package)
+    units = _lyric_units(package.get("lyrics"))
+    if not units:
+        units = [
+            {"section": "Hook", "line": compact_text(package.get("mainHook") or package.get("mantra") or package.get("title"), 140) or "I choose my strongest self"}
+        ]
+
+    target_count = max(1, int(math.ceil(max(1.0, duration) / max(1.0, interval_seconds))))
+    beat_count = min(max_beats, target_count)
+    actual_interval = duration / max(1, beat_count)
+    palette = _palette(package)
+    beats = []
+    for index in range(beat_count):
+        unit_index = min(len(units) - 1, int((index / max(1, beat_count)) * len(units)))
+        unit = units[unit_index]
+        scene = _match_scene_for_section(scenes, unit.get("section"), index)
+        text_overlay = compact_text(unit.get("line"), 60) or compact_text(scene.get("textOverlay"), 60)
+        prompt = _build_music_visual_prompt(package, unit, scene, palette)
+        start = index * actual_interval
+        end = duration if index == beat_count - 1 else min(duration, (index + 1) * actual_interval)
+        beats.append(
+            {
+                "scene_number": index + 1,
+                "section": compact_text(unit.get("section"), 60),
+                "lyric": compact_text(unit.get("line"), 180),
+                "overlay": text_overlay,
+                "prompt": prompt,
+                "duration": max(0.5, end - start),
+                "sourceScene": scene.get("section"),
+            }
+        )
+    return beats, actual_interval
+
+
+def _comfy_music_enabled():
+    default = bool(os.getenv("COMFYUI_API_KEY"))
+    return _env_bool("CONTENT_FACTORY_MUSIC_COMFY_ENABLED", default=default) and bool(os.getenv("COMFYUI_API_KEY"))
+
+
+def _generate_comfy_beat_images(beats, images_dir):
+    """Generate beat-aligned images with the existing Comfy/Flux pipeline.
+
+    The function is deliberately optional and fault-tolerant. A failed Comfy
+    batch never breaks the final render; local premium fallback frames fill any
+    missing beat.
+    """
+    stats = {
+        "enabled": False,
+        "requested": 0,
+        "generated": 0,
+        "skipped": 0,
+        "failed": 0,
+        "missing": [],
+        "invalid": [],
+        "error": "",
+    }
+    if not _comfy_music_enabled():
+        stats["error"] = "COMFYUI_API_KEY not configured or CONTENT_FACTORY_MUSIC_COMFY_ENABLED=false"
+        return stats
+
+    max_images = _env_int("CONTENT_FACTORY_MUSIC_MAX_COMFY_IMAGES", DEFAULT_MAX_COMFY_IMAGES)
+    comfy_scenes = [{"scene_number": beat["scene_number"], "prompt": beat["prompt"]} for beat in beats[:max_images]]
+    if not comfy_scenes:
+        return stats
+
+    stats["enabled"] = True
+    stats["requested"] = len(comfy_scenes)
+    try:
+        from scripts.factory import generate_comfy_images, _select_image_workflow
+
+        workflow = _select_image_workflow("narrativa")
+        workflow["label"] = "FLUX/Krea Power Music"
+        result = generate_comfy_images(comfy_scenes, images_dir, workflow, pipeline_format="narrativa")
+        stats.update(
+            {
+                "generated": int(result.get("generated") or 0),
+                "skipped": int(result.get("skipped") or 0),
+                "failed": int(result.get("failed") or 0),
+                "missing": result.get("missing") or [],
+                "invalid": result.get("invalid") or [],
+            }
+        )
+    except Exception as exc:
+        stats["error"] = str(exc)[:500]
+    return stats
+
+
 def render_power_music_video(track_id, package, audio_path, output_dir):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -265,8 +532,10 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     title = compact_text(package.get("title"), 100) or "Power Music"
     subtitle = compact_text(package.get("subtitle") or package.get("mainHook"), 160)
     palette = _palette(package)
-    scenes = _scene_list(package)
     duration = probe_audio_duration(audio_path)
+    requested_interval = _env_float("CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS", DEFAULT_VISUAL_INTERVAL_SECONDS)
+    max_visual_beats = _env_int("CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS", DEFAULT_MAX_VISUAL_BEATS)
+    beats, visual_interval = _build_visual_beats(package, duration, requested_interval, max_visual_beats)
 
     cover_path = output_dir / "cover.jpg"
     thumbnail_path = output_dir / "thumbnail.jpg"
@@ -281,22 +550,32 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     thumb = _draw_frame(THUMB_SIZE, palette, title, subtitle, thumb_text, package.get("coverPrompt"), 17)
     thumb.save(thumbnail_path, quality=94)
 
-    scene_duration = max(5.0, duration / max(1, len(scenes)))
+    comfy_dir = output_dir / "comfy"
+    comfy_stats = _generate_comfy_beat_images(beats, comfy_dir)
     segment_paths = []
-    for index, scene in enumerate(scenes, start=1):
-        image_path = assets_dir / f"scene_{index:02d}.jpg"
-        segment_path = segments_dir / f"segment_{index:02d}.mp4"
-        frame = _draw_frame(
-            VIDEO_SIZE,
-            palette,
-            title,
-            scene["section"],
-            scene["textOverlay"] or package.get("mainHook") or title,
-            scene["visualPrompt"],
-            100 + index,
-        )
-        frame.save(image_path, quality=92)
-        frames = max(1, int(math.ceil(scene_duration * FPS)))
+    generated_frames = 0
+    fallback_frames = 0
+    for index, beat in enumerate(beats, start=1):
+        image_path = assets_dir / f"beat_{index:03d}.jpg"
+        segment_path = segments_dir / f"segment_{index:03d}.mp4"
+        comfy_path = comfy_dir / f"scene_{index:04d}.png"
+        if comfy_path.exists() and comfy_path.stat().st_size > 5000 and _compose_generated_frame(comfy_path, image_path, palette, beat):
+            generated_frames += 1
+        else:
+            frame = _draw_frame(
+                VIDEO_SIZE,
+                palette,
+                title,
+                beat.get("section"),
+                beat.get("overlay") or package.get("mainHook") or title,
+                beat.get("prompt"),
+                100 + index,
+            )
+            frame.save(image_path, quality=92)
+            fallback_frames += 1
+
+        segment_duration = max(0.5, float(beat.get("duration") or visual_interval))
+        frames = max(1, int(math.ceil(segment_duration * FPS)))
         zoom = "zoompan=z='min(zoom+0.00085,1.09)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
         vf = f"scale={VIDEO_SIZE[0]}:{VIDEO_SIZE[1]},{zoom}:d={frames}:s={VIDEO_SIZE[0]}x{VIDEO_SIZE[1]}:fps={FPS},format=yuv420p"
         _run(
@@ -310,7 +589,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
                 "-vf",
                 vf,
                 "-t",
-                f"{scene_duration:.3f}",
+                f"{segment_duration:.3f}",
                 "-an",
                 "-c:v",
                 "libx264",
@@ -322,7 +601,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
                 "yuv420p",
                 str(segment_path),
             ],
-            timeout=max(120, int(scene_duration * 20)),
+            timeout=max(120, int(segment_duration * 20)),
         )
         segment_paths.append(segment_path)
 
@@ -368,8 +647,26 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "trackId": track_id,
         "title": title,
         "durationSeconds": duration,
-        "sceneCount": len(scenes),
-        "renderer": "power_music_video_v1",
+        "sceneCount": len(beats),
+        "visualBeatCount": len(beats),
+        "visualIntervalSeconds": round(visual_interval, 3),
+        "requestedVisualIntervalSeconds": round(requested_interval, 3),
+        "visualProvider": "comfy_flux" if generated_frames else "local_fallback",
+        "comfy": comfy_stats,
+        "generatedFrames": generated_frames,
+        "fallbackFrames": fallback_frames,
+        "renderer": "power_music_video_v2_lyric_beats",
+        "visualBeats": [
+            {
+                "index": beat["scene_number"],
+                "section": beat.get("section"),
+                "lyric": beat.get("lyric"),
+                "duration": round(float(beat.get("duration") or 0), 3),
+                "sourceScene": beat.get("sourceScene"),
+                "prompt": beat.get("prompt"),
+            }
+            for beat in beats
+        ],
         "files": {
             "video": final_path.name,
             "thumbnail": thumbnail_path.name,
@@ -390,5 +687,12 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "lyrics": lyrics_path,
         "sunoPrompt": suno_path,
         "durationSeconds": duration,
-        "sceneCount": len(scenes),
+        "sceneCount": len(beats),
+        "visualBeatCount": len(beats),
+        "visualIntervalSeconds": round(visual_interval, 3),
+        "visualProvider": metadata["visualProvider"],
+        "generatedFrames": generated_frames,
+        "fallbackFrames": fallback_frames,
+        "comfy": comfy_stats,
+        "renderer": metadata["renderer"],
     }

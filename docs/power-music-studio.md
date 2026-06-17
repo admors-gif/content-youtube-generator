@@ -18,6 +18,7 @@ Power Music Studio convierte una idea de crecimiento personal en un paquete crea
 - produccion de video final en VPS con visuales generativos locales, Ken Burns, thumbnail, cover y metadata.
 - multiples tomas/versiones de audio por una misma letra.
 - calificador de letra sin costo extra.
+- visuales sincronizados con la letra cada ~5 segundos, usando Comfy/Flux cuando este configurado y fallback local si falla.
 
 La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la cancion y la sube al track en Content Factory. Desde ahi Content Factory ya puede mandar el render completo al VPS/worker para generar `FINAL_MUSIC.mp4`, miniatura y portada sin depender de que la computadora del usuario permanezca prendida.
 
@@ -34,7 +35,9 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - Permite seleccionar una version activa antes de producir el video.
 - Renderiza el video en worker/Celery con fallback a background task si la cola no esta disponible.
 - No usa Luma por default.
-- Renderer v1: imagenes locales premium con PIL + movimiento Ken Burns en FFmpeg.
+- Renderer v2: timeline visual por letra. Divide el audio en beats de ~5 segundos, genera prompts Flux por linea/seccion de la cancion y ensambla con Ken Burns en FFmpeg.
+- Si `COMFYUI_API_KEY` esta configurado y `CONTENT_FACTORY_MUSIC_COMFY_ENABLED` no esta desactivado, intenta generar imagenes reales con Flux/Krea via Comfy.
+- Si Comfy falla o no esta configurado, usa fallback local limpio sin mostrar prompts tecnicos en pantalla.
 - El score de letra es heuristico: no llama otro modelo ni consume API adicional.
 
 ## Variables
@@ -49,8 +52,20 @@ CONTENT_FACTORY_MUSIC_MAX_TOKENS=5200
 CONTENT_FACTORY_MUSIC_ALLOW_FALLBACK=false
 MUSIC_MAX_AUDIO_BYTES=167772160
 MUSIC_RENDER_DIR=/app/output/music_renders
+CONTENT_FACTORY_MUSIC_COMFY_ENABLED=true
+CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS=5
+CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS=72
+CONTENT_FACTORY_MUSIC_MAX_COMFY_IMAGES=72
 ANTHROPIC_API_KEY=...
+COMFYUI_API_KEY=...
 ```
+
+Notas de costo visual:
+
+- Una cancion de 3 minutos con intervalo de 5 segundos genera aprox. 36 imagenes.
+- `CONTENT_FACTORY_MUSIC_MAX_COMFY_IMAGES` limita cuantas imagenes se mandan a Comfy por render.
+- Los beats que excedan el limite o fallen entran con fallback local.
+- Para apagar Comfy sin romper el render: `CONTENT_FACTORY_MUSIC_COMFY_ENABLED=false`.
 
 Frontend:
 
@@ -232,7 +247,7 @@ Estados futuros:
 ## Archivos Principales
 
 - `scripts/power_music.py`: presets, prompt builder, normalizacion y fallback.
-- `scripts/power_music_video.py`: renderer local de video musical con PIL + FFmpeg.
+- `scripts/power_music_video.py`: renderer de video musical; crea beats visuales desde la letra, intenta Comfy/Flux y arma MP4 con FFmpeg.
 - `api.py`: endpoints `/music/*`.
 - `worker_tasks.py`: task Celery `content_factory.produce_music_video`.
 - `web/app/dashboard/music/page.js`: UI admin.
@@ -257,15 +272,15 @@ Estados futuros:
    - `metadata.json`;
    - `lyrics.txt`;
    - `suno_prompt.txt`.
-11. La UI muestra progreso, video final, miniatura y enlaces.
+11. La UI muestra progreso, video final, miniatura, proveedor visual (`Flux/Comfy` o fallback local), numero de beats y enlaces.
 
 ## Proximos Bloques
 
-1. Conectar Comfy/Flux como proveedor opcional de escenas reales.
-2. Agregar waveform visual reactivo al audio.
-3. Integrar publicacion directa a YouTube reutilizando el centro de publicaciones.
-4. Agregar ZIP de material musical completo.
-5. Calificador LLM opcional para comparar letras con mayor criterio artistico.
+1. Agregar waveform visual reactivo al audio.
+2. Integrar publicacion directa a YouTube reutilizando el centro de publicaciones.
+3. Agregar ZIP de material musical completo.
+4. Calificador LLM opcional para comparar letras con mayor criterio artistico.
+5. Sincronizacion fina con timestamps reales/LRC si Suno exporta letras cronometradas en el futuro.
 
 ## Handoff Para Otro Equipo
 
@@ -296,7 +311,8 @@ Probar en produccion:
 - seleccionar la version activa;
 - pulsar "Producir video musical";
 - esperar `video_ready`;
-- reproducir `FINAL_MUSIC.mp4` y abrir la miniatura.
+- reproducir `FINAL_MUSIC.mp4` y confirmar que cambian los visuales por beats de letra.
+- abrir metadata y revisar `visualBeatCount`, `visualProvider`, `generatedFrames`, `fallbackFrames` y `visualBeats`.
 - confirmar que no consume credito interno.
 
 ## Riesgos

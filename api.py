@@ -5738,9 +5738,15 @@ def _run_music_video_job(track_id: str) -> dict:
             "sunoPrompt": _music_upload_asset(outputs["sunoPrompt"], uid, clean_track_id, bucket, f"metadata/{safe_audio_version}"),
             "durationSeconds": outputs.get("durationSeconds"),
             "sceneCount": outputs.get("sceneCount"),
+            "visualBeatCount": outputs.get("visualBeatCount"),
+            "visualIntervalSeconds": outputs.get("visualIntervalSeconds"),
+            "visualProvider": outputs.get("visualProvider"),
+            "generatedFrames": outputs.get("generatedFrames"),
+            "fallbackFrames": outputs.get("fallbackFrames"),
+            "comfy": outputs.get("comfy") or {},
             "audioVersionId": audio_version_id,
             "audioLabel": audio.get("label") or "",
-            "renderer": "power_music_video_v1",
+            "renderer": outputs.get("renderer") or "power_music_video_v2_lyric_beats",
         }
 
         ref.set(

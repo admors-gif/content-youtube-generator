@@ -63,6 +63,8 @@ Implementado en la sesion 2026-06-16:
 - `musicTracks/{trackId}.audio` conserva la version activa para compatibilidad.
 - V1 renderiza video final en VPS/worker desde la version activa de audio.
 - V1 incluye `package.lyricScore` heuristico sin costo extra.
+- Renderer v2 sincroniza visuales con la letra: divide la duracion real del audio en beats de ~5 segundos, genera prompts Flux por linea/seccion y usa Comfy/Flux si esta configurado.
+- Si Comfy falla o no esta configurado, el render sigue con fallback local limpio; ya no muestra prompts tecnicos en el video.
 - No consume creditos internos; el usuario copia a Suno manualmente.
 
 Flags:
@@ -74,7 +76,7 @@ Siguiente bloque recomendado:
 
 - Analizar audio subido: duracion, waveform y energia aproximada.
 - Crear comparador subjetivo de tomas: energia, mezcla, claridad vocal, hook.
-- Conectar Comfy/Flux como proveedor opcional usando `videoConcept.scenes`.
+- Probar un MP3 real de Suno con `COMFYUI_API_KEY` activo para confirmar costo/tiempo de 30-40 imagenes por cancion.
 - Miniatura y publicacion YouTube reutilizando el centro actual.
 
 ### Radar editorial v1
@@ -196,8 +198,8 @@ Flujo:
 3. La UI permite seleccionar `activeAudioVersionId`.
 4. Boton `Producir video musical` llama `POST /music/tracks/{trackId}/produce`.
 5. Backend encola `content_factory.produce_music_video` en Celery; si la cola no esta disponible usa background task de API como fallback.
-6. Worker descarga el audio activo desde Firebase Storage, renderiza assets locales con `scripts/power_music_video.py`, ensambla `FINAL_MUSIC.mp4` con FFmpeg y sube video/thumbnail/cover/metadata a Storage.
-7. Firestore `musicTracks/{trackId}.render` guarda estado, progreso, URLs, errores y `audioVersionId`.
+6. Worker descarga el audio activo desde Firebase Storage, construye `visualBeats` desde la letra, intenta Comfy/Flux por beat, rellena faltantes con fallback local, ensambla `FINAL_MUSIC.mp4` con FFmpeg y sube video/thumbnail/cover/metadata a Storage.
+7. Firestore `musicTracks/{trackId}.render` guarda estado, progreso, URLs, errores, `audioVersionId`, `visualBeatCount`, `visualProvider`, `generatedFrames` y `fallbackFrames`.
 
 Archivos clave:
 
@@ -223,6 +225,7 @@ Verificacion pasada en desarrollo:
 - Smoke test local con audio sintetico genero `FINAL_MUSIC.mp4`.
 - Smoke test posterior valido que el MP4 final respeta la duracion exacta del audio.
 - UI soporta boton rapido de copia en Lyrics, score de letra y versiones de audio.
+- Smoke test 2026-06-17 valido renderer `power_music_video_v2_lyric_beats` con 3 beats visuales en 12s y fallback local.
 - Pendiente antes de darlo por cerrado en produccion: probar un MP3 real de Suno desde `/dashboard/music`, confirmar que el worker del VPS toma el job, validar MP4 final, miniatura y signed URLs.
 
 ## Como pedirle contexto a Claude

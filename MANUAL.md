@@ -682,8 +682,11 @@ Estado 2026-06-17: modulo admin para canciones de poder con render final en VPS.
 - `package.lyricScore` califica la letra sin costo extra.
 - El render del video no depende de que la computadora este prendida.
 - No usa Luma por default.
-- Renderer v1 usa PIL + FFmpeg + Ken Burns con visuales generativos locales.
-- La futura mejora premium es conectar Comfy/Flux como proveedor opcional de imagenes.
+- Renderer v2 crea un timeline de beats visuales desde la letra y la duracion real del audio.
+- Por default intenta visuales cada ~5 segundos, con limite configurable por `CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS` y `CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS`.
+- Si `COMFYUI_API_KEY` esta configurado y `CONTENT_FACTORY_MUSIC_COMFY_ENABLED` no esta en `false`, usa Comfy/Flux para generar imagenes reales por beat.
+- Si Comfy falla, no se cae el render: entra fallback local limpio sin mostrar prompts tecnicos en pantalla.
+- La UI muestra `visualBeatCount`, proveedor visual y cadencia aproximada.
 
 ---
 
