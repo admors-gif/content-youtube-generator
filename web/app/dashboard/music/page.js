@@ -459,6 +459,12 @@ function renderStatusLabel(status) {
   return "sin video";
 }
 
+function subtitleModeLabel(mode) {
+  if (mode === "whisper_word_aligned") return "Whisper";
+  if (mode === "lyric_blocks_estimated") return "SRT estimado";
+  return "";
+}
+
 function AudioVersionList({
   versions,
   activeId,
@@ -504,6 +510,7 @@ function AudioVersionList({
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                   {active && <span style={pillStyle("ok")}>toma activa</span>}
                   <span style={pillStyle(renderStatusTone(render?.status))}>{renderStatusLabel(render?.status)}</span>
+                  {subtitleModeLabel(render?.subtitleMode) && <span style={pillStyle(render?.subtitleMode === "whisper_word_aligned" ? "ok" : "neutral")}>{subtitleModeLabel(render?.subtitleMode)}</span>}
                 </div>
               </div>
               <div className="cf-music-version-actions">
@@ -602,7 +609,7 @@ function RenderHistoryList({ renders, versions }) {
                   <span style={pillStyle(renderStatusTone(render.status))}>{renderStatusLabel(render.status)}</span>
                 </div>
                 <div className="cf-caption" style={{ marginTop: 6 }}>
-                  {[duration, beatCount ? `${beatCount} beats visuales` : "", render.visualProvider ? (render.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local") : "", formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}
+                  {[duration, beatCount ? `${beatCount} beats visuales` : "", render.visualProvider ? (render.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local") : "", subtitleModeLabel(render.subtitleMode), formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}
                 </div>
                 {render.error && <div className="cf-caption" style={{ color: "var(--bad)", marginTop: 6 }}>{safeText(render.error)}</div>}
               </div>
@@ -1423,6 +1430,7 @@ export default function MusicStudioPage() {
                     {Math.round(Number(renderPanel.durationSeconds))}s · {renderPanel.visualBeatCount || renderPanel.sceneCount || 0} beats visuales
                     {renderPanel.visualProvider ? ` · ${renderPanel.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local"}` : ""}
                     {renderPanel.visualIntervalSeconds ? ` · cada ${Math.round(Number(renderPanel.visualIntervalSeconds))}s` : ""}
+                    {subtitleModeLabel(renderPanel.subtitleMode) ? ` · ${subtitleModeLabel(renderPanel.subtitleMode)}` : ""}
                   </div>
                 )}
               </div>

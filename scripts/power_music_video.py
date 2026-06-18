@@ -4,6 +4,7 @@ import os
 import random
 import re
 import subprocess
+import unicodedata
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -356,6 +357,225 @@ def _write_subtitle_file(beats, output_path):
     return count
 
 
+def _write_subtitle_segments(segments, output_path):
+    lines = []
+    count = 0
+    for segment in segments:
+        subtitle = compact_text(segment.get("text") or segment.get("line"), 180)
+        if not subtitle:
+            continue
+        start = float(segment.get("start") or 0)
+        end = max(start + 0.45, float(segment.get("end") or (start + 1.2)))
+        count += 1
+        lines.extend(
+            [
+                str(count),
+                f"{_srt_timestamp(start)} --> {_srt_timestamp(end)}",
+                subtitle,
+                "",
+            ]
+        )
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+    return count
+
+
+def _music_whisper_enabled():
+    default = bool(os.getenv("OPENAI_API_KEY"))
+    return _env_bool("CONTENT_FACTORY_MUSIC_WHISPER_SUBTITLES_ENABLED", default=default) and bool(os.getenv("OPENAI_API_KEY"))
+
+
+def _normalize_token_text(value):
+    text = unicodedata.normalize("NFKD", str(value or "").lower())
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.findall(r"[a-z0-9áéíóúñü]+", text, flags=re.I)
+
+
+def _word_token(value):
+    tokens = _normalize_token_text(value)
+    return tokens[0] if tokens else ""
+
+
+def _clean_transcribed_words(words, duration):
+    clean = []
+    for item in words or []:
+        raw = item if isinstance(item, dict) else {}
+        token = _word_token(raw.get("word"))
+        if not token:
+            continue
+        try:
+            start = max(0.0, float(raw.get("start") or 0))
+            end = max(start + 0.05, float(raw.get("end") or (start + 0.3)))
+        except Exception:
+            continue
+        if duration and start > duration + 5:
+            continue
+        if duration:
+            end = min(end, max(start + 0.05, float(duration)))
+        clean.append(
+            {
+                "word": compact_text(raw.get("word"), 40),
+                "token": token,
+                "start": start,
+                "end": max(end, start + 0.05),
+            }
+        )
+    return clean
+
+
+def _token_overlap_score(window_tokens, target_tokens):
+    if not window_tokens or not target_tokens:
+        return 0.0
+    target_counts = {}
+    for token in target_tokens:
+        target_counts[token] = target_counts.get(token, 0) + 1
+    hits = 0
+    for token in window_tokens:
+        remaining = target_counts.get(token, 0)
+        if remaining > 0:
+            hits += 1
+            target_counts[token] = remaining - 1
+    coverage = hits / max(1, len(target_tokens))
+    density = hits / max(1, len(window_tokens))
+    return coverage * 0.72 + density * 0.28
+
+
+def _find_line_window(words, target_tokens, cursor):
+    if not words or not target_tokens:
+        return None
+    target_len = len(target_tokens)
+    search_start = max(0, int(cursor) - 6)
+    search_end = min(len(words), int(cursor) + max(42, target_len * 9))
+    min_size = max(1, int(target_len * 0.6))
+    max_size = max(min_size, min(len(words), int(target_len * 1.7) + 3))
+    best = None
+    best_score = 0.0
+    for start in range(search_start, search_end):
+        for size in range(min_size, max_size + 1):
+            end = start + size
+            if end > len(words):
+                break
+            window_tokens = [word["token"] for word in words[start:end]]
+            score = _token_overlap_score(window_tokens, target_tokens)
+            distance_penalty = min(0.22, abs(start - cursor) * 0.006)
+            adjusted = score - distance_penalty
+            if adjusted > best_score:
+                best_score = adjusted
+                best = (start, end, max(0.0, score))
+    if best and best[2] >= 0.56:
+        return best
+    return None
+
+
+def _align_lyrics_to_transcribed_words(units, words, duration):
+    if not units or not words:
+        return []
+    tokenized_units = []
+    total_tokens = 0
+    for index, unit in enumerate(units):
+        tokens = _normalize_token_text(unit.get("line"))
+        if not tokens:
+            continue
+        total_tokens += len(tokens)
+        tokenized_units.append({**unit, "index": index, "tokens": tokens})
+    if not tokenized_units:
+        return []
+
+    cursor = 0
+    segments = []
+    total_tokens = max(1, total_tokens)
+    for unit in tokenized_units:
+        tokens = unit["tokens"]
+        found = _find_line_window(words, tokens, cursor)
+        if found:
+            start_index, end_index, score = found
+            mode = "phrase_match"
+        else:
+            estimated_size = max(1, round(len(words) * (len(tokens) / total_tokens)))
+            start_index = min(cursor, max(0, len(words) - 1))
+            end_index = min(len(words), max(start_index + 1, start_index + estimated_size))
+            score = 0.0
+            mode = "proportional"
+
+        start_word = words[start_index]
+        end_word = words[max(start_index, end_index - 1)]
+        start = float(start_word.get("start") or 0)
+        end = max(start + 0.55, float(end_word.get("end") or (start + 1.2)))
+        if duration:
+            end = min(end, max(start + 0.55, float(duration)))
+        segments.append(
+            {
+                "index": len(segments),
+                "unitIndex": unit.get("index"),
+                "section": compact_text(unit.get("section"), 60),
+                "line": compact_text(unit.get("line"), 180),
+                "text": compact_text(unit.get("line"), 180),
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "duration": round(max(0.45, end - start), 3),
+                "alignmentScore": round(score, 3),
+                "alignmentMode": mode,
+            }
+        )
+        cursor = max(cursor + 1, end_index)
+        if cursor >= len(words):
+            break
+
+    for index, segment in enumerate(segments):
+        if index > 0:
+            previous = segments[index - 1]
+            if segment["start"] < previous["end"]:
+                midpoint = (segment["start"] + previous["end"]) / 2
+                previous["end"] = round(max(previous["start"] + 0.45, midpoint - 0.02), 3)
+                previous["duration"] = round(max(0.45, previous["end"] - previous["start"]), 3)
+                segment["start"] = round(min(segment["end"] - 0.45, midpoint + 0.02), 3)
+                segment["duration"] = round(max(0.45, segment["end"] - segment["start"]), 3)
+    return segments
+
+
+def _build_whisper_subtitle_segments(package, audio_path, duration):
+    diagnostics = {
+        "enabled": bool(_music_whisper_enabled()),
+        "model": "whisper-1",
+        "words": 0,
+        "segments": 0,
+        "mode": "disabled",
+        "error": "",
+    }
+    if not diagnostics["enabled"]:
+        diagnostics["mode"] = "disabled"
+        diagnostics["error"] = "OPENAI_API_KEY not configured or CONTENT_FACTORY_MUSIC_WHISPER_SUBTITLES_ENABLED=false"
+        return [], diagnostics
+    units = _lyric_units(package.get("lyrics"))
+    if not units:
+        diagnostics["mode"] = "no_lyrics"
+        diagnostics["error"] = "lyrics not available"
+        return [], diagnostics
+    try:
+        from scripts.generate_subtitles import transcribe_with_whisper
+
+        transcription = transcribe_with_whisper(Path(audio_path))
+    except Exception as exc:
+        diagnostics["mode"] = "transcription_failed"
+        diagnostics["error"] = str(exc)[:500]
+        return [], diagnostics
+    if not isinstance(transcription, dict):
+        diagnostics["mode"] = "transcription_empty"
+        diagnostics["error"] = "OpenAI transcription did not return words"
+        return [], diagnostics
+    words = _clean_transcribed_words(transcription.get("words") or [], duration)
+    diagnostics["words"] = len(words)
+    if not words:
+        diagnostics["mode"] = "transcription_no_words"
+        diagnostics["error"] = "Whisper returned no word timestamps"
+        return [], diagnostics
+    segments = _align_lyrics_to_transcribed_words(units, words, duration)
+    diagnostics["segments"] = len(segments)
+    diagnostics["mode"] = "whisper_word_aligned" if segments else "alignment_empty"
+    if not segments:
+        diagnostics["error"] = "lyrics could not be aligned to transcription"
+    return segments, diagnostics
+
+
 def _video_concept(package):
     if isinstance(package.get("videoConcept"), dict):
         return package.get("videoConcept") or {}
@@ -479,13 +699,32 @@ def _build_music_visual_prompt(package, beat, scene, palette):
     )
 
 
-def _build_visual_beats(package, duration, interval_seconds, max_beats):
+def _timed_segment_for_window(segments, start, end):
+    if not segments:
+        return 0, {}
+    best_index = 0
+    best_score = -1.0
+    midpoint = (float(start or 0) + float(end or 0)) / 2
+    for index, segment in enumerate(segments):
+        seg_start = float(segment.get("start") or 0)
+        seg_end = float(segment.get("end") or seg_start)
+        overlap = max(0.0, min(end, seg_end) - max(start, seg_start))
+        distance = abs(((seg_start + seg_end) / 2) - midpoint)
+        score = overlap * 10 - distance * 0.04
+        if score > best_score:
+            best_score = score
+            best_index = index
+    return best_index, segments[best_index]
+
+
+def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_segments=None):
     scenes = _scene_list(package)
     units = _lyric_units(package.get("lyrics"))
     if not units:
         units = [
             {"section": "Hook", "line": compact_text(package.get("mainHook") or package.get("mantra") or package.get("title"), 140) or "I choose my strongest self"}
         ]
+    timed_segments = [segment for segment in (timed_segments or []) if isinstance(segment, dict)]
 
     target_count = max(1, int(math.ceil(max(1.0, duration) / max(1.0, interval_seconds))))
     beat_count = min(max_beats, target_count)
@@ -493,14 +732,26 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats):
     palette = _palette(package)
     beats = []
     for index in range(beat_count):
-        unit_index = min(len(units) - 1, int((index / max(1, beat_count)) * len(units)))
-        unit = units[unit_index]
-        previous_unit = units[max(0, unit_index - 1)] if units else {}
-        next_unit = units[min(len(units) - 1, unit_index + 1)] if units else {}
-        scene = _match_scene_for_section(scenes, unit.get("section"), index)
-        text_overlay = compact_text(unit.get("line"), 60) or compact_text(scene.get("textOverlay"), 60)
         start = index * actual_interval
         end = duration if index == beat_count - 1 else min(duration, (index + 1) * actual_interval)
+        if timed_segments:
+            segment_index, segment = _timed_segment_for_window(timed_segments, start, end)
+            unit = {"section": segment.get("section"), "line": segment.get("line") or segment.get("text")}
+            previous_segment = timed_segments[max(0, segment_index - 1)] if timed_segments else {}
+            next_segment = timed_segments[min(len(timed_segments) - 1, segment_index + 1)] if timed_segments else {}
+            previous_unit = {"line": previous_segment.get("line") or previous_segment.get("text")}
+            next_unit = {"line": next_segment.get("line") or next_segment.get("text")}
+            alignment_mode = segment.get("alignmentMode") or "timed"
+            alignment_score = segment.get("alignmentScore")
+        else:
+            unit_index = min(len(units) - 1, int((index / max(1, beat_count)) * len(units)))
+            unit = units[unit_index]
+            previous_unit = units[max(0, unit_index - 1)] if units else {}
+            next_unit = units[min(len(units) - 1, unit_index + 1)] if units else {}
+            alignment_mode = "estimated"
+            alignment_score = None
+        scene = _match_scene_for_section(scenes, unit.get("section"), index)
+        text_overlay = compact_text(unit.get("line"), 60) or compact_text(scene.get("textOverlay"), 60)
         prompt_context = {
             **unit,
             "previousLine": previous_unit.get("line") if isinstance(previous_unit, dict) else "",
@@ -519,6 +770,8 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats):
                 "end": round(end, 3),
                 "duration": max(0.5, end - start),
                 "sourceScene": scene.get("section"),
+                "alignmentMode": alignment_mode,
+                "alignmentScore": alignment_score,
             }
         )
     return beats, actual_interval
@@ -592,7 +845,9 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     duration = probe_audio_duration(audio_path)
     requested_interval = _env_float("CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS", DEFAULT_VISUAL_INTERVAL_SECONDS)
     max_visual_beats = _env_int("CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS", DEFAULT_MAX_VISUAL_BEATS)
-    beats, visual_interval = _build_visual_beats(package, duration, requested_interval, max_visual_beats)
+    subtitle_segments, subtitle_diagnostics = _build_whisper_subtitle_segments(package, audio_path, duration)
+    subtitle_mode = "whisper_word_aligned" if subtitle_segments else "lyric_blocks_estimated"
+    beats, visual_interval = _build_visual_beats(package, duration, requested_interval, max_visual_beats, timed_segments=subtitle_segments)
 
     cover_path = output_dir / "cover.jpg"
     thumbnail_path = output_dir / "thumbnail.jpg"
@@ -701,7 +956,10 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
 
     lyrics_path.write_text(str(package.get("lyrics") or ""), encoding="utf-8")
     suno_path.write_text(str(package.get("sunoPrompt") or ""), encoding="utf-8")
-    subtitle_count = _write_subtitle_file(beats, subtitles_path)
+    if subtitle_segments:
+        subtitle_count = _write_subtitle_segments(subtitle_segments, subtitles_path)
+    else:
+        subtitle_count = _write_subtitle_file(beats, subtitles_path)
     metadata = {
         "trackId": track_id,
         "title": title,
@@ -715,8 +973,9 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "generatedFrames": generated_frames,
         "fallbackFrames": fallback_frames,
         "renderer": "power_music_video_v2_lyric_beats",
-        "subtitleMode": "lyric_blocks_estimated",
+        "subtitleMode": subtitle_mode,
         "subtitleCount": subtitle_count,
+        "subtitleDiagnostics": subtitle_diagnostics,
         "visualBeats": [
             {
                 "index": beat["scene_number"],
@@ -727,6 +986,8 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
                 "end": beat.get("end"),
                 "duration": round(float(beat.get("duration") or 0), 3),
                 "sourceScene": beat.get("sourceScene"),
+                "alignmentMode": beat.get("alignmentMode"),
+                "alignmentScore": beat.get("alignmentScore"),
                 "prompt": beat.get("prompt"),
             }
             for beat in beats
@@ -763,4 +1024,5 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "renderer": metadata["renderer"],
         "subtitleMode": metadata["subtitleMode"],
         "subtitleCount": metadata["subtitleCount"],
+        "subtitleDiagnostics": metadata["subtitleDiagnostics"],
     }

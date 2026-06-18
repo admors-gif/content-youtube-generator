@@ -200,7 +200,7 @@ Flujo:
 4. Boton `Producir toma activa` llama `POST /music/tracks/{trackId}/produce`.
 5. Cada fila de audio tambien permite `Renderizar esta toma`, que llama `POST /music/tracks/{trackId}/audio/{versionId}/produce` sin cambiar la version activa.
 6. Backend encola `content_factory.produce_music_video` en Celery; si la cola no esta disponible usa background task de API como fallback.
-7. Worker descarga el audio elegido desde Firebase Storage, construye `visualBeats` desde la letra cada ~5 segundos, intenta Comfy/Flux por beat, rellena faltantes con fallback local, ensambla `FINAL_MUSIC.mp4` con FFmpeg y sube video/thumbnail/cover/metadata/lyrics/sunoPrompt/subtitles a Storage.
+7. Worker descarga el audio elegido desde Firebase Storage, intenta transcribir con Whisper/OpenAI para timestamps reales de palabra, construye `visualBeats` desde la linea activa cada ~5 segundos, intenta Comfy/Flux por beat, rellena faltantes con fallback local, ensambla `FINAL_MUSIC.mp4` con FFmpeg y sube video/thumbnail/cover/metadata/lyrics/sunoPrompt/subtitles a Storage.
 8. Firestore `musicTracks/{trackId}.render` guarda estado compatible del render actual/ultimo.
 9. Firestore `musicTracks/{trackId}.renders[]` guarda historial por version de audio para comparar v1.1, v1.2, prompt alterno A/B, etc. sin pisar visualmente los MP4s.
 
@@ -230,6 +230,7 @@ Verificacion pasada en desarrollo:
 - UI soporta boton rapido de copia en Lyrics, score de letra y versiones de audio.
 - Smoke test 2026-06-17 valido renderer `power_music_video_v2_lyric_beats` con 3 beats visuales en 12s y fallback local.
 - 2026-06-17: agregado `POST /music/import`, UI para importar letras existentes, prompts visuales mas semanticos para Comfy/Flux y archivo `subtitles.srt` por render.
+- 2026-06-17: Power Music render intenta `subtitleMode=whisper_word_aligned` con `OPENAI_API_KEY`; si falla, conserva `subtitleMode=lyric_blocks_estimated`.
 
 ## Como pedirle contexto a Claude
 

@@ -5815,6 +5815,7 @@ def _run_music_video_job(track_id: str, audio_version_id: str | None = None) -> 
             "visualIntervalSeconds": outputs.get("visualIntervalSeconds"),
             "subtitleMode": outputs.get("subtitleMode"),
             "subtitleCount": outputs.get("subtitleCount"),
+            "subtitleDiagnostics": outputs.get("subtitleDiagnostics") or {},
             "visualProvider": outputs.get("visualProvider"),
             "generatedFrames": outputs.get("generatedFrames"),
             "fallbackFrames": outputs.get("fallbackFrames"),

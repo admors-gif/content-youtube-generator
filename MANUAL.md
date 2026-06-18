@@ -690,7 +690,8 @@ Estado 2026-06-17: modulo admin para canciones de poder con render final en VPS.
 - No usa Luma por default.
 - Renderer v2 crea un timeline de beats visuales desde la letra y la duracion real del audio.
 - Por default intenta visuales cada ~5 segundos, con limite configurable por `CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS` y `CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS`.
-- Cada render genera un archivo `subtitles.srt` con sincronizacion aproximada por bloques de letra.
+- Cada render genera un archivo `subtitles.srt`. Si `OPENAI_API_KEY` esta disponible y `CONTENT_FACTORY_MUSIC_WHISPER_SUBTITLES_ENABLED` no esta en `false`, usa Whisper/OpenAI para timestamps reales de palabra y alinea la letra; si falla, usa sincronizacion aproximada por bloques.
+- La UI muestra `Whisper` cuando el render uso alineacion real y `SRT estimado` cuando uso fallback.
 - Si `COMFYUI_API_KEY` esta configurado y `CONTENT_FACTORY_MUSIC_COMFY_ENABLED` no esta en `false`, usa Comfy/Flux para generar imagenes reales por beat.
 - Si Comfy falla, no se cae el render: entra fallback local limpio sin mostrar prompts tecnicos en pantalla.
 - La UI muestra `visualBeatCount`, proveedor visual y cadencia aproximada.

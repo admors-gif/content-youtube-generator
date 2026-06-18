@@ -20,7 +20,7 @@ Power Music Studio convierte una idea de crecimiento personal en un paquete crea
 - calificador de letra sin costo extra.
 - importacion de canciones ya creadas: pegar letra, crear track, subir audio de Suno y renderizar video.
 - visuales sincronizados con la letra cada ~5 segundos, usando Comfy/Flux cuando este configurado y fallback local si falla.
-- archivo `subtitles.srt` por version renderizada, sincronizado por bloques de letra.
+- archivo `subtitles.srt` por version renderizada. Si `OPENAI_API_KEY` esta disponible usa Whisper con timestamps de palabra; si falla, cae a sincronizacion estimada por bloques de letra.
 
 La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la cancion y la sube al track en Content Factory. Desde ahi Content Factory ya puede mandar el render completo al VPS/worker para generar `FINAL_MUSIC.mp4`, miniatura y portada sin depender de que la computadora del usuario permanezca prendida.
 
@@ -42,6 +42,8 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - Renderer v2: timeline visual por letra. Divide el audio en beats de ~5 segundos, genera prompts Flux por linea/seccion de la cancion y ensambla con Ken Burns en FFmpeg.
 - Si `COMFYUI_API_KEY` esta configurado y `CONTENT_FACTORY_MUSIC_COMFY_ENABLED` no esta desactivado, intenta generar imagenes reales con Flux/Krea via Comfy.
 - Si Comfy falla o no esta configurado, usa fallback local limpio sin mostrar prompts tecnicos en pantalla.
+- Si `OPENAI_API_KEY` esta configurado y `CONTENT_FACTORY_MUSIC_WHISPER_SUBTITLES_ENABLED` no esta desactivado, transcribe el audio con Whisper, alinea la letra con timestamps reales y usa esas lineas para subtitulos y prompts visuales.
+- Si Whisper falla, no se cae el render: el renderer usa `lyric_blocks_estimated`.
 - El score de letra es heuristico: no llama otro modelo ni consume API adicional.
 
 ## Variables
@@ -60,8 +62,10 @@ CONTENT_FACTORY_MUSIC_COMFY_ENABLED=true
 CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS=5
 CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS=120
 CONTENT_FACTORY_MUSIC_MAX_COMFY_IMAGES=120
+CONTENT_FACTORY_MUSIC_WHISPER_SUBTITLES_ENABLED=true
 ANTHROPIC_API_KEY=...
 COMFYUI_API_KEY=...
+OPENAI_API_KEY=...
 ```
 
 Notas de costo visual:
@@ -362,7 +366,7 @@ Flujo alterno con cancion existente:
 3. Pulsa "Crear track para video".
 4. Sube el audio final descargado de Suno como toma.
 5. Renderiza la toma activa o una toma especifica.
-6. El renderer divide el audio en bloques de ~5 segundos, asigna lineas de letra, genera prompts visuales semanticos para Comfy/Flux y crea `subtitles.srt`.
+6. El renderer intenta alinear la letra con Whisper/OpenAI. Si hay timestamps, divide el video en beats de ~5 segundos usando la linea activa real; si no, asigna lineas por estimacion, genera prompts visuales semanticos para Comfy/Flux y crea `subtitles.srt`.
 
 ## Proximos Bloques
 
@@ -370,7 +374,7 @@ Flujo alterno con cancion existente:
 2. Integrar publicacion directa a YouTube reutilizando el centro de publicaciones.
 3. Agregar ZIP de material musical completo.
 4. Calificador LLM opcional para comparar letras con mayor criterio artistico.
-5. Sincronizacion fina con timestamps reales/LRC si Suno exporta letras cronometradas en el futuro.
+5. Mejorar alineacion a nivel palabra/LRC si Suno exporta letras cronometradas en el futuro.
 
 ## Handoff Para Otro Equipo
 
@@ -398,6 +402,7 @@ Probar en produccion:
 - subir un `.mp3` o `.wav` descargado de Suno;
 - subir varias tomas si Suno devuelve mas de una version;
 - reproducir audios desde la UI;
+- confirmar que el render muestre `Whisper` si se genero con timestamps reales o `SRT estimado` si uso fallback;
 - seleccionar la version activa;
 - pulsar "Producir video musical";
 - esperar `video_ready`;
