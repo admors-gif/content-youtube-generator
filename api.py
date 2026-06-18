@@ -5597,6 +5597,67 @@ def _music_active_audio(data: dict) -> dict:
     return data.get("audio") if isinstance(data.get("audio"), dict) else {}
 
 
+def _music_audio_for_version(data: dict, version_id: str | None = None) -> dict:
+    clean_version_id = str(version_id or "").strip()
+    if clean_version_id:
+        for item in _music_audio_versions(data):
+            if str(item.get("versionId") or "") == clean_version_id:
+                return item
+        return {}
+    return _music_active_audio(data)
+
+
+def _music_render_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _music_render_records(data: dict) -> list[dict]:
+    records = data.get("renders") if isinstance(data.get("renders"), list) else []
+    return [item for item in records if isinstance(item, dict)]
+
+
+def _music_upsert_render_record(records: list[dict], record: dict) -> list[dict]:
+    audio_version_id = str(record.get("audioVersionId") or "").strip()
+    if not audio_version_id:
+        return records
+    next_records = []
+    replaced = False
+    for item in records or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("audioVersionId") or "") == audio_version_id:
+            next_records.append({**item, **record})
+            replaced = True
+        else:
+            next_records.append(item)
+    if not replaced:
+        next_records.append(record)
+    return next_records[-20:]
+
+
+def _music_render_for_version(data: dict, audio_version_id: str) -> dict:
+    clean_version_id = str(audio_version_id or "").strip()
+    if not clean_version_id:
+        return {}
+    for item in _music_render_records(data):
+        if str(item.get("audioVersionId") or "") == clean_version_id:
+            return item
+    render = data.get("render") if isinstance(data.get("render"), dict) else {}
+    if str(render.get("audioVersionId") or "") == clean_version_id:
+        return render
+    return {}
+
+
+def _music_running_render(data: dict) -> dict:
+    render = data.get("render") if isinstance(data.get("render"), dict) else {}
+    if render.get("status") in {"queued", "running"}:
+        return render
+    for item in _music_render_records(data):
+        if item.get("status") in {"queued", "running"}:
+            return item
+    return {}
+
+
 def _music_upload_asset(local_path: Path, uid: str, track_id: str, bucket, subdir: str) -> dict:
     name = Path(local_path).name
     blob_name = f"music/{uid}/{track_id}/{subdir}/{name}"
@@ -5642,14 +5703,18 @@ def _music_track_ref_for_job(track_id: str):
     return db, firestore, ref, snap.to_dict() or {}
 
 
-def _run_music_video_job(track_id: str) -> dict:
+def _run_music_video_job(track_id: str, audio_version_id: str | None = None) -> dict:
     """
     Render completo para Power Music.
     Corre en worker/API background, nunca en el navegador.
     """
-    clean_track_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(track_id or "")).strip()
-    if not clean_track_id or clean_track_id != track_id:
+    raw_track_id = str(track_id or "").strip()
+    clean_track_id = re.sub(r"[^a-zA-Z0-9_-]", "", raw_track_id).strip()
+    if not clean_track_id or clean_track_id != raw_track_id:
         raise RuntimeError("invalid music track id")
+    requested_audio_version_id = str(audio_version_id or "").strip()
+    if requested_audio_version_id and re.sub(r"[^a-zA-Z0-9_-]", "", requested_audio_version_id) != requested_audio_version_id:
+        raise RuntimeError("invalid music audio version id")
 
     from firebase_admin import storage
 
@@ -5658,39 +5723,54 @@ def _run_music_video_job(track_id: str) -> dict:
     if not uid:
         raise RuntimeError("music track missing owner")
     package = data.get("package") if isinstance(data.get("package"), dict) else {}
-    audio = _music_active_audio(data)
-    audio_version_id = str(audio.get("versionId") or data.get("activeAudioVersionId") or "active").strip() or "active"
-    safe_audio_version = re.sub(r"[^a-zA-Z0-9_-]", "", audio_version_id) or "active"
-    if not audio.get("storagePath") and not audio.get("fileName"):
-        ref.set(
-            {
-                "status": "audio_required",
-                "render": {
-                    "status": "failed",
-                    "error": "audio_required",
-                    "audioVersionId": audio_version_id,
-                    "updatedAt": firestore.SERVER_TIMESTAMP,
-                },
+    audio = _music_audio_for_version(data, requested_audio_version_id)
+    if requested_audio_version_id and not audio:
+        raise RuntimeError("music audio version not found")
+    selected_audio_version_id = str(audio.get("versionId") or requested_audio_version_id or data.get("activeAudioVersionId") or "active").strip() or "active"
+    safe_audio_version = re.sub(r"[^a-zA-Z0-9_-]", "", selected_audio_version_id) or "active"
+    render_records = _music_render_records(data)
+
+    def _set_render_state(record: dict, *, track_status: str | None = None) -> None:
+        nonlocal render_records
+        now = _music_render_now()
+        base_record = {
+            "audioVersionId": selected_audio_version_id,
+            "audioLabel": audio.get("label") or "",
+            "updatedAt": now,
+            **record,
+        }
+        render_records = _music_upsert_render_record(render_records, base_record)
+        payload = {
+            "render": {
+                **base_record,
                 "updatedAt": firestore.SERVER_TIMESTAMP,
             },
-            merge=True,
+            "renders": render_records,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+        if track_status:
+            payload["status"] = track_status
+        ref.set(payload, merge=True)
+
+    if not audio.get("storagePath") and not audio.get("fileName"):
+        _set_render_state(
+            {
+                "status": "failed",
+                "error": "audio_required",
+                "stepName": "Audio requerido",
+            },
+            track_status="audio_required",
         )
         raise RuntimeError("audio required before rendering")
 
-    ref.set(
+    _set_render_state(
         {
-            "status": "video_rendering",
-            "render": {
-                "status": "running",
-                "stepName": "Preparando audio y visuales",
-                "progress": 8,
-                "audioVersionId": audio_version_id,
-                "startedAt": firestore.SERVER_TIMESTAMP,
-                "updatedAt": firestore.SERVER_TIMESTAMP,
-            },
-            "updatedAt": firestore.SERVER_TIMESTAMP,
+            "status": "running",
+            "stepName": "Preparando audio y visuales",
+            "progress": 8,
+            "startedAt": _music_render_now(),
         },
-        merge=True,
+        track_status="video_rendering",
     )
 
     try:
@@ -5699,34 +5779,22 @@ def _run_music_video_job(track_id: str) -> dict:
         render_dir = MUSIC_RENDER_DIR / uid / clean_track_id / "render" / safe_audio_version
         render_dir.mkdir(parents=True, exist_ok=True)
 
-        ref.set(
+        _set_render_state(
             {
-                "render": {
-                    "status": "running",
-                    "stepName": "Renderizando video musical",
-                    "progress": 32,
-                    "audioVersionId": audio_version_id,
-                    "updatedAt": firestore.SERVER_TIMESTAMP,
-                },
-                "updatedAt": firestore.SERVER_TIMESTAMP,
+                "status": "running",
+                "stepName": "Renderizando video musical",
+                "progress": 32,
             },
-            merge=True,
         )
 
         outputs = _render_power_music_video(clean_track_id, package, audio_path, render_dir)
 
-        ref.set(
+        _set_render_state(
             {
-                "render": {
-                    "status": "running",
-                    "stepName": "Subiendo video y miniatura",
-                    "progress": 84,
-                    "audioVersionId": audio_version_id,
-                    "updatedAt": firestore.SERVER_TIMESTAMP,
-                },
-                "updatedAt": firestore.SERVER_TIMESTAMP,
+                "status": "running",
+                "stepName": "Subiendo video y miniatura",
+                "progress": 84,
             },
-            merge=True,
         )
 
         upload_payload = {
@@ -5744,54 +5812,43 @@ def _run_music_video_job(track_id: str) -> dict:
             "generatedFrames": outputs.get("generatedFrames"),
             "fallbackFrames": outputs.get("fallbackFrames"),
             "comfy": outputs.get("comfy") or {},
-            "audioVersionId": audio_version_id,
+            "audioVersionId": selected_audio_version_id,
             "audioLabel": audio.get("label") or "",
             "renderer": outputs.get("renderer") or "power_music_video_v2_lyric_beats",
         }
 
-        ref.set(
+        _set_render_state(
             {
-                "status": "video_ready",
-                "render": {
-                    "status": "completed",
-                    "stepName": "Video musical listo",
-                    "progress": 100,
-                    **upload_payload,
-                    "completedAt": firestore.SERVER_TIMESTAMP,
-                    "updatedAt": firestore.SERVER_TIMESTAMP,
-                },
-                "updatedAt": firestore.SERVER_TIMESTAMP,
+                "status": "completed",
+                "stepName": "Video musical listo",
+                "progress": 100,
+                **upload_payload,
+                "completedAt": _music_render_now(),
             },
-            merge=True,
+            track_status="video_ready",
         )
         updated = ref.get().to_dict() or {}
         return {"ok": True, "track": _power_music_public_track(clean_track_id, updated)}
     except Exception as exc:
-        ref.set(
+        _set_render_state(
             {
-                "status": "render_failed",
-                "render": {
-                    "status": "failed",
-                    "error": str(exc)[:500],
-                    "stepName": "Render fallido",
-                    "audioVersionId": audio_version_id,
-                    "updatedAt": firestore.SERVER_TIMESTAMP,
-                },
-                "updatedAt": firestore.SERVER_TIMESTAMP,
+                "status": "failed",
+                "error": str(exc)[:500],
+                "stepName": "Render fallido",
             },
-            merge=True,
+            track_status="render_failed",
         )
         raise
 
 
-def _enqueue_music_video_job(track_id: str, background_tasks: BackgroundTasks) -> dict:
+def _enqueue_music_video_job(track_id: str, background_tasks: BackgroundTasks, audio_version_id: str | None = None) -> dict:
     try:
         from worker_tasks import produce_music_video
-        task = produce_music_video.delay(track_id)
+        task = produce_music_video.delay(track_id, audio_version_id)
         return {"queue": "celery", "taskId": task.id}
     except Exception as queue_err:
         print(f"[music] queue unavailable, using api background: {queue_err}", flush=True)
-        background_tasks.add_task(_run_music_video_job, track_id)
+        background_tasks.add_task(_run_music_video_job, track_id, audio_version_id)
         return {"queue": "api_background", "error": str(queue_err)[:200]}
 
 
@@ -8229,81 +8286,126 @@ async def music_track_activate_audio(track_id: str, version_id: str, request: Re
         return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
 
 
-@app.post("/music/tracks/{track_id}/produce")
-async def music_track_produce_video(track_id: str, request: Request, background_tasks: BackgroundTasks):
-    principal = _require_music_studio_admin(request)
+def _music_queue_track_render(
+    track_id: str,
+    audio_version_id: str | None,
+    principal: dict,
+    background_tasks: BackgroundTasks,
+) -> dict:
     clean_track_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(track_id or "")).strip()
     if not clean_track_id or clean_track_id != track_id:
         raise HTTPException(status_code=400, detail="invalid track id")
+    clean_audio_version_id = str(audio_version_id or "").strip()
+    if clean_audio_version_id and re.sub(r"[^a-zA-Z0-9_-]", "", clean_audio_version_id) != clean_audio_version_id:
+        raise HTTPException(status_code=400, detail="invalid audio version id")
 
-    try:
-        _ensure_firebase_initialized()
-        from firebase_admin import firestore
-        db = firestore.client()
-        ref = db.collection("musicTracks").document(clean_track_id)
-        snap = ref.get()
-        if not snap.exists:
-            raise HTTPException(status_code=404, detail="track not found")
-        data = snap.to_dict() or {}
-        if data.get("userId") != principal["uid"]:
-            raise HTTPException(status_code=403, detail="track owner mismatch")
-        audio = _music_active_audio(data)
-        audio_version_id = str(audio.get("versionId") or data.get("activeAudioVersionId") or "active").strip() or "active"
-        if not audio.get("storagePath") and not audio.get("fileName"):
-            raise HTTPException(status_code=400, detail="sube primero el audio final de Suno")
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    db = firestore.client()
+    ref = db.collection("musicTracks").document(clean_track_id)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="track not found")
+    data = snap.to_dict() or {}
+    if data.get("userId") != principal["uid"]:
+        raise HTTPException(status_code=403, detail="track owner mismatch")
+    audio = _music_audio_for_version(data, clean_audio_version_id)
+    if clean_audio_version_id and not audio:
+        raise HTTPException(status_code=404, detail="audio version not found")
+    selected_audio_version_id = str(audio.get("versionId") or data.get("activeAudioVersionId") or "active").strip() or "active"
+    if not audio.get("storagePath") and not audio.get("fileName"):
+        raise HTTPException(status_code=400, detail="sube primero el audio final de Suno")
 
-        render = data.get("render") if isinstance(data.get("render"), dict) else {}
-        if render.get("status") in {"queued", "running"}:
-            return {
-                "ok": True,
-                "status": "queued",
-                "duplicateBlocked": True,
-                "track": _power_music_public_track(clean_track_id, data),
-            }
-        render_video = render.get("video") if isinstance(render.get("video"), dict) else {}
-        if render.get("status") == "completed" and render.get("audioVersionId") == audio_version_id and render_video.get("url"):
-            return {
-                "ok": True,
-                "status": "completed",
-                "alreadyReady": True,
-                "track": _power_music_public_track(clean_track_id, data),
-            }
-
-        ref.set(
-            {
-                "status": "video_queued",
-                "render": {
-                    "status": "queued",
-                    "stepName": "Esperando worker de video musical",
-                    "progress": 2,
-                    "audioVersionId": audio_version_id,
-                    "audioLabel": audio.get("label") or "",
-                    "queuedAt": firestore.SERVER_TIMESTAMP,
-                    "updatedAt": firestore.SERVER_TIMESTAMP,
-                },
-                "updatedAt": firestore.SERVER_TIMESTAMP,
-            },
-            merge=True,
-        )
-        dispatch = _enqueue_music_video_job(clean_track_id, background_tasks)
-        ref.set(
-            {
-                "render": {
-                    "queue": dispatch.get("queue"),
-                    "taskId": dispatch.get("taskId") or "",
-                    "updatedAt": firestore.SERVER_TIMESTAMP,
-                },
-                "updatedAt": firestore.SERVER_TIMESTAMP,
-            },
-            merge=True,
-        )
-        updated = ref.get().to_dict() or {}
+    running_render = _music_running_render(data)
+    if running_render:
         return {
             "ok": True,
             "status": "queued",
-            "dispatch": dispatch,
-            "track": _power_music_public_track(clean_track_id, updated),
+            "duplicateBlocked": True,
+            "runningRender": _serialize_firestore_value(running_render),
+            "track": _power_music_public_track(clean_track_id, data),
         }
+    existing_render = _music_render_for_version(data, selected_audio_version_id)
+    existing_video = existing_render.get("video") if isinstance(existing_render.get("video"), dict) else {}
+    if existing_render.get("status") == "completed" and existing_video.get("url"):
+        return {
+            "ok": True,
+            "status": "completed",
+            "alreadyReady": True,
+            "track": _power_music_public_track(clean_track_id, data),
+        }
+
+    now = _music_render_now()
+    queued_record = {
+        "status": "queued",
+        "stepName": "Esperando worker de video musical",
+        "progress": 2,
+        "audioVersionId": selected_audio_version_id,
+        "audioLabel": audio.get("label") or "",
+        "queuedAt": now,
+        "updatedAt": now,
+    }
+    render_records = _music_upsert_render_record(_music_render_records(data), queued_record)
+
+    ref.set(
+        {
+            "status": "video_queued",
+            "render": {
+                **queued_record,
+                "queuedAt": firestore.SERVER_TIMESTAMP,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            },
+            "renders": render_records,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+    dispatch = _enqueue_music_video_job(clean_track_id, background_tasks, selected_audio_version_id)
+    dispatch_record = {
+        "audioVersionId": selected_audio_version_id,
+        "audioLabel": audio.get("label") or "",
+        "queue": dispatch.get("queue"),
+        "taskId": dispatch.get("taskId") or "",
+        "updatedAt": _music_render_now(),
+    }
+    render_records = _music_upsert_render_record(render_records, dispatch_record)
+    ref.set(
+        {
+            "render": {
+                "queue": dispatch.get("queue"),
+                "taskId": dispatch.get("taskId") or "",
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            },
+            "renders": render_records,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+    updated = ref.get().to_dict() or {}
+    return {
+        "ok": True,
+        "status": "queued",
+        "dispatch": dispatch,
+        "track": _power_music_public_track(clean_track_id, updated),
+    }
+
+
+@app.post("/music/tracks/{track_id}/produce")
+async def music_track_produce_video(track_id: str, request: Request, background_tasks: BackgroundTasks):
+    principal = _require_music_studio_admin(request)
+    try:
+        return _music_queue_track_render(track_id, None, principal, background_tasks)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/music/tracks/{track_id}/audio/{version_id}/produce")
+async def music_track_produce_audio_version(track_id: str, version_id: str, request: Request, background_tasks: BackgroundTasks):
+    principal = _require_music_studio_admin(request)
+    try:
+        return _music_queue_track_render(track_id, version_id, principal, background_tasks)
     except HTTPException:
         raise
     except Exception as exc:

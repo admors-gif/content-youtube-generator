@@ -521,6 +521,12 @@ def public_track_doc(track_id: str, data: dict) -> dict:
             "promptKind": audio.get("promptKind") or "unknown",
         }]
     render = data.get("render") if isinstance(data.get("render"), dict) else {}
+    renders = data.get("renders") if isinstance(data.get("renders"), list) else []
+    if render and render.get("audioVersionId"):
+        render_version_id = str(render.get("audioVersionId") or "")
+        has_render = any(str(item.get("audioVersionId") or "") == render_version_id for item in renders if isinstance(item, dict))
+        if not has_render:
+            renders = [*renders, render]
 
     def _public_value(value):
         if value is None or isinstance(value, (str, int, float, bool)):
@@ -546,5 +552,6 @@ def public_track_doc(track_id: str, data: dict) -> dict:
         "audioVersions": _public_value(audio_versions),
         "activeAudioVersionId": _public_value(data.get("activeAudioVersionId") or audio.get("versionId") or ""),
         "render": _public_value(render),
+        "renders": _public_value(renders),
         "package": package,
     }

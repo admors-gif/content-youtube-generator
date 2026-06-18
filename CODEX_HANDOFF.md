@@ -61,7 +61,8 @@ Implementado en la sesion 2026-06-16:
 - V1 genera letra, prompt Suno, prompt alternativo, negative prompt, portada, direccion visual y metadata YouTube.
 - V1 permite subir multiples tomas de audio descargadas de Suno a `musicTracks/{trackId}.audioVersions` y Firebase Storage.
 - `musicTracks/{trackId}.audio` conserva la version activa para compatibilidad.
-- V1 renderiza video final en VPS/worker desde la version activa de audio.
+- V1 renderiza video final en VPS/worker desde la version activa de audio y tambien puede renderizar una toma especifica sin cambiar la version activa.
+- Firestore conserva `musicTracks/{trackId}.renders[]` como historial por `audioVersionId`, con MP4, miniatura, portada, metadata, estado, progreso, cola y errores.
 - V1 incluye `package.lyricScore` heuristico sin costo extra.
 - Renderer v2 sincroniza visuales con la letra: divide la duracion real del audio en beats de ~5 segundos, genera prompts Flux por linea/seccion y usa Comfy/Flux si esta configurado.
 - Si Comfy falla o no esta configurado, el render sigue con fallback local limpio; ya no muestra prompts tecnicos en el video.
@@ -196,10 +197,12 @@ Flujo:
 1. `/dashboard/music` genera letra, score, prompt Suno, direccion visual y metadata.
 2. El usuario crea la cancion en Suno con prompt maestro/alterno y puede subir varias tomas al mismo track.
 3. La UI permite seleccionar `activeAudioVersionId`.
-4. Boton `Producir video musical` llama `POST /music/tracks/{trackId}/produce`.
-5. Backend encola `content_factory.produce_music_video` en Celery; si la cola no esta disponible usa background task de API como fallback.
-6. Worker descarga el audio activo desde Firebase Storage, construye `visualBeats` desde la letra, intenta Comfy/Flux por beat, rellena faltantes con fallback local, ensambla `FINAL_MUSIC.mp4` con FFmpeg y sube video/thumbnail/cover/metadata a Storage.
-7. Firestore `musicTracks/{trackId}.render` guarda estado, progreso, URLs, errores, `audioVersionId`, `visualBeatCount`, `visualProvider`, `generatedFrames` y `fallbackFrames`.
+4. Boton `Producir toma activa` llama `POST /music/tracks/{trackId}/produce`.
+5. Cada fila de audio tambien permite `Renderizar esta toma`, que llama `POST /music/tracks/{trackId}/audio/{versionId}/produce` sin cambiar la version activa.
+6. Backend encola `content_factory.produce_music_video` en Celery; si la cola no esta disponible usa background task de API como fallback.
+7. Worker descarga el audio elegido desde Firebase Storage, construye `visualBeats` desde la letra, intenta Comfy/Flux por beat, rellena faltantes con fallback local, ensambla `FINAL_MUSIC.mp4` con FFmpeg y sube video/thumbnail/cover/metadata a Storage.
+8. Firestore `musicTracks/{trackId}.render` guarda estado compatible del render actual/ultimo.
+9. Firestore `musicTracks/{trackId}.renders[]` guarda historial por version de audio para comparar v1.1, v1.2, prompt alterno A/B, etc. sin pisar visualmente los MP4s.
 
 Archivos clave:
 
@@ -226,7 +229,7 @@ Verificacion pasada en desarrollo:
 - Smoke test posterior valido que el MP4 final respeta la duracion exacta del audio.
 - UI soporta boton rapido de copia en Lyrics, score de letra y versiones de audio.
 - Smoke test 2026-06-17 valido renderer `power_music_video_v2_lyric_beats` con 3 beats visuales en 12s y fallback local.
-- Pendiente antes de darlo por cerrado en produccion: probar un MP3 real de Suno desde `/dashboard/music`, confirmar que el worker del VPS toma el job, validar MP4 final, miniatura y signed URLs.
+- Pendiente antes de darlo por cerrado en produccion: despues de que termine el render activo actual, deployar/pushear el cambio de renders por version, probar un MP3 real de Suno desde `/dashboard/music`, confirmar que el worker del VPS toma el job por `versionId`, validar MP4 final, miniatura, historial `renders[]` y signed URLs.
 
 ## Como pedirle contexto a Claude
 

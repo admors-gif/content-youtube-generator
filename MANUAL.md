@@ -655,8 +655,9 @@ Estado 2026-06-17: modulo admin para canciones de poder con render final en VPS.
 5. Descargar las mejores versiones de audio.
 6. Subir cada audio al mismo track como toma/version.
 7. Escuchar versiones y seleccionar la activa.
-8. Pulsar `Producir video musical`.
-9. El worker genera y sube:
+8. Pulsar `Renderizar esta toma` en cada version que quieras comparar, o `Producir toma activa` para usar la seleccionada.
+9. Revisar `Videos generados por version` para abrir MP4, miniatura y metadata de cada toma sin pisar las demas.
+10. El worker genera y sube por cada toma:
    - `FINAL_MUSIC.mp4`;
    - `thumbnail.jpg`;
    - `cover.jpg`;
@@ -673,12 +674,15 @@ Estado 2026-06-17: modulo admin para canciones de poder con render final en VPS.
 - `POST /music/tracks/{trackId}/audio`
 - `POST /music/tracks/{trackId}/audio/{versionId}/activate`
 - `POST /music/tracks/{trackId}/produce`
+- `POST /music/tracks/{trackId}/audio/{versionId}/produce`
 
 ### Notas
 
 - No hay API de Suno integrada; Suno sigue siendo manual.
 - Se pueden guardar multiples versiones de audio de una misma letra.
-- Solo la version activa se usa para renderizar el video final.
+- `render` conserva el render actual/ultimo por compatibilidad.
+- `renders[]` guarda el historial por `audioVersionId`, incluyendo MP4, miniatura, portada, metadata, estado, progreso, `taskId` y errores.
+- Solo se permite un render activo por track para evitar colisiones y gasto duplicado.
 - `package.lyricScore` califica la letra sin costo extra.
 - El render del video no depende de que la computadora este prendida.
 - No usa Luma por default.

@@ -33,6 +33,8 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - Guarda paquetes en Firestore para reutilizarlos.
 - Guarda cada version de audio en Firebase Storage bajo `music/{uid}/{trackId}/audio/`.
 - Permite seleccionar una version activa antes de producir el video.
+- Permite renderizar una toma especifica sin cambiar la version activa.
+- Guarda historial de videos por toma en `musicTracks/{trackId}.renders[]`.
 - Renderiza el video en worker/Celery con fallback a background task si la cola no esta disponible.
 - No usa Luma por default.
 - Renderer v2: timeline visual por letra. Divide el audio en beats de ~5 segundos, genera prompts Flux por linea/seccion de la cancion y ensambla con Ken Burns en FFmpeg.
@@ -85,8 +87,10 @@ Lista paquetes recientes del usuario/admin desde `musicTracks`.
 
 ### `GET /music/tracks/{trackId}`
 
-Devuelve un track individual con `package`, `audio` y `render`.
-Tambien devuelve `audioVersions` y `activeAudioVersionId`.
+Devuelve un track individual con `package`, `audio`, `render`, `renders`, `audioVersions` y `activeAudioVersionId`.
+
+- `render` conserva el ultimo render/estado principal por compatibilidad.
+- `renders[]` contiene el historial por `audioVersionId`, para conservar MP4, miniatura y metadata de cada toma.
 
 ### `POST /music/generate`
 
@@ -154,7 +158,7 @@ Selecciona una toma de audio como version activa. Si el render anterior era de o
 
 ### `POST /music/tracks/{trackId}/produce`
 
-Encola el render musical completo en el VPS.
+Encola el render musical completo en el VPS usando la version activa.
 
 Precondicion:
 
@@ -180,6 +184,19 @@ Respuesta:
   }
 }
 ```
+
+### `POST /music/tracks/{trackId}/audio/{versionId}/produce`
+
+Encola el render musical completo para una toma especifica, sin cambiar `activeAudioVersionId`.
+
+Uso recomendado:
+
+- subir `Prompt maestro A`, `Prompt maestro B`, `Prompt alterno A`, etc.;
+- pulsar `Renderizar esta toma` en cada version;
+- revisar la seccion `Videos generados por version`;
+- abrir el MP4/miniatura de cada toma sin pisar visualmente las demas.
+
+Solo se permite un render activo por track para evitar colisiones de worker y gasto duplicado.
 
 Respuesta:
 
@@ -214,6 +231,33 @@ Campos principales:
 - `audioVersions`
 - `activeAudioVersionId`
 - `render`
+- `renders`
+
+`render` es el estado compatible del render actual/ultimo.
+
+`renders[]` guarda un registro por toma:
+
+- `audioVersionId`
+- `audioLabel`
+- `status`
+- `progress`
+- `stepName`
+- `video`
+- `thumbnail`
+- `cover`
+- `metadata`
+- `lyrics`
+- `sunoPrompt`
+- `durationSeconds`
+- `visualBeatCount`
+- `visualProvider`
+- `queue`
+- `taskId`
+- `error`
+- `queuedAt`
+- `startedAt`
+- `completedAt`
+- `updatedAt`
 
 `package.lyricScore` contiene:
 
