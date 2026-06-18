@@ -115,6 +115,7 @@ from scripts.power_music import (
     TARGET_USE_PRESETS as POWER_MUSIC_TARGET_USES,
     POWER_MUSIC_SYSTEM_PROMPT,
     build_generation_prompt as _power_music_generation_prompt,
+    build_imported_song_package as _power_music_import_package,
     fallback_package as _power_music_fallback_package,
     normalize_package as _power_music_normalize_package,
     parse_json_object as _power_music_parse_json,
@@ -5562,6 +5563,7 @@ def _music_asset_content_type(path: Path) -> str:
         ".png": "image/png",
         ".json": "application/json",
         ".txt": "text/plain; charset=utf-8",
+        ".srt": "application/x-subrip; charset=utf-8",
     }.get(path.suffix.lower(), "application/octet-stream")
 
 
@@ -5804,10 +5806,15 @@ def _run_music_video_job(track_id: str, audio_version_id: str | None = None) -> 
             "metadata": _music_upload_asset(outputs["metadata"], uid, clean_track_id, bucket, f"metadata/{safe_audio_version}"),
             "lyrics": _music_upload_asset(outputs["lyrics"], uid, clean_track_id, bucket, f"metadata/{safe_audio_version}"),
             "sunoPrompt": _music_upload_asset(outputs["sunoPrompt"], uid, clean_track_id, bucket, f"metadata/{safe_audio_version}"),
+            "subtitles": _music_upload_asset(outputs["subtitles"], uid, clean_track_id, bucket, f"metadata/{safe_audio_version}")
+            if outputs.get("subtitles")
+            else {},
             "durationSeconds": outputs.get("durationSeconds"),
             "sceneCount": outputs.get("sceneCount"),
             "visualBeatCount": outputs.get("visualBeatCount"),
             "visualIntervalSeconds": outputs.get("visualIntervalSeconds"),
+            "subtitleMode": outputs.get("subtitleMode"),
+            "subtitleCount": outputs.get("subtitleCount"),
             "visualProvider": outputs.get("visualProvider"),
             "generatedFrames": outputs.get("generatedFrames"),
             "fallbackFrames": outputs.get("fallbackFrames"),
@@ -8406,6 +8413,68 @@ async def music_track_produce_audio_version(track_id: str, version_id: str, requ
     principal = _require_music_studio_admin(request)
     try:
         return _music_queue_track_render(track_id, version_id, principal, background_tasks)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/music/import")
+async def music_import_existing_song(request: Request):
+    principal = _require_music_studio_admin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    body = body if isinstance(body, dict) else {}
+    title = re.sub(r"\s+", " ", str(body.get("title") or "")).strip()
+    lyrics = str(body.get("lyrics") or "").strip()
+    if len(title) < 2:
+        raise HTTPException(status_code=400, detail="titulo requerido")
+    if len(lyrics) < 40:
+        raise HTTPException(status_code=400, detail="pega la letra completa antes de crear el track")
+
+    try:
+        package = _power_music_import_package(body)
+        track_id = _power_music_track_id(principal["uid"], package)
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+
+        db = firestore.client()
+        ref = db.collection("musicTracks").document(track_id)
+        exists = ref.get().exists
+        payload = {
+            "userId": principal["uid"],
+            "email": ((principal.get("token") or {}).get("email") or "").strip().lower(),
+            "status": "lyrics_ready",
+            "package": package,
+            "input": {
+                "mode": "external_song_import",
+                "title": title,
+                "style": body.get("style") or "",
+                "intention": body.get("intention") or "",
+                "visualIdentity": body.get("visualIdentity") or body.get("visual_identity") or "",
+            },
+            "generationMode": "external_song_import",
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+        if not exists:
+            payload["createdAt"] = firestore.SERVER_TIMESTAMP
+        ref.set(payload, merge=True)
+        updated = ref.get().to_dict() or {}
+        return {
+            "ok": True,
+            "trackId": track_id,
+            "track": _power_music_public_track(track_id, updated),
+            "package": package,
+            "saved": True,
+            "generationMode": "external_song_import",
+            "creditCharged": False,
+            "notes": [
+                "Track creado desde una cancion existente.",
+                "Sube el audio de Suno para renderizar imagenes cada 5 segundos y subtitulos por bloques de letra.",
+            ],
+        }
     except HTTPException:
         raise
     except Exception as exc:

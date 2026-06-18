@@ -23,6 +23,17 @@ const DEFAULT_FORM = {
     "promesas medicas, bajar de peso como castigo, imitacion de artistas reales, lenguaje vulgar gratuito",
 };
 
+const DEFAULT_IMPORT_FORM = {
+  title: "",
+  subtitle: "",
+  intention: "disciplina",
+  style: "latin_trap_anthem",
+  energy: "alta, elegante, cinematica",
+  visualIdentity:
+    "visuales cinematograficos premium que sigan la letra: amanecer, movimiento, enfoque, simbolos de identidad, fuerza y avance",
+  lyrics: "",
+};
+
 const emptyPresets = {
   intentions: [],
   styles: [],
@@ -535,6 +546,12 @@ function AudioVersionList({
                   Miniatura
                 </a>
               )}
+              {render?.subtitles?.url && (
+                <a className="cf-button cf-button--subtle" href={render.subtitles.url} target="_blank" rel="noreferrer">
+                  <Icon name="fileText" size={16} />
+                  SRT
+                </a>
+              )}
             </div>
           </div>
         );
@@ -603,6 +620,12 @@ function RenderHistoryList({ renders, versions }) {
                   Miniatura
                 </a>
               )}
+              {render.subtitles?.url && (
+                <a className="cf-button cf-button--subtle" href={render.subtitles.url} target="_blank" rel="noreferrer">
+                  <Icon name="fileText" size={16} />
+                  SRT
+                </a>
+              )}
             </div>
           </div>
         );
@@ -647,9 +670,11 @@ export default function MusicStudioPage() {
   const [presets, setPresets] = useState(emptyPresets);
   const [tracks, setTracks] = useState([]);
   const [form, setForm] = useState(DEFAULT_FORM);
+  const [importForm, setImportForm] = useState(DEFAULT_IMPORT_FORM);
   const [current, setCurrent] = useState(null);
   const [currentId, setCurrentId] = useState("");
   const [loading, setLoading] = useState(false);
+  const [importingSong, setImportingSong] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
   const [producingVideo, setProducingVideo] = useState(false);
   const [producingVersionId, setProducingVersionId] = useState("");
@@ -707,6 +732,10 @@ export default function MusicStudioPage() {
 
   const updateForm = useCallback((key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  const updateImportForm = useCallback((key, value) => {
+    setImportForm((prev) => ({ ...prev, [key]: value }));
   }, []);
 
   const apiFetch = useCallback(
@@ -809,6 +838,46 @@ export default function MusicStudioPage() {
       setError(exc.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function importExistingSong() {
+    setError("");
+    setNotice("");
+    setCopied("");
+    if (!importForm.title.trim()) {
+      setError("Ponle titulo a la cancion para crear el track.");
+      return;
+    }
+    if (importForm.lyrics.trim().length < 40) {
+      setError("Pega la letra completa antes de crear el track para video.");
+      return;
+    }
+    setImportingSong(true);
+    try {
+      const data = await apiFetch("/music/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...importForm }),
+      });
+      if (data.track) {
+        setCurrent(data.track);
+        setCurrentId(data.track.trackId || data.trackId || "");
+      } else {
+        setCurrent({
+          trackId: data.trackId,
+          package: data.package,
+          status: "lyrics_ready",
+          generationMode: data.generationMode,
+        });
+        setCurrentId(data.trackId || "");
+      }
+      setNotice("Cancion importada. Ahora sube el audio de Suno y produce el video con imagenes cada 5 segundos.");
+      await loadTracks();
+    } catch (exc) {
+      setError(exc.message);
+    } finally {
+      setImportingSong(false);
     }
   }
 
@@ -991,61 +1060,117 @@ export default function MusicStudioPage() {
           alignItems: "start",
         }}
       >
-        <Section
-          label="Contrato creativo"
-          title="Generar paquete"
-          actions={<span style={pillStyle("ok")}>0 creditos internos</span>}
-        >
-          <div style={{ display: "grid", gap: "var(--s-4)" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--s-4)" }}>
-              <SelectField
-                label="Intencion"
-                value={form.intention}
-                onChange={(value) => updateForm("intention", value)}
-                options={presets.intentions.length ? presets.intentions : [{ id: DEFAULT_FORM.intention, label: "Disciplina" }]}
+        <div style={{ display: "grid", gap: "var(--s-5)" }}>
+          <Section
+            label="Contrato creativo"
+            title="Generar paquete"
+            actions={<span style={pillStyle("ok")}>0 creditos internos</span>}
+          >
+            <div style={{ display: "grid", gap: "var(--s-4)" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--s-4)" }}>
+                <SelectField
+                  label="Intencion"
+                  value={form.intention}
+                  onChange={(value) => updateForm("intention", value)}
+                  options={presets.intentions.length ? presets.intentions : [{ id: DEFAULT_FORM.intention, label: "Disciplina" }]}
+                />
+                <SelectField
+                  label="Estilo"
+                  value={form.style}
+                  onChange={(value) => updateForm("style", value)}
+                  options={presets.styles.length ? presets.styles : [{ id: DEFAULT_FORM.style, label: "Latin Trap Anthem" }]}
+                />
+              </div>
+
+              <Field label="Tema central" value={form.theme} onChange={(value) => updateForm("theme", value)} />
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--s-4)" }}>
+                <SelectField
+                  label="Uso"
+                  value={form.targetUse}
+                  onChange={(value) => updateForm("targetUse", value)}
+                  options={presets.targetUses.length ? presets.targetUses : [DEFAULT_FORM.targetUse]}
+                  getLabel={(item) => item.label || item}
+                />
+                <Field label="Energia" value={form.energy} onChange={(value) => updateForm("energy", value)} />
+              </div>
+
+              <Field
+                label="Perspectiva vocal"
+                value={form.vocalPerspective}
+                onChange={(value) => updateForm("vocalPerspective", value)}
               />
-              <SelectField
-                label="Estilo"
-                value={form.style}
-                onChange={(value) => updateForm("style", value)}
-                options={presets.styles.length ? presets.styles : [{ id: DEFAULT_FORM.style, label: "Latin Trap Anthem" }]}
-              />
+              <TextArea label="Angulo personal" value={form.personalAngle} onChange={(value) => updateForm("personalAngle", value)} rows={4} />
+              <TextArea label="Debe incluir" value={form.mustInclude} onChange={(value) => updateForm("mustInclude", value)} rows={3} />
+              <TextArea label="Evitar" value={form.mustAvoid} onChange={(value) => updateForm("mustAvoid", value)} rows={3} />
+
+              <button
+                type="button"
+                className="cf-button cf-button--primary"
+                onClick={generatePackage}
+                disabled={loading}
+                style={{ minHeight: 58, justifyContent: "center", fontSize: 18 }}
+              >
+                <Icon name={loading ? "refresh" : "flame"} size={20} />
+                {loading ? "Generando paquete..." : "Generar paquete premium"}
+              </button>
             </div>
+          </Section>
 
-            <Field label="Tema central" value={form.theme} onChange={(value) => updateForm("theme", value)} />
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--s-4)" }}>
-              <SelectField
-                label="Uso"
-                value={form.targetUse}
-                onChange={(value) => updateForm("targetUse", value)}
-                options={presets.targetUses.length ? presets.targetUses : [DEFAULT_FORM.targetUse]}
-                getLabel={(item) => item.label || item}
+          <Section
+            label="Ya tengo cancion"
+            title="Importar letra"
+            actions={<span style={pillStyle("neutral")}>video desde audio</span>}
+          >
+            <p className="cf-music-helper" style={{ marginTop: 0, marginBottom: "var(--s-4)" }}>
+              Pega una letra ya creada en Suno o escrita por ti. Content Factory generara direccion visual, score, metadata, imagenes cada 5 segundos y subtitulos por bloques.
+            </p>
+            <div style={{ display: "grid", gap: "var(--s-4)" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--s-4)" }}>
+                <Field label="Titulo" value={importForm.title} onChange={(value) => updateImportForm("title", value)} placeholder="Ej. Hoy no negocio conmigo" />
+                <Field label="Subtitulo / promesa" value={importForm.subtitle} onChange={(value) => updateImportForm("subtitle", value)} placeholder="Ej. Disciplina para entrenar sin excusas" />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--s-4)" }}>
+                <SelectField
+                  label="Intencion"
+                  value={importForm.intention}
+                  onChange={(value) => updateImportForm("intention", value)}
+                  options={presets.intentions.length ? presets.intentions : [{ id: DEFAULT_IMPORT_FORM.intention, label: "Disciplina" }]}
+                />
+                <SelectField
+                  label="Estilo"
+                  value={importForm.style}
+                  onChange={(value) => updateImportForm("style", value)}
+                  options={presets.styles.length ? presets.styles : [{ id: DEFAULT_IMPORT_FORM.style, label: "Latin Trap Anthem" }]}
+                />
+              </div>
+              <Field label="Energia visual" value={importForm.energy} onChange={(value) => updateImportForm("energy", value)} />
+              <TextArea
+                label="Identidad visual"
+                value={importForm.visualIdentity}
+                onChange={(value) => updateImportForm("visualIdentity", value)}
+                rows={3}
               />
-              <Field label="Energia" value={form.energy} onChange={(value) => updateForm("energy", value)} />
+              <TextArea
+                label="Letra completa"
+                value={importForm.lyrics}
+                onChange={(value) => updateImportForm("lyrics", value)}
+                placeholder="[Intro]\n...\n[Chorus]\n..."
+                rows={9}
+              />
+              <button
+                type="button"
+                className="cf-button cf-button--primary"
+                onClick={importExistingSong}
+                disabled={importingSong || !importForm.title.trim() || importForm.lyrics.trim().length < 40}
+                style={{ minHeight: 58, justifyContent: "center", fontSize: 18 }}
+              >
+                <Icon name={importingSong ? "refresh" : "plus"} size={20} />
+                {importingSong ? "Creando track..." : "Crear track para video"}
+              </button>
             </div>
-
-            <Field
-              label="Perspectiva vocal"
-              value={form.vocalPerspective}
-              onChange={(value) => updateForm("vocalPerspective", value)}
-            />
-            <TextArea label="Angulo personal" value={form.personalAngle} onChange={(value) => updateForm("personalAngle", value)} rows={4} />
-            <TextArea label="Debe incluir" value={form.mustInclude} onChange={(value) => updateForm("mustInclude", value)} rows={3} />
-            <TextArea label="Evitar" value={form.mustAvoid} onChange={(value) => updateForm("mustAvoid", value)} rows={3} />
-
-            <button
-              type="button"
-              className="cf-button cf-button--primary"
-              onClick={generatePackage}
-              disabled={loading}
-              style={{ minHeight: 58, justifyContent: "center", fontSize: 18 }}
-            >
-              <Icon name={loading ? "refresh" : "flame"} size={20} />
-              {loading ? "Generando paquete..." : "Generar paquete premium"}
-            </button>
-          </div>
-        </Section>
+          </Section>
+        </div>
 
         <div style={{ display: "grid", gap: "var(--s-5)" }}>
           <Section label="Workflow" title="Comparar tomas">
@@ -1273,6 +1398,12 @@ export default function MusicStudioPage() {
                     <a className="cf-button cf-button--subtle" href={renderPanel.thumbnail.url} target="_blank" rel="noreferrer" style={{ minHeight: 52 }}>
                       <Icon name="image" size={18} />
                       Miniatura
+                    </a>
+                  )}
+                  {renderPanel?.subtitles?.url && (
+                    <a className="cf-button cf-button--subtle" href={renderPanel.subtitles.url} target="_blank" rel="noreferrer" style={{ minHeight: 52 }}>
+                      <Icon name="fileText" size={18} />
+                      Subtitulos SRT
                     </a>
                   )}
                 </div>

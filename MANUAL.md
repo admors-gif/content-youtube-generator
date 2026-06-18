@@ -649,7 +649,7 @@ Estado 2026-06-17: modulo admin para canciones de poder con render final en VPS.
 ### Flujo operativo
 
 1. Abrir `/dashboard/music`.
-2. Generar paquete premium: letra, score, prompt Suno, prompt alterno, visuales y metadata.
+2. Generar paquete premium: letra, score, prompt Suno, prompt alterno, visuales y metadata. Alternativamente, pegar una letra existente en "Ya tengo cancion" y crear un track para video.
 3. Copiar letra/prompt a Suno.
 4. Probar prompt maestro y/o alternativo en Suno.
 5. Descargar las mejores versiones de audio.
@@ -663,7 +663,8 @@ Estado 2026-06-17: modulo admin para canciones de poder con render final en VPS.
    - `cover.jpg`;
    - `metadata.json`;
    - `lyrics.txt`;
-   - `suno_prompt.txt`.
+   - `suno_prompt.txt`;
+   - `subtitles.srt`.
 
 ### Endpoints
 
@@ -671,6 +672,7 @@ Estado 2026-06-17: modulo admin para canciones de poder con render final en VPS.
 - `GET /music/tracks`
 - `GET /music/tracks/{trackId}`
 - `POST /music/generate`
+- `POST /music/import`
 - `POST /music/tracks/{trackId}/audio`
 - `POST /music/tracks/{trackId}/audio/{versionId}/activate`
 - `POST /music/tracks/{trackId}/produce`
@@ -688,6 +690,7 @@ Estado 2026-06-17: modulo admin para canciones de poder con render final en VPS.
 - No usa Luma por default.
 - Renderer v2 crea un timeline de beats visuales desde la letra y la duracion real del audio.
 - Por default intenta visuales cada ~5 segundos, con limite configurable por `CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS` y `CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS`.
+- Cada render genera un archivo `subtitles.srt` con sincronizacion aproximada por bloques de letra.
 - Si `COMFYUI_API_KEY` esta configurado y `CONTENT_FACTORY_MUSIC_COMFY_ENABLED` no esta en `false`, usa Comfy/Flux para generar imagenes reales por beat.
 - Si Comfy falla, no se cae el render: entra fallback local limpio sin mostrar prompts tecnicos en pantalla.
 - La UI muestra `visualBeatCount`, proveedor visual y cadencia aproximada.

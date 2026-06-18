@@ -14,8 +14,8 @@ THUMB_SIZE = (1280, 720)
 COVER_SIZE = (1080, 1080)
 FPS = 30
 DEFAULT_VISUAL_INTERVAL_SECONDS = 5.0
-DEFAULT_MAX_VISUAL_BEATS = 72
-DEFAULT_MAX_COMFY_IMAGES = 72
+DEFAULT_MAX_VISUAL_BEATS = 120
+DEFAULT_MAX_COMFY_IMAGES = 120
 _VIGNETTE_CACHE = {}
 
 
@@ -322,6 +322,40 @@ def probe_audio_duration(audio_path):
         return 180.0
 
 
+def _srt_timestamp(seconds):
+    safe_seconds = max(0.0, float(seconds or 0))
+    hours = int(safe_seconds // 3600)
+    minutes = int((safe_seconds % 3600) // 60)
+    secs = int(safe_seconds % 60)
+    millis = int(round((safe_seconds - int(safe_seconds)) * 1000))
+    if millis >= 1000:
+        secs += 1
+        millis -= 1000
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def _write_subtitle_file(beats, output_path):
+    lines = []
+    count = 0
+    for beat in beats:
+        subtitle = compact_text(beat.get("subtitle") or beat.get("lyric") or beat.get("overlay"), 150)
+        if not subtitle:
+            continue
+        start = float(beat.get("start") or 0)
+        end = max(start + 0.5, float(beat.get("end") or (start + float(beat.get("duration") or 0.5))))
+        count += 1
+        lines.extend(
+            [
+                str(count),
+                f"{_srt_timestamp(start)} --> {_srt_timestamp(end)}",
+                subtitle,
+                "",
+            ]
+        )
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+    return count
+
+
 def _video_concept(package):
     if isinstance(package.get("videoConcept"), dict):
         return package.get("videoConcept") or {}
@@ -401,6 +435,14 @@ def _visual_mood_from_line(line):
         signals.append("identity transformation, memory and future self")
     if any(word in text for word in ["respiro", "calma", "silencio", "mente"]):
         signals.append("breath, focus, quiet confidence")
+    if any(word in text for word in ["no negocio", "decido", "elijo", "hoy", "nunca mas"]):
+        signals.append("decisive boundary, self-command, internal leadership")
+    if any(word in text for word in ["cama", "amanece", "despierto", "mañana", "dia"]):
+        signals.append("morning transition, leaving comfort, first disciplined action")
+    if any(word in text for word in ["corro", "calle", "ruta", "camino", "cima"]):
+        signals.append("forward movement, road, sunrise, endurance")
+    if any(word in text for word in ["mi palabra", "promesa", "contrato", "firma"]):
+        signals.append("oath, signature, contract with the stronger self")
     return ", ".join(signals) or "premium emotional motivation, identity, momentum"
 
 
@@ -410,7 +452,9 @@ def _build_music_visual_prompt(package, beat, scene, palette):
     identity = compact_text(video.get("visualIdentity"), 260) or "premium cinematic motivational music-video identity"
     style = compact_text(package.get("style"), 80) or "motivational anthem"
     intention = compact_text(package.get("intention"), 90) or "discipline and identity"
-    lyric = compact_text(beat.get("line"), 180)
+    lyric = compact_text(beat.get("line") or beat.get("lyric"), 180)
+    previous_lyric = compact_text(beat.get("previousLine"), 140)
+    next_lyric = compact_text(beat.get("nextLine"), 140)
     section = compact_text(beat.get("section"), 60)
     scene_prompt = compact_text(scene.get("visualPrompt"), 520)
     mood = _visual_mood_from_line(lyric)
@@ -418,15 +462,18 @@ def _build_music_visual_prompt(package, beat, scene, palette):
 
     return compact_text(
         (
-            "16:9 cinematic music video still for a Spanish empowerment song, "
-            "Flux Krea photoreal editorial quality, premium composition, high emotional clarity. "
+            "PROMPT CONTRACT: generate ONE clean, text-free, 16:9 cinematic still for a music video. "
+            "Do not draw typography; subtitles will be added later by the renderer. "
+            "Interpret the lyric semantically and emotionally, not as random decoration. "
+            "Flux Krea photoreal editorial quality, premium composition, clear subject, cinematic lighting, high emotional clarity. "
             f"Song: {title}. Section: {section}. Style: {style}. Intention: {intention}. "
-            f"Current lyric meaning: {lyric}. Mood to visualize: {mood}. "
-            f"Visual identity: {identity}. Palette: {colors}. "
-            f"Scene direction: {scene_prompt}. "
-            "Create a concrete cinematic image that supports the lyric's emotion: modern athlete, dawn, city, mirror, road, iron, breath, focused eyes, "
-            "or symbolic transformation depending on the lyric. Powerful but elegant, not cheesy, no random abstract template. "
-            "No readable text, no lyrics, no captions, no subtitles, no logos, no watermark, no UI, no frame border, no misspelled letters."
+            f"Previous lyric context: {previous_lyric}. Current lyric to visualize: {lyric}. Next lyric context: {next_lyric}. "
+            f"Meaning map: {mood}. Visual identity to keep consistent: {identity}. Palette: {colors}. "
+            f"Base scene direction: {scene_prompt}. "
+            "Choose a concrete, relevant image: a disciplined person in motion, gym iron, sunrise road, mirror transformation, breath in cold air, "
+            "a signed oath, focused eyes, shoes leaving the bedroom, city at dawn, or symbolic strength only when the lyric is abstract. "
+            "The image must make sense even if the subtitle is hidden. Avoid generic waveform backgrounds, empty graphic templates, random neon circles, stock-photo smiles, "
+            "fake text, logos, watermarks, UI, frame borders, captions, readable letters, misspelled typography, extra limbs, distorted hands."
         ),
         1600,
     )
@@ -448,18 +495,28 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats):
     for index in range(beat_count):
         unit_index = min(len(units) - 1, int((index / max(1, beat_count)) * len(units)))
         unit = units[unit_index]
+        previous_unit = units[max(0, unit_index - 1)] if units else {}
+        next_unit = units[min(len(units) - 1, unit_index + 1)] if units else {}
         scene = _match_scene_for_section(scenes, unit.get("section"), index)
         text_overlay = compact_text(unit.get("line"), 60) or compact_text(scene.get("textOverlay"), 60)
-        prompt = _build_music_visual_prompt(package, unit, scene, palette)
         start = index * actual_interval
         end = duration if index == beat_count - 1 else min(duration, (index + 1) * actual_interval)
+        prompt_context = {
+            **unit,
+            "previousLine": previous_unit.get("line") if isinstance(previous_unit, dict) else "",
+            "nextLine": next_unit.get("line") if isinstance(next_unit, dict) else "",
+        }
+        prompt = _build_music_visual_prompt(package, prompt_context, scene, palette)
         beats.append(
             {
                 "scene_number": index + 1,
                 "section": compact_text(unit.get("section"), 60),
                 "lyric": compact_text(unit.get("line"), 180),
+                "subtitle": compact_text(unit.get("line"), 150),
                 "overlay": text_overlay,
                 "prompt": prompt,
+                "start": round(start, 3),
+                "end": round(end, 3),
                 "duration": max(0.5, end - start),
                 "sourceScene": scene.get("section"),
             }
@@ -542,6 +599,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     metadata_path = output_dir / "metadata.json"
     lyrics_path = output_dir / "lyrics.txt"
     suno_path = output_dir / "suno_prompt.txt"
+    subtitles_path = output_dir / "subtitles.srt"
     final_path = output_dir / "FINAL_MUSIC.mp4"
 
     cover = _draw_frame(COVER_SIZE, palette, title, subtitle, package.get("mainHook") or title, package.get("coverPrompt"), 11, square=True)
@@ -643,6 +701,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
 
     lyrics_path.write_text(str(package.get("lyrics") or ""), encoding="utf-8")
     suno_path.write_text(str(package.get("sunoPrompt") or ""), encoding="utf-8")
+    subtitle_count = _write_subtitle_file(beats, subtitles_path)
     metadata = {
         "trackId": track_id,
         "title": title,
@@ -656,11 +715,16 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "generatedFrames": generated_frames,
         "fallbackFrames": fallback_frames,
         "renderer": "power_music_video_v2_lyric_beats",
+        "subtitleMode": "lyric_blocks_estimated",
+        "subtitleCount": subtitle_count,
         "visualBeats": [
             {
                 "index": beat["scene_number"],
                 "section": beat.get("section"),
                 "lyric": beat.get("lyric"),
+                "subtitle": beat.get("subtitle"),
+                "start": beat.get("start"),
+                "end": beat.get("end"),
                 "duration": round(float(beat.get("duration") or 0), 3),
                 "sourceScene": beat.get("sourceScene"),
                 "prompt": beat.get("prompt"),
@@ -673,6 +737,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
             "cover": cover_path.name,
             "lyrics": lyrics_path.name,
             "sunoPrompt": suno_path.name,
+            "subtitles": subtitles_path.name,
         },
         "youtube": package.get("youtube") or {},
         "safetyNotes": package.get("safetyNotes") or [],
@@ -686,6 +751,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "metadata": metadata_path,
         "lyrics": lyrics_path,
         "sunoPrompt": suno_path,
+        "subtitles": subtitles_path,
         "durationSeconds": duration,
         "sceneCount": len(beats),
         "visualBeatCount": len(beats),
@@ -695,4 +761,6 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "fallbackFrames": fallback_frames,
         "comfy": comfy_stats,
         "renderer": metadata["renderer"],
+        "subtitleMode": metadata["subtitleMode"],
+        "subtitleCount": metadata["subtitleCount"],
     }

@@ -194,13 +194,13 @@ Estado: implementado como pipeline admin de musica con render en VPS.
 
 Flujo:
 
-1. `/dashboard/music` genera letra, score, prompt Suno, direccion visual y metadata.
+1. `/dashboard/music` genera letra, score, prompt Suno, direccion visual y metadata, o importa una letra existente desde "Ya tengo cancion".
 2. El usuario crea la cancion en Suno con prompt maestro/alterno y puede subir varias tomas al mismo track.
 3. La UI permite seleccionar `activeAudioVersionId`.
 4. Boton `Producir toma activa` llama `POST /music/tracks/{trackId}/produce`.
 5. Cada fila de audio tambien permite `Renderizar esta toma`, que llama `POST /music/tracks/{trackId}/audio/{versionId}/produce` sin cambiar la version activa.
 6. Backend encola `content_factory.produce_music_video` en Celery; si la cola no esta disponible usa background task de API como fallback.
-7. Worker descarga el audio elegido desde Firebase Storage, construye `visualBeats` desde la letra, intenta Comfy/Flux por beat, rellena faltantes con fallback local, ensambla `FINAL_MUSIC.mp4` con FFmpeg y sube video/thumbnail/cover/metadata a Storage.
+7. Worker descarga el audio elegido desde Firebase Storage, construye `visualBeats` desde la letra cada ~5 segundos, intenta Comfy/Flux por beat, rellena faltantes con fallback local, ensambla `FINAL_MUSIC.mp4` con FFmpeg y sube video/thumbnail/cover/metadata/lyrics/sunoPrompt/subtitles a Storage.
 8. Firestore `musicTracks/{trackId}.render` guarda estado compatible del render actual/ultimo.
 9. Firestore `musicTracks/{trackId}.renders[]` guarda historial por version de audio para comparar v1.1, v1.2, prompt alterno A/B, etc. sin pisar visualmente los MP4s.
 
@@ -229,7 +229,7 @@ Verificacion pasada en desarrollo:
 - Smoke test posterior valido que el MP4 final respeta la duracion exacta del audio.
 - UI soporta boton rapido de copia en Lyrics, score de letra y versiones de audio.
 - Smoke test 2026-06-17 valido renderer `power_music_video_v2_lyric_beats` con 3 beats visuales en 12s y fallback local.
-- Pendiente antes de darlo por cerrado en produccion: despues de que termine el render activo actual, deployar/pushear el cambio de renders por version, probar un MP3 real de Suno desde `/dashboard/music`, confirmar que el worker del VPS toma el job por `versionId`, validar MP4 final, miniatura, historial `renders[]` y signed URLs.
+- 2026-06-17: agregado `POST /music/import`, UI para importar letras existentes, prompts visuales mas semanticos para Comfy/Flux y archivo `subtitles.srt` por render.
 
 ## Como pedirle contexto a Claude
 

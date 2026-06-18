@@ -495,6 +495,166 @@ def fallback_package(payload: dict | None = None) -> dict:
     }
 
 
+def _first_singable_line(lyrics: str) -> str:
+    for raw_line in str(lyrics or "").splitlines():
+        line = raw_line.strip()
+        if not line or (line.startswith("[") and line.endswith("]")):
+            continue
+        clean = compact_text(line, 120)
+        if clean:
+            return clean
+    return ""
+
+
+def _song_sections_from_lyrics(lyrics: str, limit: int = 6) -> list[dict]:
+    sections = []
+    current = {"section": "Intro", "lines": []}
+    for raw_line in str(lyrics or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        match = re.fullmatch(r"\[([^\]]{1,80})\]", line)
+        if match:
+            if current["lines"]:
+                sections.append(current)
+            current = {"section": compact_text(match.group(1), 60) or "Section", "lines": []}
+            continue
+        if len(current["lines"]) < 4:
+            current["lines"].append(compact_text(line, 160))
+    if current["lines"] or current["section"]:
+        sections.append(current)
+
+    clean = []
+    seen = set()
+    for item in sections:
+        name = compact_text(item.get("section"), 60) or "Section"
+        key = name.lower()
+        if key in seen and not item.get("lines"):
+            continue
+        seen.add(key)
+        clean.append({"section": name, "lines": [line for line in item.get("lines", []) if line]})
+        if len(clean) >= limit:
+            break
+    if clean:
+        return clean
+    first = _first_singable_line(lyrics) or "La cancion habla de elegir una version mas fuerte."
+    return [{"section": "Song", "lines": [first]}]
+
+
+def _import_scene_prompt(section: str, sample_lines: list[str], visual_identity: str, style_label: str) -> str:
+    sample = " / ".join(sample_lines[:3]) or section
+    return compact_text(
+        (
+            "16:9 cinematic text-free music-video still, Flux/Krea photoreal editorial quality, "
+            f"section {section}, inspired by these lyric ideas: {sample}. "
+            f"Visual identity: {visual_identity}. Musical energy: {style_label}. "
+            "Represent the emotion and action of the lyrics with a concrete scene, not a generic abstract background. "
+            "Use strong subject, premium lighting, clean negative space, no readable text, no logos."
+        ),
+        900,
+    )
+
+
+def build_imported_song_package(payload: dict | None = None) -> dict:
+    """Create a Power Music package from a song that already has lyrics.
+
+    This is the safe path when the user wrote/generated the song in Suno first:
+    Content Factory only builds metadata, score, visual direction and video
+    prompts around the provided lyrics.
+    """
+    payload = payload or {}
+    title = compact_text(payload.get("title"), 120) or "Cancion importada"
+    lyrics = str(payload.get("lyrics") or "").strip()
+    style = style_by_id(str(payload.get("style") or DEFAULT_STYLE))
+    intention = intention_by_id(str(payload.get("intention") or DEFAULT_INTENTION))
+    subtitle = compact_text(payload.get("subtitle"), 180) or _first_singable_line(lyrics) or intention["description"]
+    energy = compact_text(payload.get("energy"), 120) or "alta, enfocada, poderosa"
+    visual_identity = compact_text(
+        payload.get("visualIdentity") or payload.get("visual_identity"),
+        260,
+    )
+    if not visual_identity:
+        visual_identity = (
+            "premium motivational music-video identity with cinematic scenes that follow the lyrics, "
+            "strong movement, sunrise contrast, disciplined emotion and clean heroic energy"
+        )
+
+    sections = _song_sections_from_lyrics(lyrics, limit=7)
+    scenes = []
+    for item in sections:
+        lines = item.get("lines") or []
+        overlay = compact_text(lines[0] if lines else item.get("section"), 54)
+        scenes.append(
+            {
+                "section": compact_text(item.get("section"), 60),
+                "visualPrompt": _import_scene_prompt(item.get("section"), lines, visual_identity, style["label"]),
+                "textOverlay": overlay,
+            }
+        )
+
+    main_hook = compact_text(payload.get("mainHook") or payload.get("main_hook"), 260)
+    if not main_hook:
+        main_hook = _first_singable_line(lyrics) or title
+    mantra = compact_text(payload.get("mantra"), 160) or main_hook
+
+    youtube_title = compact_text(payload.get("youtubeTitle") or payload.get("youtube_title"), 120)
+    thumbnail_text = compact_text(payload.get("thumbnailText") or payload.get("thumbnail_text"), 40) or title[:40]
+    raw_package = {
+        "title": title,
+        "subtitle": subtitle,
+        "intention": intention["label"],
+        "style": style["label"],
+        "bpm": compact_text(payload.get("bpm"), 40) or style["bpm"],
+        "energy": energy,
+        "durationTarget": compact_text(payload.get("durationTarget"), 40) or "audio importado",
+        "lyrics": lyrics,
+        "mainHook": main_hook,
+        "mantra": mantra,
+        "sunoPrompt": compact_text(payload.get("sunoPrompt"), 900) or style["suno"],
+        "sunoPromptAlt": compact_text(payload.get("sunoPromptAlt"), 900) or f"{style['suno']}, alternate stronger mix, same lyrics, cinematic hook emphasis",
+        "negativePrompt": compact_text(payload.get("negativePrompt"), 500)
+        or "no imitation of real artists, no copyrighted melody, no readable text in visuals, no medical claims, no body shaming",
+        "coverPrompt": compact_text(payload.get("coverPrompt"), 900)
+        or f"Premium cinematic cover for {title}, {visual_identity}, powerful subject, dramatic light, no readable text, no logos",
+        "videoConcept": {
+            "visualIdentity": visual_identity,
+            "palette": [
+                compact_text(payload.get("primaryColor"), 40) or "#07111F azul profundo",
+                compact_text(payload.get("accentColor"), 40) or "#D4A24C oro intenso",
+                compact_text(payload.get("emberColor"), 40) or "#E0533D energia roja",
+            ],
+            "scenes": scenes,
+            "motionDirection": "One lyric-aligned still every 5 seconds, subtle Ken Burns, beat cuts, premium subtitles synced by lyric block.",
+        },
+        "youtube": {
+            "title": youtube_title or f"{title} | Musica motivacional",
+            "description": compact_text(payload.get("youtubeDescription"), 1800)
+            or "Cancion motivacional creada para entrenar identidad, disciplina y enfoque. Video visual generado con imagenes alineadas a la letra.",
+            "hashtags": ["#motivacion", "#disciplina", "#musicamotivacional", "#power"],
+            "tags": ["musica motivacional", "disciplina", "power music", title],
+            "thumbnailText": thumbnail_text,
+        },
+        "productionNotes": [
+            "Cancion importada: la letra no fue generada por Content Factory en este paso.",
+            "El video se renderiza en VPS con imagenes de Comfy/Flux alineadas a la letra cada 5 segundos.",
+            "Los subtitulos se sincronizan por bloques de letra aproximados al audio.",
+        ],
+        "safetyNotes": [
+            "Mensajes de autoprogramacion explicitos y saludables, no subliminales ocultos.",
+            "No imitar artistas reales ni reutilizar letras protegidas sin permiso.",
+        ],
+    }
+    package = normalize_package(raw_package, {**payload, "style": payload.get("style") or style["id"], "intention": payload.get("intention") or intention["id"]})
+    package["source"] = "external_song_import"
+    package["importedSong"] = {
+        "mode": "lyrics_plus_audio",
+        "visualIntervalSeconds": 5,
+        "subtitleSync": "lyric_blocks",
+    }
+    package["lyricScore"] = _score_power_music_package(package)
+    return package
+
+
 def stable_track_id(uid: str, package: dict) -> str:
     base = json.dumps(
         {

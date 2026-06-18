@@ -18,7 +18,9 @@ Power Music Studio convierte una idea de crecimiento personal en un paquete crea
 - produccion de video final en VPS con visuales generativos locales, Ken Burns, thumbnail, cover y metadata.
 - multiples tomas/versiones de audio por una misma letra.
 - calificador de letra sin costo extra.
+- importacion de canciones ya creadas: pegar letra, crear track, subir audio de Suno y renderizar video.
 - visuales sincronizados con la letra cada ~5 segundos, usando Comfy/Flux cuando este configurado y fallback local si falla.
+- archivo `subtitles.srt` por version renderizada, sincronizado por bloques de letra.
 
 La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la cancion y la sube al track en Content Factory. Desde ahi Content Factory ya puede mandar el render completo al VPS/worker para generar `FINAL_MUSIC.mp4`, miniatura y portada sin depender de que la computadora del usuario permanezca prendida.
 
@@ -56,8 +58,8 @@ MUSIC_MAX_AUDIO_BYTES=167772160
 MUSIC_RENDER_DIR=/app/output/music_renders
 CONTENT_FACTORY_MUSIC_COMFY_ENABLED=true
 CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS=5
-CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS=72
-CONTENT_FACTORY_MUSIC_MAX_COMFY_IMAGES=72
+CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS=120
+CONTENT_FACTORY_MUSIC_MAX_COMFY_IMAGES=120
 ANTHROPIC_API_KEY=...
 COMFYUI_API_KEY=...
 ```
@@ -109,6 +111,37 @@ Payload principal:
   "personalAngle": "Cancion para entrenar y volver a mi vision.",
   "mustInclude": "hook repetible, promesa conmigo mismo",
   "mustAvoid": "imitacion de artistas reales"
+}
+```
+
+### `POST /music/import`
+
+Crea un track desde una cancion existente. No llama Anthropic y no consume creditos internos. Sirve cuando el usuario ya tiene letra de Suno u otra fuente y solo quiere producir el video.
+
+Payload principal:
+
+```json
+{
+  "title": "Hoy no negocio conmigo",
+  "subtitle": "Disciplina para entrenar sin excusas",
+  "intention": "disciplina",
+  "style": "latin_trap_anthem",
+  "energy": "alta, elegante, cinematica",
+  "visualIdentity": "guerrero moderno al amanecer, gimnasio industrial, oro y azul profundo",
+  "lyrics": "[Intro]\nHoy no negocio conmigo..."
+}
+```
+
+Respuesta:
+
+```json
+{
+  "ok": true,
+  "trackId": "music_...",
+  "track": {},
+  "package": {},
+  "generationMode": "external_song_import",
+  "creditCharged": false
 }
 ```
 
@@ -248,8 +281,11 @@ Campos principales:
 - `metadata`
 - `lyrics`
 - `sunoPrompt`
+- `subtitles`
 - `durationSeconds`
 - `visualBeatCount`
+- `subtitleMode`
+- `subtitleCount`
 - `visualProvider`
 - `queue`
 - `taskId`
@@ -315,8 +351,18 @@ Estados futuros:
    - `cover.jpg`;
    - `metadata.json`;
    - `lyrics.txt`;
-   - `suno_prompt.txt`.
+   - `suno_prompt.txt`;
+   - `subtitles.srt`.
 11. La UI muestra progreso, video final, miniatura, proveedor visual (`Flux/Comfy` o fallback local), numero de beats y enlaces.
+
+Flujo alterno con cancion existente:
+
+1. Admin abre `/dashboard/music`.
+2. En "Ya tengo cancion", pega titulo, letra completa, estilo e identidad visual.
+3. Pulsa "Crear track para video".
+4. Sube el audio final descargado de Suno como toma.
+5. Renderiza la toma activa o una toma especifica.
+6. El renderer divide el audio en bloques de ~5 segundos, asigna lineas de letra, genera prompts visuales semanticos para Comfy/Flux y crea `subtitles.srt`.
 
 ## Proximos Bloques
 
