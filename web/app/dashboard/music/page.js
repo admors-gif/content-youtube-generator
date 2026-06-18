@@ -128,12 +128,10 @@ function Notice({ error, notice }) {
   if (!error && !notice) return null;
   return (
     <div
-      className="cf-card"
+      className="cf-card cf-music-notice"
       style={{
-        padding: "var(--s-4)",
         borderColor: error ? "var(--bad)" : "var(--ok)",
         color: error ? "var(--bad)" : "var(--ok)",
-        marginBottom: "var(--s-5)",
       }}
     >
       {error || notice}
@@ -145,15 +143,10 @@ function CopyButton({ label, value, onCopy, icon = "copy" }) {
   return (
     <button
       type="button"
-      className="cf-button"
+      className="cf-button cf-button--subtle"
       onClick={() => onCopy(label, value)}
       disabled={!value}
       style={{
-        minHeight: 44,
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 10,
-        color: "var(--paper)",
         opacity: value ? 1 : 0.5,
       }}
     >
@@ -165,7 +158,7 @@ function CopyButton({ label, value, onCopy, icon = "copy" }) {
 
 function Section({ label, title, children, actions }) {
   return (
-    <section className="cf-card" style={{ padding: "var(--s-5)" }}>
+    <section className="cf-card cf-music-panel" style={{ padding: "var(--s-5)" }}>
       <div
         style={{
           display: "flex",
@@ -190,7 +183,7 @@ function Section({ label, title, children, actions }) {
             </h2>
           )}
         </div>
-        {actions && <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>{actions}</div>}
+        {actions && <div className="cf-music-actions">{actions}</div>}
       </div>
       {children}
     </section>
@@ -253,10 +246,58 @@ function packageText(pkg, key) {
   return "";
 }
 
+function MusicWorkflowGuide({ hasPackage, audioCount, renderCount, renderBusy }) {
+  const steps = [
+    {
+      id: "package",
+      title: "Crear paquete",
+      copy: "Letra, prompt Suno, direccion visual y metadata.",
+      done: hasPackage,
+      active: !hasPackage,
+    },
+    {
+      id: "suno",
+      title: "Probar en Suno",
+      copy: "Copia letra y prompt. Suno puede darte varias tomas.",
+      done: audioCount > 0,
+      active: hasPackage && audioCount === 0,
+    },
+    {
+      id: "takes",
+      title: "Subir tomas",
+      copy: "Guarda v1.1, v1.2 o prompt alterno sin pisarlas.",
+      done: audioCount > 0,
+      active: hasPackage && audioCount > 0 && renderCount === 0,
+    },
+    {
+      id: "render",
+      title: "Renderizar",
+      copy: "Cada toma puede generar su propio MP4 y miniatura.",
+      done: renderCount > 0,
+      active: renderBusy || (audioCount > 0 && renderCount === 0),
+    },
+  ];
+
+  return (
+    <div className="cf-music-workflow" aria-label="Flujo de trabajo de musica">
+      {steps.map((step, index) => {
+        const stateClass = step.done ? " is-done" : step.active ? " is-active" : "";
+        return (
+          <div key={step.id} className={`cf-music-step${stateClass}`}>
+            <div className="cf-music-step-number">{String(index + 1).padStart(2, "0")}</div>
+            <div className="cf-music-step-title">{step.title}</div>
+            <div className="cf-music-step-copy">{step.copy}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function TrackList({ tracks, selectedId, onSelect }) {
   if (!tracks.length) {
     return (
-      <div className="cf-card" style={{ padding: "var(--s-4)", color: "var(--paper-mute)" }}>
+      <div className="cf-music-empty">
         Todavia no hay canciones guardadas. Genera la primera y quedara aqui como biblioteca.
       </div>
     );
@@ -280,12 +321,9 @@ function TrackList({ tracks, selectedId, onSelect }) {
             type="button"
             key={track.trackId}
             onClick={() => onSelect(track)}
-            className="cf-card"
+            className={`cf-music-track-card${active ? " is-active" : ""}`}
             style={{
-              padding: "var(--s-4)",
-              textAlign: "left",
-              borderColor: active ? "var(--ember)" : "var(--rule-1)",
-              cursor: "pointer",
+              borderColor: active ? "var(--ember)" : undefined,
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
@@ -422,7 +460,11 @@ function AudioVersionList({
 }) {
   const items = Array.isArray(versions) ? versions : [];
   if (!items.length) {
-    return <p className="cf-caption" style={{ marginTop: "var(--s-4)" }}>Todavia no hay versiones de audio subidas.</p>;
+    return (
+      <div className="cf-music-empty" style={{ marginTop: "var(--s-4)" }}>
+        Todavia no hay tomas de audio. Genera 2 versiones en Suno, descarga la mejor y subela aqui para comparar renders.
+      </div>
+    );
   }
   return (
     <div style={{ display: "grid", gap: 10, marginTop: "var(--s-4)" }}>
@@ -436,60 +478,59 @@ function AudioVersionList({
         return (
           <div
             key={`${versionId}-${index}`}
-            className="cf-card"
+            className={`cf-music-version-card${active ? " is-active" : ""}`}
             style={{
-              padding: "var(--s-4)",
               borderColor: active ? "var(--ok)" : "var(--rule-1)",
-              background: active ? "rgba(116,201,154,0.07)" : "var(--ink-1)",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <div className="cf-music-version-head">
+              <div className="cf-music-version-index">v{index + 1}</div>
               <div>
-                <strong style={{ color: "var(--paper)" }}>{safeText(version.label, `Toma ${index + 1}`)}</strong>
+                <strong style={{ color: "var(--paper)", display: "block", fontSize: 17 }}>{safeText(version.label, `Toma ${index + 1}`)}</strong>
                 <div className="cf-caption">
                   {safeText(version.promptKind, "suno")} · {safeText(version.originalFileName || version.fileName, "audio")}
                 </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                  {active && <span style={pillStyle("ok")}>toma activa</span>}
+                  <span style={pillStyle(renderStatusTone(render?.status))}>{renderStatusLabel(render?.status)}</span>
+                </div>
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {active && <span style={pillStyle("ok")}>activa</span>}
-                <span style={pillStyle(renderStatusTone(render?.status))}>{renderStatusLabel(render?.status)}</span>
+              <div className="cf-music-version-actions">
                 <button
                   type="button"
-                  className="cf-button"
+                  className="cf-button cf-button--subtle"
                   onClick={() => onActivate(versionId)}
                   disabled={active || activating}
-                  style={{ minHeight: 40, color: "var(--paper)" }}
                 >
                   <Icon name="check" size={16} />
-                  Usar esta version
+                  {active ? "Activa" : "Marcar activa"}
+                </button>
+                <button
+                  type="button"
+                  className="cf-button cf-button--primary"
+                  onClick={() => onProduce(versionId)}
+                  disabled={anyRenderBusy || producingThis || renderBusy || renderDone || (!version.url && !version.storagePath)}
+                >
+                  <Icon name={producingThis || renderBusy ? "refresh" : "clapperboard"} size={16} />
+                  {renderDone ? "Video listo" : producingThis || renderBusy ? "Renderizando..." : "Renderizar"}
                 </button>
               </div>
             </div>
-            {version.url && <audio controls src={version.url} style={{ width: "100%", marginTop: 12 }} />}
+            {version.url && <audio className="cf-music-version-audio" controls src={version.url} />}
             {render?.error && (
               <div className="cf-caption" style={{ color: "var(--bad)", marginTop: 10 }}>
                 {safeText(render.error, "El render de esta toma fallo.")}
               </div>
             )}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-              <button
-                type="button"
-                className="cf-button"
-                onClick={() => onProduce(versionId)}
-                disabled={anyRenderBusy || producingThis || renderBusy || renderDone || (!version.url && !version.storagePath)}
-                style={{ minHeight: 40, color: "var(--paper)" }}
-              >
-                <Icon name={producingThis || renderBusy ? "refresh" : "clapperboard"} size={16} />
-                {renderDone ? "Video listo" : producingThis || renderBusy ? "Renderizando..." : "Renderizar esta toma"}
-              </button>
+            <div className="cf-music-actions" style={{ marginTop: 12 }}>
               {render?.video?.url && (
-                <a className="cf-button" href={render.video.url} target="_blank" rel="noreferrer" style={{ minHeight: 40, textDecoration: "none", color: "var(--paper)" }}>
+                <a className="cf-button cf-button--success" href={render.video.url} target="_blank" rel="noreferrer">
                   <Icon name="download" size={16} />
-                  MP4
+                  Abrir MP4
                 </a>
               )}
               {render?.thumbnail?.url && (
-                <a className="cf-button" href={render.thumbnail.url} target="_blank" rel="noreferrer" style={{ minHeight: 40, textDecoration: "none", color: "var(--paper)" }}>
+                <a className="cf-button cf-button--subtle" href={render.thumbnail.url} target="_blank" rel="noreferrer">
                   <Icon name="image" size={16} />
                   Miniatura
                 </a>
@@ -507,7 +548,11 @@ function RenderHistoryList({ renders, versions }) {
     ? renders.filter((item) => item && (item.audioVersionId || item.video?.url || item.status))
     : [];
   if (!items.length) {
-    return <p className="cf-caption">Todavia no hay videos generados por version.</p>;
+    return (
+      <div className="cf-music-empty">
+        Todavia no hay videos por toma. Cuando renderices una version de audio, su MP4 y miniatura apareceran aqui sin reemplazar las otras tomas.
+      </div>
+    );
   }
   const labelByVersion = new Map(
     (Array.isArray(versions) ? versions : []).map((item, index) => [
@@ -525,34 +570,35 @@ function RenderHistoryList({ renders, versions }) {
         return (
           <div
             key={`${versionId}-${index}`}
-            className="cf-card"
+            className="cf-music-render-row"
             style={{
-              padding: "var(--s-4)",
-              display: "grid",
-              gridTemplateColumns: "minmax(0, 1fr) auto",
-              gap: 12,
-              alignItems: "center",
+              borderColor: render.status === "completed" ? "rgba(111,190,142,0.34)" : undefined,
             }}
           >
-            <div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                <strong style={{ color: "var(--paper)" }}>{label}</strong>
-                <span style={pillStyle(renderStatusTone(render.status))}>{renderStatusLabel(render.status)}</span>
+            <div style={{ display: "flex", gap: 14, alignItems: "center", minWidth: 0 }}>
+              {render.thumbnail?.url && (
+                <img className="cf-music-render-thumb" src={render.thumbnail.url} alt={`Miniatura ${label}`} />
+              )}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <strong style={{ color: "var(--paper)" }}>{label}</strong>
+                  <span style={pillStyle(renderStatusTone(render.status))}>{renderStatusLabel(render.status)}</span>
+                </div>
+                <div className="cf-caption" style={{ marginTop: 6 }}>
+                  {[duration, beatCount ? `${beatCount} beats visuales` : "", render.visualProvider ? (render.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local") : "", formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}
+                </div>
+                {render.error && <div className="cf-caption" style={{ color: "var(--bad)", marginTop: 6 }}>{safeText(render.error)}</div>}
               </div>
-              <div className="cf-caption" style={{ marginTop: 6 }}>
-                {[duration, beatCount ? `${beatCount} beats visuales` : "", render.visualProvider ? (render.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local") : "", formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}
-              </div>
-              {render.error && <div className="cf-caption" style={{ color: "var(--bad)", marginTop: 6 }}>{safeText(render.error)}</div>}
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <div className="cf-music-actions" style={{ justifyContent: "flex-end" }}>
               {render.video?.url && (
-                <a className="cf-button" href={render.video.url} target="_blank" rel="noreferrer" style={{ minHeight: 40, textDecoration: "none", color: "var(--paper)" }}>
+                <a className="cf-button cf-button--success" href={render.video.url} target="_blank" rel="noreferrer">
                   <Icon name="download" size={16} />
                   MP4
                 </a>
               )}
               {render.thumbnail?.url && (
-                <a className="cf-button" href={render.thumbnail.url} target="_blank" rel="noreferrer" style={{ minHeight: 40, textDecoration: "none", color: "var(--paper)" }}>
+                <a className="cf-button cf-button--subtle" href={render.thumbnail.url} target="_blank" rel="noreferrer">
                   <Icon name="image" size={16} />
                   Miniatura
                 </a>
@@ -577,12 +623,7 @@ function VisualSceneList({ scenes }) {
         return (
           <div
             key={`${title}-${index}`}
-            style={{
-              border: "1px solid var(--rule-1)",
-              borderRadius: "var(--r-2)",
-              padding: "var(--s-4)",
-              background: "var(--ink-2)",
-            }}
+            className="cf-music-scene-card"
           >
             <div className="cf-mono-sm" style={{ color: "var(--ember)", marginBottom: 6 }}>
               {String(index + 1).padStart(2, "0")} · {title}
@@ -646,8 +687,13 @@ export default function MusicStudioPage() {
     () => renderHistory.some((item) => item?.status === "queued" || item?.status === "running"),
     [renderHistory]
   );
+  const completedRenderCount = useMemo(
+    () => renderHistory.filter((item) => item?.status === "completed" && item?.video?.url).length,
+    [renderHistory]
+  );
   const activeRender = renderByVersion[activeAudioVersionId] || (safeText(renderData?.audioVersionId) === activeAudioVersionId ? renderData : null);
   const renderPanel = activeRender || (!activeAudioVersionId ? renderData : null);
+  const renderBusy = anyRenderBusy || renderPanel?.status === "queued" || renderPanel?.status === "running";
   const lyricScore = packageData?.lyricScore || null;
 
   const intentionMeta = useMemo(
@@ -904,25 +950,38 @@ export default function MusicStudioPage() {
   }
 
   return (
-    <main className="cf-page">
-      <header style={{ marginBottom: "var(--s-6)" }}>
-        <div className="cf-kicker">POWER MUSIC</div>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: "clamp(48px, 8vw, 92px)",
-            lineHeight: 0.95,
-            margin: "10px 0 12px",
-          }}
-        >
-          Música de poder
-        </h1>
-        <p style={{ font: "var(--t-lead)", color: "var(--paper-dim)", maxWidth: 980 }}>
-          Letras, hooks, prompts Suno y direccion visual para canciones de disciplina, identidad y energia.
-        </p>
+    <main className="cf-page cf-music-page">
+      <header className="cf-music-hero">
+        <div className="cf-music-hero-grid">
+          <div>
+            <div className="cf-kicker">POWER MUSIC</div>
+            <h1 className="cf-music-title">Música de poder</h1>
+            <p className="cf-music-subtitle">
+              Crea letras premium, prompts para Suno, versiones de audio y videos visuales por toma sin perder el control editorial.
+            </p>
+          </div>
+          <div className="cf-music-command">
+            <p className="cf-music-command-title">Flujo recomendado</p>
+            <p className="cf-music-command-body">
+              Genera el paquete, prueba 2 o mas tomas en Suno, subelas como versiones y renderiza solo las que valgan la pena.
+            </p>
+            <div className="cf-music-actions" style={{ marginTop: 14 }}>
+              <span style={pillStyle("neutral")}>{tracks.length} tracks</span>
+              <span style={pillStyle(audioVersions.length ? "ok" : "neutral")}>{audioVersions.length} toma(s)</span>
+              <span style={pillStyle(completedRenderCount ? "ok" : "neutral")}>{completedRenderCount} video(s)</span>
+            </div>
+          </div>
+        </div>
       </header>
 
       <Notice error={error} notice={notice || (copied ? `${copied} listo para pegar.` : "")} />
+
+      <MusicWorkflowGuide
+        hasPackage={Boolean(packageData)}
+        audioCount={audioVersions.length}
+        renderCount={completedRenderCount}
+        renderBusy={renderBusy}
+      />
 
       <div
         style={{
@@ -989,13 +1048,13 @@ export default function MusicStudioPage() {
         </Section>
 
         <div style={{ display: "grid", gap: "var(--s-5)" }}>
-          <Section label="Pipeline" title="Suno primero">
+          <Section label="Workflow" title="Comparar tomas">
             <div style={{ display: "grid", gap: 12 }}>
               {[
-                ["01", "Genera letra y prompt maestro en Content Factory."],
-                ["02", "Copia letra + prompt en Suno y crea la cancion final."],
-                ["03", "Descarga audio de Suno y subelo al track aqui mismo."],
-                ["04", "Produce en el VPS el video, miniatura, portada y metadata final."],
+                ["01", "Usa Copiar letra y Copiar prompt Suno. En Suno normalmente salen 2 tomas por intento."],
+                ["02", "Sube cada audio como v1.1, v1.2, prompt alterno A o intento manual."],
+                ["03", "Marca como activa la toma que mas te guste para escucharla y producirla primero."],
+                ["04", "Renderiza cada toma fuerte. Cada una conserva su propio MP4, miniatura y metadata."],
               ].map(([step, text]) => (
                 <div key={step} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                   <span style={pillStyle("ember")}>{step}</span>
@@ -1074,6 +1133,9 @@ export default function MusicStudioPage() {
               )
             }
           >
+            <p className="cf-music-helper" style={{ marginBottom: "var(--s-4)" }}>
+              Sube aqui cada version que Suno te entregue. Puedes conservar varias tomas para la misma letra y renderizar un video distinto para cada una.
+            </p>
             <div
               style={{
                 display: "grid",
@@ -1167,20 +1229,10 @@ export default function MusicStudioPage() {
                 </p>
                 {(renderPanel?.status === "running" || renderPanel?.status === "queued") && (
                   <div style={{ margin: "var(--s-4) 0" }}>
-                    <div
-                      style={{
-                        height: 8,
-                        borderRadius: 999,
-                        overflow: "hidden",
-                        background: "var(--ink-2)",
-                        border: "1px solid var(--rule-1)",
-                      }}
-                    >
-                      <div
+                    <div className="cf-music-progress">
+                      <span
                         style={{
-                          height: "100%",
                           width: `${Math.max(2, Math.min(100, Number(renderPanel.progress || 2)))}%`,
-                          background: "var(--ember)",
                         }}
                       />
                     </div>
@@ -1194,7 +1246,7 @@ export default function MusicStudioPage() {
                     {renderPanel.error || "El render fallo. Puedes reintentar sin volver a crear la letra."}
                   </div>
                 )}
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <div className="cf-music-actions">
                   <button
                     type="button"
                     className="cf-button cf-button--primary"
@@ -1212,13 +1264,13 @@ export default function MusicStudioPage() {
                     {renderPanel?.status === "completed" ? "Video de toma activa listo" : producingVideo ? "Enviando al VPS..." : "Producir toma activa"}
                   </button>
                   {renderPanel?.video?.url && (
-                    <a className="cf-button" href={renderPanel.video.url} target="_blank" rel="noreferrer" style={{ minHeight: 52, textDecoration: "none", color: "var(--paper)" }}>
+                    <a className="cf-button cf-button--success" href={renderPanel.video.url} target="_blank" rel="noreferrer" style={{ minHeight: 52 }}>
                       <Icon name="download" size={18} />
                       Abrir MP4
                     </a>
                   )}
                   {renderPanel?.thumbnail?.url && (
-                    <a className="cf-button" href={renderPanel.thumbnail.url} target="_blank" rel="noreferrer" style={{ minHeight: 52, textDecoration: "none", color: "var(--paper)" }}>
+                    <a className="cf-button cf-button--subtle" href={renderPanel.thumbnail.url} target="_blank" rel="noreferrer" style={{ minHeight: 52 }}>
                       <Icon name="image" size={18} />
                       Miniatura
                     </a>
@@ -1227,11 +1279,11 @@ export default function MusicStudioPage() {
               </div>
               <div>
                 {renderPanel?.video?.url ? (
-                  <video controls src={renderPanel.video.url} poster={renderPanel.thumbnail?.url || renderPanel.cover?.url} style={{ width: "100%", borderRadius: "var(--r-2)", border: "1px solid var(--rule-1)", background: "var(--ink-2)" }} />
+                  <video className="cf-music-render-preview" controls src={renderPanel.video.url} poster={renderPanel.thumbnail?.url || renderPanel.cover?.url} />
                 ) : renderPanel?.thumbnail?.url || renderPanel?.cover?.url ? (
-                  <img src={renderPanel.thumbnail?.url || renderPanel.cover?.url} alt="Miniatura musical" style={{ width: "100%", borderRadius: "var(--r-2)", border: "1px solid var(--rule-1)" }} />
+                  <img className="cf-music-render-preview" src={renderPanel.thumbnail?.url || renderPanel.cover?.url} alt="Miniatura musical" />
                 ) : (
-                  <div className="cf-card" style={{ padding: "var(--s-5)", minHeight: 180, display: "grid", placeItems: "center", color: "var(--paper-mute)" }}>
+                  <div className="cf-music-preview-empty">
                     Vista previa pendiente
                   </div>
                 )}
@@ -1268,19 +1320,7 @@ export default function MusicStudioPage() {
               actions={<CopyButton label="Copiar letra para Suno" value={packageText(packageData, "lyrics")} onCopy={copyText} />}
             >
               <pre
-                style={{
-                  whiteSpace: "pre-wrap",
-                  margin: 0,
-                  color: "var(--paper-dim)",
-                  font: "var(--t-body)",
-                  lineHeight: 1.65,
-                  background: "var(--ink-2)",
-                  border: "1px solid var(--rule-1)",
-                  borderRadius: "var(--r-2)",
-                  padding: "var(--s-4)",
-                  maxHeight: 620,
-                  overflow: "auto",
-                }}
+                className="cf-music-code-box"
               >
                 {safeText(packageData.lyrics)}
               </pre>

@@ -260,6 +260,94 @@ body::before {
 
 .cf-btn--sm { padding: 7px 14px; font-size: 13px; }
 
+.cf-button {
+  min-height: 44px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--rule-1);
+  background: linear-gradient(180deg, rgba(244, 241, 234, 0.08), rgba(244, 241, 234, 0.035));
+  color: var(--paper);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 10px 28px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 11px 18px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    transform var(--dur-micro) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
+    background var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out),
+    color var(--dur-base) var(--ease-out),
+    opacity var(--dur-base) var(--ease-out);
+}
+.cf-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(244, 241, 234, 0.22);
+  background: linear-gradient(180deg, rgba(244, 241, 234, 0.12), rgba(244, 241, 234, 0.055));
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 18px 42px rgba(0, 0, 0, 0.30);
+}
+.cf-button:active:not(:disabled) {
+  transform: translateY(0) scale(0.99);
+}
+.cf-button:focus-visible {
+  outline: 2px solid var(--ember);
+  outline-offset: 3px;
+  box-shadow: var(--shadow-ember);
+}
+.cf-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+  filter: saturate(0.65);
+  box-shadow: none;
+}
+.cf-button--primary {
+  border-color: rgba(224, 83, 61, 0.78);
+  background: linear-gradient(135deg, var(--ember), #ff8c73);
+  color: #0b0b0e;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.20) inset,
+    0 18px 44px rgba(224, 83, 61, 0.20);
+}
+.cf-button--primary:hover:not(:disabled) {
+  border-color: rgba(245, 138, 117, 0.95);
+  background: linear-gradient(135deg, #f06a50, #ff9d84);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.24) inset,
+    0 22px 52px rgba(224, 83, 61, 0.28);
+}
+.cf-button--subtle {
+  background: rgba(244, 241, 234, 0.035);
+  color: var(--paper-dim);
+}
+.cf-button--subtle:hover:not(:disabled) {
+  color: var(--paper);
+}
+.cf-button--success {
+  border-color: rgba(111, 190, 142, 0.38);
+  background: rgba(111, 190, 142, 0.10);
+  color: var(--ok);
+}
+.cf-button--success:hover:not(:disabled) {
+  border-color: rgba(111, 190, 142, 0.62);
+  background: rgba(111, 190, 142, 0.15);
+}
+.cf-button--danger {
+  border-color: rgba(216, 98, 90, 0.38);
+  background: rgba(216, 98, 90, 0.10);
+  color: var(--bad);
+}
+
 .cf-card {
   background: var(--ink-1);
   border: 1px solid var(--rule-1);
@@ -347,6 +435,340 @@ body::before {
 .cf-fade--3 { animation-delay: 180ms; }
 .cf-fade--4 { animation-delay: 240ms; }
 .cf-mobile-break { display: none; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Power Music studio
+   ───────────────────────────────────────────────────────────────────────── */
+
+.cf-music-page {
+  position: relative;
+  overflow: hidden;
+}
+.cf-music-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 78% 8%, rgba(224, 83, 61, 0.13), transparent 34%),
+    radial-gradient(circle at 10% 28%, rgba(111, 190, 142, 0.08), transparent 26%);
+}
+.cf-music-page > * {
+  position: relative;
+  z-index: 2;
+}
+.cf-music-hero {
+  margin-bottom: var(--s-6);
+  padding: clamp(24px, 4.6vw, 52px);
+  border: 1px solid rgba(244, 241, 234, 0.08);
+  border-radius: var(--r-4);
+  background:
+    linear-gradient(135deg, rgba(244, 241, 234, 0.045), rgba(244, 241, 234, 0.015)),
+    linear-gradient(180deg, rgba(19, 19, 24, 0.92), rgba(11, 11, 14, 0.72));
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 28px 80px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.cf-music-hero::after {
+  content: "";
+  position: absolute;
+  right: -18%;
+  top: -38%;
+  width: 56%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(224, 83, 61, 0.16), transparent 66%);
+  pointer-events: none;
+}
+.cf-music-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+  gap: clamp(24px, 4vw, 48px);
+  align-items: end;
+}
+.cf-music-title {
+  font-family: var(--font-display);
+  font-size: clamp(52px, 8vw, 106px);
+  font-weight: 800;
+  line-height: 0.92;
+  margin: 10px 0 14px;
+  color: var(--paper);
+  text-wrap: balance;
+}
+.cf-music-subtitle {
+  max-width: 900px;
+  margin: 0;
+  color: var(--paper-dim);
+  font: var(--t-body-lg);
+  text-wrap: pretty;
+}
+.cf-music-command {
+  border: 1px solid var(--rule-1);
+  border-radius: var(--r-3);
+  padding: var(--s-4);
+  background: rgba(11, 11, 14, 0.50);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+.cf-music-command-title {
+  margin: 0 0 10px;
+  color: var(--paper);
+  font-weight: 800;
+}
+.cf-music-command-body {
+  margin: 0;
+  color: var(--paper-mute);
+  line-height: 1.55;
+}
+.cf-music-workflow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: var(--s-5);
+}
+.cf-music-step {
+  min-height: 108px;
+  padding: 14px;
+  border: 1px solid var(--rule-1);
+  border-radius: var(--r-3);
+  background: rgba(244, 241, 234, 0.025);
+}
+.cf-music-step.is-active {
+  border-color: rgba(224, 83, 61, 0.60);
+  background: rgba(224, 83, 61, 0.08);
+}
+.cf-music-step.is-done {
+  border-color: rgba(111, 190, 142, 0.38);
+  background: rgba(111, 190, 142, 0.06);
+}
+.cf-music-step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid var(--rule-1);
+  color: var(--paper-dim);
+  font: var(--t-mono-sm);
+  margin-bottom: 10px;
+}
+.cf-music-step.is-active .cf-music-step-number {
+  border-color: var(--ember);
+  color: var(--ember);
+}
+.cf-music-step.is-done .cf-music-step-number {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.cf-music-step-title {
+  color: var(--paper);
+  font-weight: 800;
+  margin-bottom: 5px;
+}
+.cf-music-step-copy {
+  color: var(--paper-mute);
+  font-size: 13px;
+  line-height: 1.42;
+}
+.cf-music-panel {
+  background:
+    linear-gradient(180deg, rgba(244, 241, 234, 0.035), rgba(244, 241, 234, 0.015)),
+    var(--ink-1);
+  border-color: rgba(244, 241, 234, 0.075);
+}
+.cf-music-notice {
+  padding: var(--s-4);
+  margin-bottom: var(--s-5);
+}
+.cf-music-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.cf-music-track-card,
+.cf-music-version-card,
+.cf-music-render-row,
+.cf-music-scene-card {
+  border: 1px solid var(--rule-1);
+  border-radius: var(--r-3);
+  background: rgba(244, 241, 234, 0.026);
+  transition:
+    transform var(--dur-micro) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
+    background var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+.cf-music-track-card:hover,
+.cf-music-version-card:hover,
+.cf-music-render-row:hover {
+  transform: translateY(-1px);
+  border-color: rgba(244, 241, 234, 0.16);
+  background: rgba(244, 241, 234, 0.045);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
+}
+.cf-music-track-card {
+  width: 100%;
+  padding: var(--s-4);
+  text-align: left;
+  cursor: pointer;
+}
+.cf-music-track-card.is-active {
+  border-color: rgba(224, 83, 61, 0.72);
+  background: rgba(224, 83, 61, 0.07);
+}
+.cf-music-empty {
+  padding: var(--s-4);
+  border: 1px dashed var(--rule-2);
+  border-radius: var(--r-3);
+  color: var(--paper-mute);
+  background: rgba(244, 241, 234, 0.018);
+}
+.cf-music-version-card {
+  padding: var(--s-4);
+}
+.cf-music-version-card.is-active {
+  border-color: rgba(111, 190, 142, 0.62);
+  background: rgba(111, 190, 142, 0.07);
+}
+.cf-music-version-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+.cf-music-version-index {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--rule-1);
+  background: rgba(11, 11, 14, 0.45);
+  color: var(--paper);
+  font: var(--t-mono);
+}
+.cf-music-version-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.cf-music-version-audio {
+  width: 100%;
+  margin-top: 14px;
+  filter: saturate(0.9);
+}
+.cf-music-render-row {
+  padding: var(--s-4);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+.cf-music-render-thumb {
+  width: 112px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--r-2);
+  border: 1px solid var(--rule-1);
+  background: var(--ink-2);
+}
+.cf-music-render-preview {
+  width: 100%;
+  border-radius: var(--r-3);
+  border: 1px solid var(--rule-1);
+  background: var(--ink-2);
+}
+.cf-music-preview-empty {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--rule-2);
+  border-radius: var(--r-3);
+  color: var(--paper-mute);
+  background: rgba(244, 241, 234, 0.02);
+}
+.cf-music-scene-card {
+  padding: var(--s-4);
+}
+.cf-music-code-box {
+  white-space: pre-wrap;
+  margin: 0;
+  color: var(--paper-dim);
+  font: var(--t-body);
+  line-height: 1.65;
+  background: rgba(11, 11, 14, 0.48);
+  border: 1px solid var(--rule-1);
+  border-radius: var(--r-3);
+  padding: var(--s-4);
+  max-height: 620px;
+  overflow: auto;
+}
+.cf-music-helper {
+  color: var(--paper-mute);
+  line-height: 1.55;
+  margin: 0;
+}
+.cf-music-progress {
+  height: 9px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--ink-2);
+  border: 1px solid var(--rule-1);
+}
+.cf-music-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--ember), var(--ember-soft));
+}
+
+@media (max-width: 980px) {
+  .cf-music-hero-grid {
+    grid-template-columns: 1fr;
+  }
+  .cf-music-workflow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .cf-music-title {
+    font-size: clamp(44px, 16vw, 72px);
+  }
+  .cf-music-workflow {
+    grid-template-columns: 1fr;
+  }
+  .cf-music-actions,
+  .cf-music-version-actions {
+    width: 100%;
+  }
+  .cf-music-actions .cf-button,
+  .cf-music-version-actions .cf-button,
+  .cf-music-render-row .cf-button {
+    width: 100%;
+  }
+  .cf-music-version-head,
+  .cf-music-render-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cf-button,
+  .cf-music-track-card,
+  .cf-music-version-card,
+  .cf-music-render-row {
+    transition: none;
+  }
+  .cf-button:hover:not(:disabled),
+  .cf-music-track-card:hover,
+  .cf-music-version-card:hover,
+  .cf-music-render-row:hover {
+    transform: none;
+  }
+}
 
 /* ─────────────────────────────────────────────────────────────────────────
    LAYOUT shell (cf-shell + cf-main)
