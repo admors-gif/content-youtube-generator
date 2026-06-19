@@ -6,6 +6,7 @@ import { collection, limit, onSnapshot, query, where } from "firebase/firestore"
 import Icon from "@/components/Icon";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
+import { SYSTEM_AGENTS } from "@/lib/agents";
 import {
   EDITORIAL_CALENDAR_ITEMS,
   EDITORIAL_SIGNAL,
@@ -84,6 +85,11 @@ const AGENT_ALIASES = {
   agent_misterios_v2: new Set(["agent_misterios", "agent_misterios_v2"]),
 };
 
+const AGENT_NAMES = SYSTEM_AGENTS.reduce((acc, agent) => {
+  acc[agent.agentId] = agent.name;
+  return acc;
+}, {});
+
 function toDate(date) {
   return new Date(`${date}T12:00:00`);
 }
@@ -154,6 +160,15 @@ function formatDetectedDate(value) {
 
 function compatibleAgentIds(item) {
   return AGENT_ALIASES[item.agentId] || new Set([item.agentId]);
+}
+
+function agentName(agentId) {
+  return AGENT_NAMES[agentId] || agentId || "Agente sin identificar";
+}
+
+function agentIsCompatible(item, agentId) {
+  if (!agentId || !item?.agentId) return true;
+  return compatibleAgentIds(item).has(agentId);
 }
 
 function hasCompletedDelivery(project) {
@@ -282,6 +297,7 @@ function mergeItem(item, overrides, detectedProject, today) {
           id: detectedProject.id,
           title: detectedProject.title || detectedProject.topic || "",
           status: detectedProject.status || "",
+          agentId: detectedProject.agentId || detectedProject.agent || "",
           updatedAt: detectedProject.updatedAt || detectedProject.completedAt || detectedProject.createdAt || null,
           youtubeStudioUrl: detectedProject.youtube?.lastStudioUrl || "",
           youtubeVideoId: detectedProject.youtube?.lastVideoId || "",
@@ -393,6 +409,10 @@ function AgendaItem({ item, today, updateItem }) {
   const derivatives = derivativeOptionsForItem(item);
   const projectHref = item.detectedProject?.id ? `/dashboard/project/${item.detectedProject.id}` : "";
   const publishedHref = item.detectedProject?.youtubeStudioUrl || item.youtubeUrl || "";
+  const plannedAgentName = agentName(item.agentId);
+  const detectedAgentId = item.detectedProject?.agentId || "";
+  const detectedAgentName = agentName(detectedAgentId);
+  const detectedAgentDiffers = detectedAgentId && !agentIsCompatible(item, detectedAgentId);
   const sourceLabel =
     item.statusSource === "manual"
       ? "Manual"
@@ -472,6 +492,38 @@ function AgendaItem({ item, today, updateItem }) {
             <span>·</span>
             <span>{item.pillar}</span>
           </div>
+          <div
+            className="cf-caption"
+            style={{
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+              margin: "-6px 0 16px",
+              alignItems: "center",
+            }}
+          >
+            <span
+              className="cf-badge cf-badge--neutral"
+              title={item.agentId}
+              style={{ textTransform: "none" }}
+            >
+              Plan: {plannedAgentName}
+            </span>
+            {item.detectedProject && (
+              <span
+                className={`cf-badge ${detectedAgentDiffers ? "cf-badge--warn" : "cf-badge--ok"}`}
+                title={detectedAgentId}
+                style={{ textTransform: "none" }}
+              >
+                Creado con: {detectedAgentName}
+              </span>
+            )}
+            {detectedAgentDiffers && (
+              <span className="cf-caption" style={{ color: "var(--warn)" }}>
+                Revisar: el proyecto detectado usa otro agente.
+              </span>
+            )}
+          </div>
           {item.seoKeywords && (
             <div className="cf-caption" style={{ margin: "-6px 0 16px", color: "var(--paper-dim)" }}>
               SEO: {item.seoKeywords}
@@ -506,7 +558,12 @@ function AgendaItem({ item, today, updateItem }) {
               {primaryAction.label}
             </Link>
             {projectHref && (
-              <Link className="cf-btn cf-btn--ghost cf-btn--sm" href={createHref} style={{ textDecoration: "none" }}>
+              <Link
+                className="cf-btn cf-btn--ghost cf-btn--sm"
+                href={createHref}
+                title={`Crear con ${plannedAgentName} (${item.agentId})`}
+                style={{ textDecoration: "none" }}
+              >
                 <Icon name="sparkles" size={14} />
                 Crear otra version
               </Link>
@@ -536,6 +593,7 @@ function AgendaItem({ item, today, updateItem }) {
                 key={`${item.id}-${option.agentId}`}
                 className="cf-btn cf-btn--ghost cf-btn--sm"
                 href={buildCreateContentHref(item, option)}
+                title={`Crear con ${agentName(option.agentId)} (${option.agentId})`}
                 style={{ textDecoration: "none" }}
               >
                 <Icon name={option.agentId.includes("carousel") ? "image" : option.agentId.includes("shorts") ? "zap" : "film"} size={14} />
