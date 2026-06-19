@@ -21,6 +21,7 @@ import argparse
 import ast
 import unicodedata
 import hashlib
+import re
 from datetime import datetime
 from pathlib import Path
 from openai import OpenAI
@@ -66,6 +67,33 @@ OUTPUT_DIR = BASE_DIR / "output" / "scripts"
 
 # Crear directorio de output si no existe
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+_RESERVED_FILE_STEMS = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
+def safe_filename_stem(value: str, max_length: int = 80, fallback: str = "untitled") -> str:
+    """Return a filesystem-safe ASCII stem without path separators."""
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = text.encode("ascii", "ignore").decode("ascii").lower()
+    text = re.sub(r"[\\/]+", " ", text)
+    text = re.sub(r"[\x00-\x1f<>:\"|?*]+", " ", text)
+    text = re.sub(r"[^a-z0-9._ -]+", " ", text)
+    text = re.sub(r"[\s._-]+", "_", text).strip("._-")
+
+    if not text:
+        text = fallback
+    if text.upper() in _RESERVED_FILE_STEMS:
+        text = f"{text}_file"
+
+    text = text[:max_length].rstrip("._-")
+    return text or fallback
 
 # Cargar configuración
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -479,9 +507,10 @@ Requisitos:
     }
     
     # Guardar
-    safe_filename = topic.lower().replace(" ", "_")[:50]
+    safe_filename = safe_filename_stem(topic, max_length=50)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = OUTPUT_DIR / f"{safe_filename}_{timestamp}.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
@@ -4779,7 +4808,7 @@ def run_full_pipeline(
 
         # Guardar resultado completo
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name = topic.lower().replace(" ", "_")[:50]
+        safe_name = safe_filename_stem(topic, max_length=50)
 
         full_result = {
             "topic": topic,
@@ -4945,6 +4974,7 @@ def run_full_pipeline(
             }
 
         output_path = OUTPUT_DIR / f"FULL_{safe_name}_{timestamp}.json"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(full_result, f, ensure_ascii=False, indent=2)
 
