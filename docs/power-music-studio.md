@@ -331,7 +331,7 @@ Estados futuros:
 ## Archivos Principales
 
 - `scripts/power_music.py`: presets, prompt builder, normalizacion y fallback.
-- `scripts/power_music_video.py`: renderer de video musical; crea beats visuales desde la letra, intenta Comfy/Flux y arma MP4 con FFmpeg.
+- `scripts/power_music_video.py`: renderer de video musical; crea un visualizer simbolico premium desde el arco emocional, intenta Comfy/Flux y arma MP4 con FFmpeg.
 - `api.py`: endpoints `/music/*`.
 - `worker_tasks.py`: task Celery `content_factory.produce_music_video`.
 - `web/app/dashboard/music/page.js`: UI admin.
@@ -366,7 +366,8 @@ Flujo alterno con cancion existente:
 3. Pulsa "Crear track para video".
 4. Sube el audio final descargado de Suno como toma.
 5. Renderiza la toma activa o una toma especifica.
-6. El renderer intenta alinear la letra con Whisper/OpenAI. Si hay timestamps, divide el video en beats de ~5 segundos usando la linea activa real; si no, asigna lineas por estimacion, genera prompts visuales semanticos para Comfy/Flux y crea `subtitles.srt`.
+6. El renderer intenta alinear la letra con Whisper/OpenAI. Si hay timestamps confiables, exporta `subtitles.srt`; el video final no quema letras encima por defecto.
+7. Los prompts visuales usan un mundo simbolico premium por bloques emocionales, no ilustraciones literales linea por linea. Las imagenes generadas deben ser text-free; portada y miniatura agregan texto exacto desde backend.
 
 ## Proximos Bloques
 

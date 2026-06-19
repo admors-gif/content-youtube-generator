@@ -193,7 +193,7 @@ def build_generation_prompt(payload: dict) -> str:
 CONTRATO CREATIVO:
 {json.dumps(contract, ensure_ascii=False, indent=2)}
 
-Genera un paquete premium para crear una cancion en Suno y luego producir un video en Content Factory.
+Genera un paquete premium para crear una cancion en Suno y luego producir un video visualizer en Content Factory.
 
 REQUISITOS DE CALIDAD:
 - Letra completa en español, con estructura real de cancion.
@@ -204,9 +204,12 @@ REQUISITOS DE CALIDAD:
 - Evita sonar generico, religioso obligatorio o coach barato.
 - La letra debe estar optimizada para Suno: secciones claras entre corchetes.
 - El prompt Suno debe ser copiables y en ingles, porque Suno suele responder mejor a descripciones musicales en ingles.
-- Crea visuales premium sin depender de Luma: storyboard visual por letra + Comfy/Flux + Ken Burns.
+- Crea visuales premium tipo music visualizer, no videoclip literal linea por linea.
 - Las imagenes visuales deben ser text-free: nunca pidas letras, palabras, carteles, logos, pantallas con texto ni tipografia dentro de la imagen.
+- No conviertas cada frase de la letra en un objeto literal. Traduce la cancion a mundo visual: poder, ambicion, deseo, estatus, disciplina, victoria, sombra, lujo, movimiento.
+- Evita objetos accidentales o domesticos: planchas, electrodomesticos, papeles con letras, pantallas con texto, logos, carteles, posters, billetes volando sin elegancia.
 - Evita repetir el mismo sujeto o accion en todas las escenas. No uses "hombre corriendo" como solucion generica; solo aparece si la letra habla literalmente de correr.
+- Prefiere motivos premium: siluetas fuertes, arquitectura de lujo, marmol negro, luces de ciudad, autos oscuros, pesas de acero, amanecer en rooftop, reflejos dorados, mujeres u hombres con presencia elegante, movimiento controlado.
 - La miniatura debe tener una frase de click fuerte de 2 a 6 palabras; el texto final lo renderiza la app, no la IA de imagen.
 
 JSON SCHEMA EXACTO:
@@ -227,15 +230,17 @@ JSON SCHEMA EXACTO:
   "coverPrompt": "prompt visual 1:1 premium para portada",
   "videoConcept": {{
     "visualIdentity": "identidad visual",
+    "visualWorld": "mundo visual premium: poder / lujo / disciplina / deseo / victoria / sombra",
+    "sceneStrategy": "visualizer simbolico, no literal; bloques emocionales, motivos recurrentes, cero texto generado",
     "palette": ["color 1", "color 2", "color 3"],
     "scenes": [
-      {{"section": "Intro", "visualPrompt": "prompt 16:9 text-free, escena concreta ligada a la letra", "textOverlay": "frase corta opcional"}},
-      {{"section": "Verse 1", "visualPrompt": "prompt 16:9 text-free, accion/metafora distinta", "textOverlay": "frase corta opcional"}},
-      {{"section": "Chorus", "visualPrompt": "prompt 16:9 text-free, imagen iconica del hook", "textOverlay": "frase corta opcional"}},
-      {{"section": "Bridge", "visualPrompt": "prompt 16:9 text-free, giro emocional visual", "textOverlay": "frase corta opcional"}},
-      {{"section": "Final", "visualPrompt": "prompt 16:9 text-free, cierre visual poderoso", "textOverlay": "frase corta opcional"}}
+      {{"section": "Intro", "visualPrompt": "prompt 16:9 text-free, motivo simbolico de apertura, sin texto", "textOverlay": ""}},
+      {{"section": "Verse 1", "visualPrompt": "prompt 16:9 text-free, motivo de tension/ambicion, sin texto", "textOverlay": ""}},
+      {{"section": "Chorus", "visualPrompt": "prompt 16:9 text-free, imagen iconica de poder/victoria, sin texto", "textOverlay": ""}},
+      {{"section": "Bridge", "visualPrompt": "prompt 16:9 text-free, giro emocional visual, sin texto", "textOverlay": ""}},
+      {{"section": "Final", "visualPrompt": "prompt 16:9 text-free, cierre aspiracional poderoso, sin texto", "textOverlay": ""}}
     ],
-    "motionDirection": "Ken Burns sutil, cortes por beat, imagenes ligadas a la letra; subtitulos solo si hay timestamps reales"
+    "motionDirection": "Ken Burns sutil, cortes por beat, visuales simbolicos ligados al arco emocional; subtitulos apagados salvo timestamps reales y activacion explicita"
   }},
   "youtube": {{
     "title": "titulo SEO YouTube",
@@ -402,6 +407,8 @@ def normalize_package(data: dict, payload: dict | None = None) -> dict:
         "coverPrompt": compact_text(data.get("coverPrompt"), 900),
         "videoConcept": {
             "visualIdentity": compact_text(video.get("visualIdentity"), 260) or "premium motivational cinematic identity",
+            "visualWorld": compact_text(video.get("visualWorld"), 260) or "symbolic power visualizer: luxury, discipline, ambition, desire, victory, shadow, controlled movement",
+            "sceneStrategy": compact_text(video.get("sceneStrategy"), 360) or "symbolic music visualizer, emotional blocks instead of literal lyric illustration, text-free generated images",
             "palette": _as_list(video.get("palette"), limit=6) or ["deep black", "electric gold", "crimson ember"],
             "scenes": normalized_scenes,
             "motionDirection": compact_text(video.get("motionDirection"), 360) or "Ken Burns sutil, cortes por beat y subtitulos solo si hay timestamps reales.",
@@ -471,16 +478,18 @@ def fallback_package(payload: dict | None = None) -> dict:
         "sunoPrompt": style["suno"],
         "sunoPromptAlt": f"{style['suno']}, stronger chorus, more cinematic build up, motivational anthem in Spanish",
         "negativePrompt": "no imitation of real artists, no copyrighted melody, no sad ending, no romantic dependency, no medical claims",
-        "coverPrompt": "Premium cinematic motivational cover art, lone runner silhouette at sunrise, black and gold palette, electric ember glow, powerful discipline identity, no readable text, no logos",
+        "coverPrompt": "Premium cinematic motivational cover art, powerful silhouette in black marble luxury space with sunrise city light, black and gold palette, electric ember glow, discipline and victory identity, no readable text, no logos",
         "videoConcept": {
             "visualIdentity": "premium discipline anthem, dark heroic sunrise, gold ember energy",
+            "visualWorld": "symbolic power visualizer: dark luxury, discipline, controlled movement, sunrise victory",
+            "sceneStrategy": "Use aspirational cinematic motifs, not literal lyric-to-object images. Keep generated images text-free.",
             "palette": ["deep black", "electric gold", "crimson ember"],
             "scenes": [
-                {"section": "Intro", "visualPrompt": "cinematic dark room before sunrise, athletic shoes on floor, gold light line entering, premium motivational mood, 16:9", "textOverlay": "HOY EMPIEZA"},
-                {"section": "Verse 1", "visualPrompt": "runner silhouette on empty street at dawn, cinematic mist, gold highlights, disciplined solitude, 16:9", "textOverlay": "SIN EXCUSAS"},
-                {"section": "Chorus", "visualPrompt": "powerful abstract heart and fire waveform, black gold crimson, premium anthem energy, 16:9", "textOverlay": "NO NEGOCIO"},
-                {"section": "Bridge", "visualPrompt": "mirror reflection transforming into stronger self, cinematic shadows, gold rim light, no readable text, 16:9", "textOverlay": "ELIJO"},
-                {"section": "Final", "visualPrompt": "sunrise mountain road, triumphant lone figure, cinematic golden sky, premium victory mood, 16:9", "textOverlay": "CUMPLO"},
+                {"section": "Intro", "visualPrompt": "cinematic black marble room before sunrise, one decisive silhouette, gold light line entering, premium motivational mood, 16:9, no text", "textOverlay": ""},
+                {"section": "Verse 1", "visualPrompt": "wide city street at blue hour, focused figure in distance, gold highlights, disciplined solitude, 16:9, no text", "textOverlay": ""},
+                {"section": "Chorus", "visualPrompt": "steel dumbbells, chalk dust, ember light, black gold crimson, premium anthem energy, 16:9, no text, no logos", "textOverlay": ""},
+                {"section": "Bridge", "visualPrompt": "mirror-like glass wall with powerful silhouette and future-self reflection, cinematic shadows, gold rim light, 16:9, no text", "textOverlay": ""},
+                {"section": "Final", "visualPrompt": "sunrise rooftop over a city, triumphant lone figure, cinematic golden sky, premium victory mood, 16:9, no text", "textOverlay": ""},
             ],
             "motionDirection": "Ken Burns slow push, lyric punches on chorus, subtle waveform, ember particles.",
         },
@@ -545,15 +554,15 @@ def _song_sections_from_lyrics(lyrics: str, limit: int = 6) -> list[dict]:
 
 
 def _import_scene_prompt(section: str, sample_lines: list[str], visual_identity: str, style_label: str) -> str:
-    sample = " / ".join(sample_lines[:3]) or section
     return compact_text(
         (
-            "16:9 cinematic text-free music-video still, Flux/Kontext/Krea photoreal editorial quality, "
-            f"section {section}, inspired by these lyric ideas: {sample}. "
+            "16:9 cinematic text-free premium music visualizer still, Flux/Kontext/Krea photoreal editorial quality. "
+            f"Section: {section}. "
             f"Visual identity: {visual_identity}. Musical energy: {style_label}. "
-            "Represent the emotion and action of the lyrics with a concrete scene, not a generic abstract background. "
-            "Vary subject, setting, action and camera distance. Do not repeat a man running unless the lyric explicitly says running. "
-            "Use strong subject, premium lighting, clean negative space, no readable text, no logos, no signs, no typography, no pseudo-letters."
+            "Translate the emotion into a symbolic aspirational scene, not a literal object-by-object illustration. "
+            "Use premium power motifs: confident silhouettes, luxury architecture, black marble, city lights, steel dumbbells or barbells, wet roads, sunrise rooftops, gold reflections, controlled movement. "
+            "Vary subject, setting, action and camera distance. Do not repeat a runner unless the lyric explicitly says running. "
+            "No readable text, no logos, no signs, no typography, no pseudo-letters, no posters, no screens with writing, no household appliances, no clothes iron, no ironing board."
         ),
         900,
     )
@@ -579,15 +588,15 @@ def build_imported_song_package(payload: dict | None = None) -> dict:
     )
     if not visual_identity:
         visual_identity = (
-            "premium motivational music-video identity with cinematic scenes that follow the lyrics, "
-            "varied symbolic objects, human emotion, sunrise contrast, disciplined energy and clean negative space"
+            "premium motivational music visualizer identity with symbolic cinematic scenes, "
+            "luxury architecture, strong silhouettes, controlled movement, status, desire, ambition, disciplined energy and clean negative space"
         )
 
     sections = _song_sections_from_lyrics(lyrics, limit=7)
     scenes = []
     for item in sections:
         lines = item.get("lines") or []
-        overlay = compact_text(lines[0] if lines else item.get("section"), 54)
+        overlay = ""
         scenes.append(
             {
                 "section": compact_text(item.get("section"), 60),
@@ -622,13 +631,15 @@ def build_imported_song_package(payload: dict | None = None) -> dict:
         or f"Premium cinematic cover for {title}, {visual_identity}, powerful subject, dramatic light, no readable text, no logos",
         "videoConcept": {
             "visualIdentity": visual_identity,
+            "visualWorld": "symbolic premium visualizer: power, opulence, discipline, desire, victory, shadow, controlled movement",
+            "sceneStrategy": "Use emotional blocks and recurring cinematic motifs. Do not make literal images for every lyric line. Generated images must be text-free.",
             "palette": [
                 compact_text(payload.get("primaryColor"), 40) or "#07111F azul profundo",
                 compact_text(payload.get("accentColor"), 40) or "#D4A24C oro intenso",
                 compact_text(payload.get("emberColor"), 40) or "#E0533D energia roja",
             ],
             "scenes": scenes,
-            "motionDirection": "One lyric-aware still every 5 seconds, subtle Ken Burns and beat cuts; subtitles only when real timestamps are available.",
+            "motionDirection": "One symbolic visualizer still every 5 seconds, subtle Ken Burns and beat cuts; subtitles are exported only when real timestamps are available and overlays stay off by default.",
         },
         "youtube": {
             "title": youtube_title or f"{title} | Musica motivacional",
@@ -640,8 +651,8 @@ def build_imported_song_package(payload: dict | None = None) -> dict:
         },
         "productionNotes": [
             "Cancion importada: la letra no fue generada por Content Factory en este paso.",
-            "El video se renderiza en VPS con imagenes de Comfy/Flux alineadas a la letra cada 5 segundos.",
-            "Los subtitulos solo se activan si Whisper alinea la letra con confianza suficiente; si no, el video queda sin subtitulos.",
+            "El video se renderiza en VPS con visuales simbolicos premium de Comfy/Flux cada 5 segundos.",
+            "Los subtitulos se exportan solo si Whisper alinea la letra con confianza suficiente; el video no quema letras encima por defecto.",
         ],
         "safetyNotes": [
             "Mensajes de autoprogramacion explicitos y saludables, no subliminales ocultos.",

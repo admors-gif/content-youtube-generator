@@ -890,7 +890,7 @@ export default function MusicStudioPage() {
         });
         setCurrentId(data.trackId || "");
       }
-      setNotice("Cancion importada. Ahora sube el audio de Suno y produce el video con imagenes cada 5 segundos.");
+      setNotice("Cancion importada. Ahora sube el audio de Suno y produce un visualizer premium sin texto quemado; los SRT solo salen si hay timestamps confiables.");
       await loadTracks();
     } catch (exc) {
       setError(exc.message);
@@ -1141,7 +1141,7 @@ export default function MusicStudioPage() {
             actions={<span style={pillStyle("neutral")}>video desde audio</span>}
           >
             <p className="cf-music-helper" style={{ marginTop: 0, marginBottom: "var(--s-4)" }}>
-              Pega una letra ya creada en Suno o escrita por ti. Content Factory generara direccion visual, score, metadata, imagenes cada 5 segundos y subtitulos por bloques.
+              Pega una letra ya creada en Suno o escrita por ti. Content Factory generara direccion visual, score, metadata y un visualizer premium sin texto quemado. Si Whisper alinea bien, exporta SRT aparte.
             </p>
             <div style={{ display: "grid", gap: "var(--s-4)" }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--s-4)" }}>

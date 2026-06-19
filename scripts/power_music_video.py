@@ -24,7 +24,8 @@ DEFAULT_SUBTITLE_MIN_PHRASE_RATIO = 0.55
 TEXT_FREE_NEGATIVE_PROMPT = (
     "No readable text, no letters, no typography, no captions, no lyrics, "
     "no logo, no watermark, no UI, no signs, no book pages, no posters, "
-    "no screens with writing, no gibberish text, no pseudo-words."
+    "no screens with writing, no gibberish text, no pseudo-words, "
+    "no household appliances, no clothes iron, no ironing board, no random domestic objects."
 )
 _VIGNETTE_CACHE = {}
 
@@ -315,18 +316,18 @@ def _build_music_thumbnail_prompt(package, title, subtitle, hook_text):
     palette = ", ".join(str(c) for c in (video.get("palette") or [])[:4]) or "deep black, gold, ember red"
     return (
         "Create a text-free YouTube music thumbnail background, 16:9 landscape.\n"
-        f"Song title: {title}.\n"
-        f"Clickable hook phrase that will be added later by code: {hook_text}.\n"
+        f"Song title metadata, do not render as text: {title}.\n"
+        f"Clickable hook phrase metadata, added later by backend overlay only: {hook_text}.\n"
         f"Subtitle/emotional promise: {subtitle}.\n"
         f"Visual identity: {visual_identity}.\n"
         f"Palette: {palette}.\n"
         f"Lyric excerpt for meaning: {lyrics}.\n"
         f"Cover direction: {cover_prompt}.\n"
-        "Make the image visually tied to the song's emotional conflict or title, not a generic gym poster. "
-        "Use one iconic cinematic metaphor, strong human emotion or symbolic object, dramatic depth, premium lighting, "
+        "Make the image visually tied to the song's emotional conflict, power, ambition, desire, or victory, not a generic gym poster. "
+        "Use one iconic cinematic metaphor, strong human emotion, luxury architecture, confident silhouette, or symbolic object, dramatic depth, premium lighting, "
         "clear subject, high click appeal, polished music-video poster quality. Leave clean negative space on the left "
         "for exact title overlay by the backend. "
-        f"{TEXT_FREE_NEGATIVE_PROMPT} No PowerPoint card layout, no flat template, no readable text anywhere."
+        f"{TEXT_FREE_NEGATIVE_PROMPT} No PowerPoint card layout, no flat template, no poster text, no title text, no fake letters anywhere."
     )
 
 
@@ -489,8 +490,8 @@ def _compose_generated_frame(source_path, output_path, palette, beat):
     """Post-process a generated image into the final music-video frame.
 
     Comfy/Flux is asked to generate clean, text-free imagery. This layer adds
-    only lightweight branding and the current lyric as a small cinematic cue,
-    never the raw prompt.
+    only a cinematic grade. Lyric text is intentionally disabled by default;
+    titles and hooks belong in the thumbnail/cover, not inside every frame.
     """
     try:
         img = Image.open(source_path).convert("RGB")
@@ -502,18 +503,8 @@ def _compose_generated_frame(source_path, output_path, palette, beat):
     draw = ImageDraw.Draw(img, "RGBA")
     w, h = VIDEO_SIZE
     paper = (246, 242, 232, 248)
-    dim = (215, 208, 194, 218)
-    ember = (*palette[2], 245)
-    small_font = load_font(28, bold=False)
     lyric_font = load_font(44, bold=True)
-    section_font = load_font(24, bold=False)
     margin = 74
-
-    draw.text((margin, 48), "POWER MUSIC", font=small_font, fill=paper)
-    section = compact_text(beat.get("section"), 36).upper()
-    if section:
-        draw.rounded_rectangle((margin, h - 145, margin + 220, h - 104), radius=20, fill=(0, 0, 0, 120), outline=ember, width=1)
-        draw.text((margin + 24, h - 136), section, font=section_font, fill=dim)
 
     lyric = compact_text(beat.get("lyric") or beat.get("overlay"), 96)
     if lyric and beat.get("showLyricOverlay"):
@@ -530,37 +521,38 @@ def _compose_generated_frame(source_path, output_path, palette, beat):
 
 
 def _draw_music_visual_fallback_frame(size, palette, title, beat, seed):
-    """Text-light fallback frame used only when generated images are missing."""
+    """Text-free fallback frame used only when generated images are missing."""
     img = _background(size, palette, seed=seed)
     w, h = size
     draw = ImageDraw.Draw(img, "RGBA")
-    paper = (246, 242, 232, 245)
-    dim = (210, 200, 184, 210)
     ember = (*palette[2], 245)
+    gold = (*palette[1], 210)
     margin = int(w * 0.055)
-    small_font = load_font(25, bold=False)
-    title_font = load_font(42, bold=True)
     lyric_font = load_font(48, bold=True)
 
-    draw.text((margin, 44), "POWER MUSIC", font=small_font, fill=dim)
-    section = compact_text(beat.get("section"), 38).upper()
-    if section:
-        draw.text((margin, h - 92), section, font=small_font, fill=ember)
+    for offset in range(0, 5):
+        alpha = max(25, 95 - offset * 16)
+        draw.rounded_rectangle(
+            (
+                margin + offset * 18,
+                margin + offset * 12,
+                w - margin - offset * 18,
+                h - margin - offset * 12,
+            ),
+            radius=32,
+            outline=(*palette[2], alpha),
+            width=2,
+        )
+    draw.line((margin, int(h * 0.72), w - margin, int(h * 0.72)), fill=gold, width=3)
+    draw.ellipse((int(w * 0.62), int(h * 0.23), int(w * 0.84), int(h * 0.62)), outline=ember, width=5)
 
     if beat.get("showLyricOverlay"):
         lyric = compact_text(beat.get("lyric") or beat.get("overlay"), 92)
         y = int(h * 0.68)
         for line in _wrap_text(draw, lyric, lyric_font, w - margin * 2)[:2]:
+            paper = (246, 242, 232, 245)
             draw.text((margin, y), line, font=lyric_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 190))
             y += lyric_font.size + 8
-    else:
-        # Keep a small deterministic title only, so failed Comfy renders do not
-        # become fake lyric subtitles.
-        title_clean = compact_text(title, 80)
-        y = h - 165
-        for line in _wrap_text(draw, title_clean, title_font, int(w * 0.48))[:2]:
-            draw.text((margin, y), line, font=title_font, fill=paper, stroke_width=2, stroke_fill=(0, 0, 0, 180))
-            y += title_font.size + 4
     return img.convert("RGB")
 
 
@@ -906,9 +898,9 @@ def _scene_list(package):
         )
     if not clean:
         clean = [
-            {"section": "Intro", "visualPrompt": "premium dark cinematic motivational opening", "textOverlay": "HOY EMPIEZA"},
-            {"section": "Hook", "visualPrompt": "gold energy waveform and disciplined silhouette", "textOverlay": compact_text(package.get("mainHook"), 42) or "NO NEGOCIO"},
-            {"section": "Final", "visualPrompt": "sunrise victory road, cinematic triumph", "textOverlay": compact_text(package.get("mantra"), 42) or "CUMPLO"},
+            {"section": "Intro", "visualPrompt": "premium dark cinematic visualizer opening, black marble, gold rim light, strong silhouette, no text", "textOverlay": ""},
+            {"section": "Hook", "visualPrompt": "symbolic power visualizer, steel weights, luxury city lights, ember glow, disciplined silhouette, no text", "textOverlay": ""},
+            {"section": "Final", "visualPrompt": "sunrise rooftop over a city, triumphant cinematic calm, gold reflections, no text", "textOverlay": ""},
         ]
     return clean
 
@@ -916,6 +908,24 @@ def _scene_list(package):
 def _clean_lyric_line(value):
     text = compact_text(value, 180)
     text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _safe_scene_prompt_for_image(value):
+    text = compact_text(value, 180)
+    lower = text.lower()
+    unsafe_markers = [
+        "lyric",
+        "lyrics",
+        "letra",
+        "do not render these words",
+        "inspired by these",
+        "current lyric",
+        "previous lyric",
+        "next lyric",
+    ]
+    if any(marker in lower for marker in unsafe_markers):
+        return ""
     return text
 
 
@@ -967,33 +977,41 @@ def _visual_mood_from_line(line):
         signals.append("morning transition, leaving comfort, first disciplined action")
     if tokens & {"corro", "calle", "ruta", "camino", "cima"}:
         signals.append("endurance, road, altitude, sunrise, directional movement")
-    return ", ".join(signals) or "premium emotional motivation, identity, momentum"
+    if tokens & {"dinero", "exito", "rico", "riqueza", "oro", "lujo", "estatus", "gano", "meta"}:
+        signals.append("elegant status, ambition, premium opulence, disciplined success")
+    if tokens & {"mujer", "reina", "diosa", "presencia", "mirada"}:
+        signals.append("confident feminine presence, elegance, magnetism, power without objectification")
+    return ", ".join(signals) or "premium emotional motivation, identity, momentum, aspirational power"
 
 
 def _visual_story_moment(line, index, section):
     tokens = set(_normalize_token_text(f"{section} {line}"))
     motif_bank = [
-        "a quiet room before dawn, shoes on the floor, one decisive first step",
-        "a mirror with a strong silhouette facing its future self, no text on the glass",
-        "hands tying worn training shoes under cinematic window light, no visible lettering",
-        "a city street at blue hour with one focused figure in the distance, not running",
-        "a close-up of breath in cold air, face partly shadowed, controlled emotion",
-        "gym iron, chalk dust, and empty space, no brand marks, no readable labels",
-        "a symbolic threshold: door opening to sunrise, disciplined calm",
-        "a table with a blank notebook, pen, keys, and morning light, no written pages",
-        "a lone car at night on a wet road, headlights cutting through fog",
-        "an abstract but concrete symbol: ember light inside cracked stone, no text",
+        "black marble penthouse at night, city skyline, one strong silhouette, gold rim light",
+        "symmetrical luxury hallway with deep shadows, cinematic red and gold accents",
+        "confident woman or man in tailored dark clothing, partial silhouette, no readable details",
+        "steel dumbbells and chalk dust under dramatic light, no brand marks, no labels",
+        "wet black car at night outside a glass tower, headlights cutting through fog",
+        "wide staircase in an opulent building, one figure ascending with controlled power",
+        "close-up of breath in cold air, face partly shadowed, controlled emotion",
+        "abstract but concrete symbol: ember light inside cracked stone, clean negative space",
+        "sunrise rooftop above a city, calm victory, architectural symmetry",
+        "dark studio with a single spotlight, powerful posture, minimal cinematic scene",
     ]
     if tokens & {"cama", "despierto", "manana", "amanece", "dia"}:
-        return "early morning bedroom transition, leaving comfort behind, cinematic first action"
+        return "early morning transition from shadow to sunrise, leaving comfort behind, cinematic first action"
     if tokens & {"fuego", "hierro", "sudor", "entreno", "levanto"}:
-        return "physical effort still life: iron, sweat, breath, focused movement, no logos"
+        return "physical power still life: steel dumbbells or barbell plates, chalk dust, breath, focused movement, no logos"
     if tokens & {"miedo", "duda", "caer", "excusa"}:
         return "internal resistance visualized as shadow and controlled posture, tension without melodrama"
     if tokens & {"promesa", "palabra", "cumplo", "contrato"}:
-        return "oath-like scene with blank paper, hand near pen, dramatic light, no written words"
+        return "oath-like cinematic scene with a strong figure under dramatic light, no paper, no written words"
     if tokens & {"corro", "ruta", "calle", "camino", "cima"}:
-        return "wide endurance landscape with directional movement; avoid repeating a male runner close-up"
+        return "wide endurance landscape with directional movement; no repetitive close-up runner shots"
+    if tokens & {"dinero", "exito", "rico", "riqueza", "oro", "lujo", "estatus", "gano", "meta"}:
+        return "elegant opulence: black marble, city lights, tailored silhouette, gold reflections, disciplined success"
+    if tokens & {"mujer", "reina", "diosa", "presencia", "mirada"}:
+        return "powerful feminine presence: confident silhouette, cinematic luxury lighting, elegance and control"
     if tokens & {"respiro", "calma", "silencio", "mente"}:
         return "quiet breath and focus scene, cinematic close-up, negative space, no text"
     return motif_bank[index % len(motif_bank)]
@@ -1001,35 +1019,35 @@ def _visual_story_moment(line, index, section):
 
 def _build_music_visual_prompt(package, beat, scene, palette):
     video = _video_concept(package)
-    title = compact_text(package.get("title"), 120)
     identity = compact_text(video.get("visualIdentity"), 260) or "premium cinematic motivational music-video identity"
+    visual_world = compact_text(video.get("visualWorld"), 260) or "symbolic power visualizer: luxury, discipline, ambition, desire, victory, shadow, controlled movement"
+    scene_strategy = compact_text(video.get("sceneStrategy"), 280) or "emotional blocks and recurring motifs instead of literal lyric illustration"
     style = compact_text(package.get("style"), 80) or "motivational anthem"
     intention = compact_text(package.get("intention"), 90) or "discipline and identity"
     lyric = compact_text(beat.get("line") or beat.get("lyric"), 180)
-    previous_lyric = compact_text(beat.get("previousLine"), 140)
-    next_lyric = compact_text(beat.get("nextLine"), 140)
     section = compact_text(beat.get("section"), 60)
-    scene_prompt = compact_text(scene.get("visualPrompt"), 520)
+    scene_prompt = _safe_scene_prompt_for_image(scene.get("visualPrompt"))
     mood = _visual_mood_from_line(lyric)
     story_moment = compact_text(beat.get("storyMoment") or _visual_story_moment(lyric, int(beat.get("index") or 0), section), 320)
     colors = ", ".join(str(c) for c in (video.get("palette") or [])[:4]) or f"deep black, gold, ember red, {palette[0]}"
 
     return compact_text(
         (
-            "PROMPT CONTRACT: generate ONE clean, text-free, 16:9 cinematic still for a music video. "
-            "Do not draw typography, signs, logos, subtitles, captions, lyric sheets, or pseudo-text. "
-            "Interpret the lyric semantically and emotionally, not as random decoration. "
-            "Flux/Kontext/Krea photoreal editorial quality, premium composition, clear subject, cinematic lighting, high emotional clarity. "
-            f"Song: {title}. Section: {section}. Style: {style}. Intention: {intention}. "
-            f"Previous lyric context: {previous_lyric}. Current lyric to visualize: {lyric}. Next lyric context: {next_lyric}. "
-            f"Meaning map: {mood}. Visual identity to keep consistent: {identity}. Palette: {colors}. "
-            f"Specific storyboard moment for this beat: {story_moment}. Base scene direction: {scene_prompt}. "
-            "Choose a concrete image that makes sense even if all subtitles are hidden. Vary subject, camera distance, setting, and action from beat to beat. "
-            "Do not repeat a man running unless the current lyric explicitly mentions running; prefer symbolic objects, close-ups, environments, silhouettes, and emotional action. "
-            "Avoid generic waveform backgrounds, empty graphic templates, random neon circles, stock-photo smiles, and repetitive gym/running shots. "
-            f"{TEXT_FREE_NEGATIVE_PROMPT} Avoid extra limbs, distorted hands, bad anatomy, malformed faces."
+            "PROMPT CONTRACT: generate ONE clean, text-free, 16:9 cinematic visualizer still for a music video. "
+            f"HARD EXCLUSIONS: {TEXT_FREE_NEGATIVE_PROMPT} No extra limbs, distorted hands, bad anatomy, malformed faces. "
+            "Visualizer mode: symbolic, aspirational, powerful, premium; do not illustrate the lyric literally word by word. "
+            "The exact song title, lyrics, and captions are NOT part of the image; backend overlays text only on thumbnail/cover. "
+            "Flux/Kontext/Krea photoreal editorial quality, premium composition, cinematic lighting, strong symmetry, high emotional clarity. "
+            f"Section: {section}. Music style: {style}. Core intention: {intention}. "
+            f"Visual world: {visual_world}. Scene strategy: {scene_strategy}. "
+            f"Emotional cue derived from the lyric: {mood}. Visual identity to keep consistent: {identity}. Palette: {colors}. "
+            f"Controlled motif for this beat: {story_moment}. Optional safe base scene direction: {scene_prompt}. "
+            "Prefer premium power motifs: confident silhouettes, luxury architecture, black marble, city lights, steel dumbbells or barbells, wet roads, sunrise rooftops, gold reflections, controlled movement. "
+            "Use elegant status symbols sparingly; no cash rain, no tacky flexing, no random props. "
+            "Vary subject, camera distance, setting, and action from beat to beat. "
+            "Avoid generic waveform backgrounds, empty graphic templates, random neon circles, stock-photo smiles, repetitive runner shots, and literal household objects."
         ),
-        1900,
+        2200,
     )
 
 
@@ -1217,7 +1235,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     subtitle_mode = "whisper_word_aligned" if subtitle_segments else "off_no_reliable_timestamps"
     show_lyric_overlay = _env_bool(
         "CONTENT_FACTORY_MUSIC_LYRIC_OVERLAY_ENABLED",
-        default=bool(subtitle_segments),
+        default=False,
     ) and bool(subtitle_segments)
     beats, visual_interval = _build_visual_beats(
         package,
@@ -1344,7 +1362,8 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "comfy": comfy_stats,
         "generatedFrames": generated_frames,
         "fallbackFrames": fallback_frames,
-        "renderer": "power_music_video_v2_lyric_beats",
+        "renderer": "power_music_video_v3_symbolic_visualizer",
+        "visualizerMode": "symbolic_premium_text_free",
         "subtitleMode": subtitle_mode,
         "subtitleCount": subtitle_count,
         "subtitleDiagnostics": subtitle_diagnostics,
@@ -1401,4 +1420,5 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "subtitleDiagnostics": metadata["subtitleDiagnostics"],
         "thumbnailEngine": metadata["thumbnailEngine"],
         "showLyricOverlay": metadata["showLyricOverlay"],
+        "visualizerMode": metadata["visualizerMode"],
     }
