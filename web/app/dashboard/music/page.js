@@ -475,6 +475,13 @@ function thumbnailEngineLabel(engine) {
   return "Miniatura premium";
 }
 
+function directorVersionLabel(version) {
+  const value = safeText(version).toLowerCase();
+  if (!value) return "";
+  if (value.includes("director_v2") || value.includes("no_luma_runway")) return "Director v2";
+  return "Director";
+}
+
 function AudioVersionList({
   versions,
   activeId,
@@ -520,6 +527,7 @@ function AudioVersionList({
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                   {active && <span style={pillStyle("ok")}>toma activa</span>}
                   <span style={pillStyle(renderStatusTone(render?.status))}>{renderStatusLabel(render?.status)}</span>
+                  {directorVersionLabel(render?.directorVersion) && <span style={pillStyle("neutral")}>{directorVersionLabel(render.directorVersion)}</span>}
                   {subtitleModeLabel(render?.subtitleMode) && <span style={pillStyle(render?.subtitleMode === "whisper_word_aligned" ? "ok" : "neutral")}>{subtitleModeLabel(render?.subtitleMode)}</span>}
                   {thumbnailEngineLabel(render?.thumbnailEngine) && <span style={pillStyle(render?.thumbnailEngine?.includes?.("openai") ? "ok" : "neutral")}>{thumbnailEngineLabel(render.thumbnailEngine)}</span>}
                 </div>
@@ -618,6 +626,7 @@ function RenderHistoryList({ renders, versions }) {
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   <strong style={{ color: "var(--paper)" }}>{label}</strong>
                   <span style={pillStyle(renderStatusTone(render.status))}>{renderStatusLabel(render.status)}</span>
+                  {directorVersionLabel(render?.directorVersion) && <span style={pillStyle("neutral")}>{directorVersionLabel(render.directorVersion)}</span>}
                 </div>
                 <div className="cf-caption" style={{ marginTop: 6 }}>
                   {[duration, beatCount ? `${beatCount} beats visuales` : "", render.visualProvider ? (render.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local") : "", thumbnailEngineLabel(render.thumbnailEngine), subtitleModeLabel(render.subtitleMode), formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}
@@ -1497,6 +1506,13 @@ export default function MusicStudioPage() {
                 <p style={{ color: "var(--paper-dim)", lineHeight: 1.6 }}>
                   {safeText(packageData.videoConcept?.visualIdentity || packageData.coverPrompt, "Identidad visual pendiente.")}
                 </p>
+                {packageData.musicVideoDirector?.version && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "var(--s-4) 0 0" }}>
+                    <span style={pillStyle("ok")}>Director v2</span>
+                    <span style={pillStyle("neutral")}>Sin Luma</span>
+                    <span style={pillStyle("neutral")}>Sin Runway</span>
+                  </div>
+                )}
                 {Array.isArray(packageData.videoConcept?.palette) && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: "var(--s-4) 0" }}>
                     {packageData.videoConcept.palette.map((color, index) => {

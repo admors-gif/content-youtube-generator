@@ -11,6 +11,24 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+try:
+    from scripts.power_music_director import (
+        DIRECTOR_VERSION,
+        enrich_package_with_director_plan,
+        prompt_gate,
+    )
+except Exception:  # pragma: no cover - keeps standalone script execution safe
+    try:
+        from power_music_director import DIRECTOR_VERSION, enrich_package_with_director_plan, prompt_gate
+    except Exception:  # pragma: no cover
+        DIRECTOR_VERSION = "power_music_director_unavailable"
+
+        def enrich_package_with_director_plan(package, payload=None):
+            return package
+
+        def prompt_gate(prompt):
+            return {"passed": True, "hits": [], "goodSignals": 0}
+
 
 VIDEO_SIZE = (1920, 1080)
 THUMB_SIZE = (1280, 720)
@@ -271,6 +289,86 @@ def _music_thumbnail_size(model):
 def _music_premium_thumbnail_enabled():
     default = bool(os.getenv("OPENAI_API_KEY"))
     return _env_bool("CONTENT_FACTORY_MUSIC_PREMIUM_THUMBNAIL_ENABLED", default=default) and bool(os.getenv("OPENAI_API_KEY"))
+
+
+def _music_vision_qa_enabled():
+    return _env_bool("CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED", default=False) and bool(os.getenv("OPENAI_API_KEY"))
+
+
+def _music_vision_qa_model():
+    return os.getenv("CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+
+
+def _music_vision_qa_max_frames():
+    return _env_int("CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MAX_FRAMES", 8)
+
+
+def _parse_json_object(text):
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", raw, re.S)
+    if not match:
+        return {}
+    try:
+        value = json.loads(match.group(0))
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def _evaluate_music_frame_with_openai_vision(image_path, beat):
+    if not _music_vision_qa_enabled():
+        return {"enabled": False}
+    try:
+        from openai import OpenAI
+
+        image_path = Path(image_path)
+        mime = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
+        encoded = base64.b64encode(image_path.read_bytes()).decode("utf-8")
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", "").strip())
+        prompt = (
+            "You are a strict visual QA critic for a premium motivational music visualizer. "
+            "Return only JSON with keys: passed boolean, score 0-100, issues array, hasReadableText boolean, "
+            "hasRandomDomesticObject boolean, brandFit 0-100. Reject if the image has readable text, fake letters, "
+            "logos, screens with writing, clothes iron, ironing board, random household objects, cheap stock-photo look, "
+            "or does not fit a premium symbolic music video. "
+            f"Beat context: section={compact_text(beat.get('section'), 60)}, storyMoment={compact_text(beat.get('storyMoment'), 240)}."
+        )
+        response = client.chat.completions.create(
+            model=_music_vision_qa_model(),
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime};base64,{encoded}",
+                                "detail": "low",
+                            },
+                        },
+                    ],
+                }
+            ],
+            temperature=0,
+            max_tokens=260,
+        )
+        text = response.choices[0].message.content if response.choices else ""
+        data = _parse_json_object(text)
+        if not data:
+            data = {"passed": False, "score": 0, "issues": ["vision_qa_returned_non_json"], "raw": compact_text(text, 300)}
+        data["enabled"] = True
+        data["model"] = _music_vision_qa_model()
+        return data
+    except Exception as exc:
+        return {"enabled": True, "passed": None, "score": None, "issues": ["vision_qa_failed"], "error": str(exc)[:300]}
 
 
 def _write_openai_image_data(image_data, output_path):
@@ -1019,6 +1117,10 @@ def _visual_story_moment(line, index, section):
 
 def _build_music_visual_prompt(package, beat, scene, palette):
     video = _video_concept(package)
+    director_plan = video.get("directorPlan") if isinstance(video.get("directorPlan"), dict) else package.get("musicVideoDirector")
+    director_plan = director_plan if isinstance(director_plan, dict) else {}
+    visual_bible = director_plan.get("visualBible") if isinstance(director_plan.get("visualBible"), dict) else {}
+    visual_world_plan = director_plan.get("visualWorld") if isinstance(director_plan.get("visualWorld"), dict) else {}
     identity = compact_text(video.get("visualIdentity"), 260) or "premium cinematic motivational music-video identity"
     visual_world = compact_text(video.get("visualWorld"), 260) or "symbolic power visualizer: luxury, discipline, ambition, desire, victory, shadow, controlled movement"
     scene_strategy = compact_text(video.get("sceneStrategy"), 280) or "emotional blocks and recurring motifs instead of literal lyric illustration"
@@ -1030,6 +1132,10 @@ def _build_music_visual_prompt(package, beat, scene, palette):
     mood = _visual_mood_from_line(lyric)
     story_moment = compact_text(beat.get("storyMoment") or _visual_story_moment(lyric, int(beat.get("index") or 0), section), 320)
     colors = ", ".join(str(c) for c in (video.get("palette") or [])[:4]) or f"deep black, gold, ember red, {palette[0]}"
+    allowed_objects = ", ".join(str(item) for item in (visual_bible.get("allowedObjects") or [])[:10])
+    banned_objects = ", ".join(str(item) for item in (visual_bible.get("bannedObjects") or [])[:12])
+    camera_language = ", ".join(str(item) for item in (visual_bible.get("cameraLanguage") or [])[:6])
+    director_world = compact_text(visual_world_plan.get("label"), 80)
 
     return compact_text(
         (
@@ -1038,10 +1144,13 @@ def _build_music_visual_prompt(package, beat, scene, palette):
             "Visualizer mode: symbolic, aspirational, powerful, premium; do not illustrate the lyric literally word by word. "
             "The exact song title, lyrics, and captions are NOT part of the image; backend overlays text only on thumbnail/cover. "
             "Flux/Kontext/Krea photoreal editorial quality, premium composition, cinematic lighting, strong symmetry, high emotional clarity. "
+            f"Music Director: {DIRECTOR_VERSION}. Director world: {director_world}. "
             f"Section: {section}. Music style: {style}. Core intention: {intention}. "
             f"Visual world: {visual_world}. Scene strategy: {scene_strategy}. "
             f"Emotional cue derived from the lyric: {mood}. Visual identity to keep consistent: {identity}. Palette: {colors}. "
             f"Controlled motif for this beat: {story_moment}. Optional safe base scene direction: {scene_prompt}. "
+            f"Allowed visual objects and motifs: {allowed_objects}. Camera language: {camera_language}. "
+            f"Banned objects and failure modes: {banned_objects}. "
             "Prefer premium power motifs: confident silhouettes, luxury architecture, black marble, city lights, steel dumbbells or barbells, wet roads, sunrise rooftops, gold reflections, controlled movement. "
             "Use elegant status symbols sparingly; no cash rain, no tacky flexing, no random props. "
             "Vary subject, camera distance, setting, and action from beat to beat. "
@@ -1113,6 +1222,7 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_se
         story_moment = _visual_story_moment(unit.get("line"), index, unit.get("section"))
         prompt_context["storyMoment"] = story_moment
         prompt = _build_music_visual_prompt(package, prompt_context, scene, palette)
+        prompt_quality = prompt_gate(prompt)
         beats.append(
             {
                 "scene_number": index + 1,
@@ -1123,6 +1233,7 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_se
                 "storyMoment": story_moment,
                 "showLyricOverlay": bool(show_lyric_overlay),
                 "prompt": prompt,
+                "promptGate": prompt_quality,
                 "start": round(start, 3),
                 "end": round(end, 3),
                 "duration": max(0.5, end - start),
@@ -1224,7 +1335,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     assets_dir.mkdir(exist_ok=True)
     segments_dir.mkdir(exist_ok=True)
 
-    package = package if isinstance(package, dict) else {}
+    package = enrich_package_with_director_plan(package if isinstance(package, dict) else {})
     title = compact_text(package.get("title"), 100) or "Power Music"
     subtitle = compact_text(package.get("subtitle") or package.get("mainHook"), 160)
     palette = _palette(package)
@@ -1263,6 +1374,8 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     segment_paths = []
     generated_frames = 0
     fallback_frames = 0
+    vision_qa_results = []
+    vision_qa_max_frames = _music_vision_qa_max_frames() if _music_vision_qa_enabled() else 0
     for index, beat in enumerate(beats, start=1):
         image_path = assets_dir / f"beat_{index:03d}.jpg"
         segment_path = segments_dir / f"segment_{index:03d}.mp4"
@@ -1273,6 +1386,11 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
             frame = _draw_music_visual_fallback_frame(VIDEO_SIZE, palette, title, beat, 100 + index)
             frame.save(image_path, quality=92)
             fallback_frames += 1
+
+        if vision_qa_max_frames and len(vision_qa_results) < vision_qa_max_frames:
+            qa_result = _evaluate_music_frame_with_openai_vision(image_path, beat)
+            qa_result["index"] = index
+            vision_qa_results.append(qa_result)
 
         segment_duration = max(0.5, float(beat.get("duration") or visual_interval))
         frames = max(1, int(math.ceil(segment_duration * FPS)))
@@ -1348,6 +1466,31 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     else:
         subtitles_path.write_text("", encoding="utf-8")
         subtitle_count = 0
+    director_plan = package.get("musicVideoDirector")
+    if not isinstance(director_plan, dict):
+        director_plan = (_video_concept(package).get("directorPlan") if isinstance(_video_concept(package), dict) else {}) or {}
+    prompt_gate_summary = {
+        "passed": sum(1 for beat in beats if (beat.get("promptGate") or {}).get("passed")),
+        "failed": sum(1 for beat in beats if not (beat.get("promptGate") or {}).get("passed")),
+        "total": len(beats),
+        "sampleFailures": [
+            {
+                "index": beat.get("scene_number"),
+                "hits": (beat.get("promptGate") or {}).get("hits") or [],
+                "goodSignals": (beat.get("promptGate") or {}).get("goodSignals"),
+            }
+            for beat in beats
+            if not (beat.get("promptGate") or {}).get("passed")
+        ][:8],
+    }
+    vision_qa_summary = {
+        "enabled": bool(_music_vision_qa_enabled()),
+        "model": _music_vision_qa_model() if _music_vision_qa_enabled() else "",
+        "checked": len(vision_qa_results),
+        "passed": sum(1 for item in vision_qa_results if item.get("passed") is True),
+        "failed": sum(1 for item in vision_qa_results if item.get("passed") is False),
+        "results": vision_qa_results,
+    }
     metadata = {
         "trackId": track_id,
         "title": title,
@@ -1362,8 +1505,12 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "comfy": comfy_stats,
         "generatedFrames": generated_frames,
         "fallbackFrames": fallback_frames,
-        "renderer": "power_music_video_v3_symbolic_visualizer",
-        "visualizerMode": "symbolic_premium_text_free",
+        "renderer": "power_music_video_v4_director_symbolic_visualizer",
+        "visualizerMode": "symbolic_premium_text_free_director_v2",
+        "directorVersion": DIRECTOR_VERSION,
+        "musicVideoDirector": director_plan,
+        "promptGateSummary": prompt_gate_summary,
+        "visionQa": vision_qa_summary,
         "subtitleMode": subtitle_mode,
         "subtitleCount": subtitle_count,
         "subtitleDiagnostics": subtitle_diagnostics,
@@ -1381,6 +1528,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
                 "alignmentScore": beat.get("alignmentScore"),
                 "storyMoment": beat.get("storyMoment"),
                 "showLyricOverlay": beat.get("showLyricOverlay"),
+                "promptGate": beat.get("promptGate"),
                 "prompt": beat.get("prompt"),
             }
             for beat in beats
@@ -1415,6 +1563,10 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "fallbackFrames": fallback_frames,
         "comfy": comfy_stats,
         "renderer": metadata["renderer"],
+        "directorVersion": metadata["directorVersion"],
+        "musicVideoDirector": metadata["musicVideoDirector"],
+        "promptGateSummary": metadata["promptGateSummary"],
+        "visionQa": metadata["visionQa"],
         "subtitleMode": metadata["subtitleMode"],
         "subtitleCount": metadata["subtitleCount"],
         "subtitleDiagnostics": metadata["subtitleDiagnostics"],

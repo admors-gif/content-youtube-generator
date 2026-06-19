@@ -3,6 +3,15 @@ import json
 import re
 from datetime import datetime, timezone
 
+try:
+    from scripts.power_music_director import enrich_package_with_director_plan
+except Exception:  # pragma: no cover - keeps legacy local imports safe
+    try:
+        from power_music_director import enrich_package_with_director_plan
+    except Exception:  # pragma: no cover
+        def enrich_package_with_director_plan(package, payload=None):
+            return package
+
 
 DEFAULT_LANGUAGE = "es"
 DEFAULT_STYLE = "latin_trap_anthem"
@@ -429,6 +438,7 @@ def normalize_package(data: dict, payload: dict | None = None) -> dict:
         package["mainHook"] = title
     if not package["mantra"]:
         package["mantra"] = intention["seed"]
+    package = enrich_package_with_director_plan(package, payload)
     package["lyricScore"] = _score_power_music_package(package)
     return package
 
