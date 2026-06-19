@@ -204,7 +204,10 @@ REQUISITOS DE CALIDAD:
 - Evita sonar generico, religioso obligatorio o coach barato.
 - La letra debe estar optimizada para Suno: secciones claras entre corchetes.
 - El prompt Suno debe ser copiables y en ingles, porque Suno suele responder mejor a descripciones musicales en ingles.
-- Crea visuales premium sin depender de Luma: Comfy/Flux + Ken Burns + texto cinetico.
+- Crea visuales premium sin depender de Luma: storyboard visual por letra + Comfy/Flux + Ken Burns.
+- Las imagenes visuales deben ser text-free: nunca pidas letras, palabras, carteles, logos, pantallas con texto ni tipografia dentro de la imagen.
+- Evita repetir el mismo sujeto o accion en todas las escenas. No uses "hombre corriendo" como solucion generica; solo aparece si la letra habla literalmente de correr.
+- La miniatura debe tener una frase de click fuerte de 2 a 6 palabras; el texto final lo renderiza la app, no la IA de imagen.
 
 JSON SCHEMA EXACTO:
 {{
@@ -226,13 +229,13 @@ JSON SCHEMA EXACTO:
     "visualIdentity": "identidad visual",
     "palette": ["color 1", "color 2", "color 3"],
     "scenes": [
-      {{"section": "Intro", "visualPrompt": "prompt 16:9", "textOverlay": "texto corto"}},
-      {{"section": "Verse 1", "visualPrompt": "prompt 16:9", "textOverlay": "texto corto"}},
-      {{"section": "Chorus", "visualPrompt": "prompt 16:9", "textOverlay": "texto corto"}},
-      {{"section": "Bridge", "visualPrompt": "prompt 16:9", "textOverlay": "texto corto"}},
-      {{"section": "Final", "visualPrompt": "prompt 16:9", "textOverlay": "texto corto"}}
+      {{"section": "Intro", "visualPrompt": "prompt 16:9 text-free, escena concreta ligada a la letra", "textOverlay": "frase corta opcional"}},
+      {{"section": "Verse 1", "visualPrompt": "prompt 16:9 text-free, accion/metafora distinta", "textOverlay": "frase corta opcional"}},
+      {{"section": "Chorus", "visualPrompt": "prompt 16:9 text-free, imagen iconica del hook", "textOverlay": "frase corta opcional"}},
+      {{"section": "Bridge", "visualPrompt": "prompt 16:9 text-free, giro emocional visual", "textOverlay": "frase corta opcional"}},
+      {{"section": "Final", "visualPrompt": "prompt 16:9 text-free, cierre visual poderoso", "textOverlay": "frase corta opcional"}}
     ],
-    "motionDirection": "Ken Burns, glow, particles, waveform, lyric punches"
+    "motionDirection": "Ken Burns sutil, cortes por beat, imagenes ligadas a la letra; subtitulos solo si hay timestamps reales"
   }},
   "youtube": {{
     "title": "titulo SEO YouTube",
@@ -395,13 +398,13 @@ def normalize_package(data: dict, payload: dict | None = None) -> dict:
         "mantra": compact_text(data.get("mantra"), 160),
         "sunoPrompt": compact_text(data.get("sunoPrompt"), 900) or style["suno"],
         "sunoPromptAlt": compact_text(data.get("sunoPromptAlt"), 900),
-        "negativePrompt": compact_text(data.get("negativePrompt"), 500) or "no imitation of real artists, no copyrighted melody, no sad ending, no romantic dependency, no medical claims",
+        "negativePrompt": compact_text(data.get("negativePrompt"), 500) or "no imitation of real artists, no copyrighted melody, no sad ending, no romantic dependency, no medical claims, no readable text in visuals",
         "coverPrompt": compact_text(data.get("coverPrompt"), 900),
         "videoConcept": {
             "visualIdentity": compact_text(video.get("visualIdentity"), 260) or "premium motivational cinematic identity",
             "palette": _as_list(video.get("palette"), limit=6) or ["deep black", "electric gold", "crimson ember"],
             "scenes": normalized_scenes,
-            "motionDirection": compact_text(video.get("motionDirection"), 360) or "Ken Burns, glow, particles, waveform and lyric punches.",
+            "motionDirection": compact_text(video.get("motionDirection"), 360) or "Ken Burns sutil, cortes por beat y subtitulos solo si hay timestamps reales.",
         },
         "youtube": {
             "title": compact_text(youtube.get("title"), 120) or title,
@@ -545,11 +548,12 @@ def _import_scene_prompt(section: str, sample_lines: list[str], visual_identity:
     sample = " / ".join(sample_lines[:3]) or section
     return compact_text(
         (
-            "16:9 cinematic text-free music-video still, Flux/Krea photoreal editorial quality, "
+            "16:9 cinematic text-free music-video still, Flux/Kontext/Krea photoreal editorial quality, "
             f"section {section}, inspired by these lyric ideas: {sample}. "
             f"Visual identity: {visual_identity}. Musical energy: {style_label}. "
             "Represent the emotion and action of the lyrics with a concrete scene, not a generic abstract background. "
-            "Use strong subject, premium lighting, clean negative space, no readable text, no logos."
+            "Vary subject, setting, action and camera distance. Do not repeat a man running unless the lyric explicitly says running. "
+            "Use strong subject, premium lighting, clean negative space, no readable text, no logos, no signs, no typography, no pseudo-letters."
         ),
         900,
     )
@@ -576,7 +580,7 @@ def build_imported_song_package(payload: dict | None = None) -> dict:
     if not visual_identity:
         visual_identity = (
             "premium motivational music-video identity with cinematic scenes that follow the lyrics, "
-            "strong movement, sunrise contrast, disciplined emotion and clean heroic energy"
+            "varied symbolic objects, human emotion, sunrise contrast, disciplined energy and clean negative space"
         )
 
     sections = _song_sections_from_lyrics(lyrics, limit=7)
@@ -624,7 +628,7 @@ def build_imported_song_package(payload: dict | None = None) -> dict:
                 compact_text(payload.get("emberColor"), 40) or "#E0533D energia roja",
             ],
             "scenes": scenes,
-            "motionDirection": "One lyric-aligned still every 5 seconds, subtle Ken Burns, beat cuts, premium subtitles synced by lyric block.",
+            "motionDirection": "One lyric-aware still every 5 seconds, subtle Ken Burns and beat cuts; subtitles only when real timestamps are available.",
         },
         "youtube": {
             "title": youtube_title or f"{title} | Musica motivacional",
@@ -637,7 +641,7 @@ def build_imported_song_package(payload: dict | None = None) -> dict:
         "productionNotes": [
             "Cancion importada: la letra no fue generada por Content Factory en este paso.",
             "El video se renderiza en VPS con imagenes de Comfy/Flux alineadas a la letra cada 5 segundos.",
-            "Los subtitulos se sincronizan por bloques de letra aproximados al audio.",
+            "Los subtitulos solo se activan si Whisper alinea la letra con confianza suficiente; si no, el video queda sin subtitulos.",
         ],
         "safetyNotes": [
             "Mensajes de autoprogramacion explicitos y saludables, no subliminales ocultos.",
@@ -649,7 +653,7 @@ def build_imported_song_package(payload: dict | None = None) -> dict:
     package["importedSong"] = {
         "mode": "lyrics_plus_audio",
         "visualIntervalSeconds": 5,
-        "subtitleSync": "lyric_blocks",
+        "subtitleSync": "whisper_word_aligned_or_off",
     }
     package["lyricScore"] = _score_power_music_package(package)
     return package

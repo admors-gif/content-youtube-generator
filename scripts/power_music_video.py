@@ -1,3 +1,4 @@
+import base64
 import json
 import math
 import os
@@ -5,6 +6,7 @@ import random
 import re
 import subprocess
 import unicodedata
+import urllib.request
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -17,6 +19,13 @@ FPS = 30
 DEFAULT_VISUAL_INTERVAL_SECONDS = 5.0
 DEFAULT_MAX_VISUAL_BEATS = 120
 DEFAULT_MAX_COMFY_IMAGES = 120
+DEFAULT_SUBTITLE_MIN_ALIGNMENT_SCORE = 0.62
+DEFAULT_SUBTITLE_MIN_PHRASE_RATIO = 0.55
+TEXT_FREE_NEGATIVE_PROMPT = (
+    "No readable text, no letters, no typography, no captions, no lyrics, "
+    "no logo, no watermark, no UI, no signs, no book pages, no posters, "
+    "no screens with writing, no gibberish text, no pseudo-words."
+)
 _VIGNETTE_CACHE = {}
 
 
@@ -30,6 +39,13 @@ def _env_bool(name, default=False):
 def _env_float(name, default):
     try:
         return max(1.0, float(os.getenv(name, default)))
+    except Exception:
+        return default
+
+
+def _env_ratio(name, default):
+    try:
+        return min(1.0, max(0.0, float(os.getenv(name, default))))
     except Exception:
         return default
 
@@ -218,6 +234,223 @@ def _draw_frame(size, palette, title, subtitle, overlay, prompt, seed, square=Fa
     return img.convert("RGB")
 
 
+def _music_thumbnail_model():
+    return os.getenv("CONTENT_FACTORY_MUSIC_THUMBNAIL_MODEL", "gpt-image-2").strip() or "gpt-image-2"
+
+
+def _music_thumbnail_model_candidates():
+    configured = [
+        item.strip()
+        for item in os.getenv("CONTENT_FACTORY_MUSIC_THUMBNAIL_MODELS", "").split(",")
+        if item.strip()
+    ]
+    if configured:
+        return configured
+    primary = _music_thumbnail_model()
+    candidates = [primary]
+    for fallback in ["gpt-image-1.5", "gpt-image-1"]:
+        if fallback not in candidates:
+            candidates.append(fallback)
+    return candidates
+
+
+def _music_thumbnail_quality():
+    return os.getenv("CONTENT_FACTORY_MUSIC_THUMBNAIL_QUALITY", "high").strip() or "high"
+
+
+def _music_thumbnail_size(model):
+    configured = os.getenv("CONTENT_FACTORY_MUSIC_THUMBNAIL_SIZE", "").strip()
+    if configured:
+        return configured
+    if str(model).startswith("gpt-image"):
+        return "1536x1024"
+    return "1792x1024"
+
+
+def _music_premium_thumbnail_enabled():
+    default = bool(os.getenv("OPENAI_API_KEY"))
+    return _env_bool("CONTENT_FACTORY_MUSIC_PREMIUM_THUMBNAIL_ENABLED", default=default) and bool(os.getenv("OPENAI_API_KEY"))
+
+
+def _write_openai_image_data(image_data, output_path):
+    b64_value = getattr(image_data, "b64_json", None)
+    if b64_value is None and isinstance(image_data, dict):
+        b64_value = image_data.get("b64_json")
+    if b64_value:
+        output_path.write_bytes(base64.b64decode(b64_value))
+        return output_path.exists() and output_path.stat().st_size > 0
+
+    image_url = getattr(image_data, "url", None)
+    if image_url is None and isinstance(image_data, dict):
+        image_url = image_data.get("url")
+    if image_url:
+        with urllib.request.urlopen(image_url, timeout=120) as resp:
+            output_path.write_bytes(resp.read())
+        return output_path.exists() and output_path.stat().st_size > 0
+    return False
+
+
+def _thumbnail_hook_text(package, title):
+    youtube = package.get("youtube") if isinstance(package.get("youtube"), dict) else {}
+    candidates = [
+        youtube.get("thumbnailText"),
+        package.get("mainHook"),
+        package.get("mantra"),
+        title,
+    ]
+    for candidate in candidates:
+        text = compact_text(candidate, 70)
+        if text:
+            return text
+    return title or "POWER MUSIC"
+
+
+def _build_music_thumbnail_prompt(package, title, subtitle, hook_text):
+    video = _video_concept(package)
+    visual_identity = compact_text(video.get("visualIdentity"), 360) or (
+        "premium cinematic music-video identity, emotional, bold, high contrast, creator-grade"
+    )
+    lyrics = compact_text(package.get("lyrics"), 700)
+    cover_prompt = compact_text(package.get("coverPrompt"), 700)
+    palette = ", ".join(str(c) for c in (video.get("palette") or [])[:4]) or "deep black, gold, ember red"
+    return (
+        "Create a text-free YouTube music thumbnail background, 16:9 landscape.\n"
+        f"Song title: {title}.\n"
+        f"Clickable hook phrase that will be added later by code: {hook_text}.\n"
+        f"Subtitle/emotional promise: {subtitle}.\n"
+        f"Visual identity: {visual_identity}.\n"
+        f"Palette: {palette}.\n"
+        f"Lyric excerpt for meaning: {lyrics}.\n"
+        f"Cover direction: {cover_prompt}.\n"
+        "Make the image visually tied to the song's emotional conflict or title, not a generic gym poster. "
+        "Use one iconic cinematic metaphor, strong human emotion or symbolic object, dramatic depth, premium lighting, "
+        "clear subject, high click appeal, polished music-video poster quality. Leave clean negative space on the left "
+        "for exact title overlay by the backend. "
+        f"{TEXT_FREE_NEGATIVE_PROMPT} No PowerPoint card layout, no flat template, no readable text anywhere."
+    )
+
+
+def _generate_music_thumbnail_background(package, title, subtitle, hook_text, output_path):
+    if not _music_premium_thumbnail_enabled():
+        return ""
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", "").strip())
+        prompt = _build_music_thumbnail_prompt(package, title, subtitle, hook_text)
+        last_error = ""
+        for model in _music_thumbnail_model_candidates():
+            params = {
+                "model": model,
+                "prompt": prompt,
+                "size": _music_thumbnail_size(model),
+                "quality": _music_thumbnail_quality(),
+                "n": 1,
+            }
+            if str(model).startswith("gpt-image"):
+                params["output_format"] = "jpeg"
+                params["output_compression"] = 92
+            try:
+                response = client.images.generate(**params)
+            except Exception as exc:
+                last_error = str(exc)[:300]
+                if "output_format" in last_error or "output_compression" in last_error:
+                    params.pop("output_format", None)
+                    params.pop("output_compression", None)
+                    try:
+                        response = client.images.generate(**params)
+                    except Exception as retry_exc:
+                        last_error = str(retry_exc)[:300]
+                        print(f"   [music-thumbnail] {model} retry failed: {last_error}", flush=True)
+                        continue
+                else:
+                    print(f"   [music-thumbnail] {model} failed: {last_error}", flush=True)
+                    continue
+            data = getattr(response, "data", None) or []
+            if not data:
+                last_error = "Image API returned no data"
+                continue
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            if _write_openai_image_data(data[0], output_path):
+                return model
+        if last_error:
+            print(f"   [music-thumbnail] OpenAI thumbnail unavailable: {last_error}", flush=True)
+        return ""
+    except Exception as exc:
+        print(f"   [music-thumbnail] OpenAI thumbnail failed: {exc}", flush=True)
+        return ""
+
+
+def _draw_music_thumbnail_overlay(base_image_path, output_path, palette, title, hook_text, subtitle):
+    try:
+        img = Image.open(base_image_path).convert("RGB")
+    except Exception:
+        return False
+    img = _resize_cover(img, THUMB_SIZE).convert("RGBA")
+    w, h = THUMB_SIZE
+    shade = Image.new("RGBA", THUMB_SIZE, (0, 0, 0, 0))
+    px = shade.load()
+    for y in range(h):
+        for x in range(w):
+            left = max(0.0, 1.0 - (x / max(1, w * 0.72)))
+            bottom = max(0.0, (y - h * 0.55) / max(1, h * 0.45))
+            alpha = int(min(210, 52 + left * 168 + bottom * 58))
+            px[x, y] = (0, 0, 0, alpha)
+    img = Image.alpha_composite(img, shade)
+    draw = ImageDraw.Draw(img, "RGBA")
+
+    paper = (250, 246, 236, 255)
+    dim = (225, 215, 197, 230)
+    ember = (*palette[2], 255)
+    gold = (*palette[1], 250)
+    margin = 68
+    badge_font = load_font(26, bold=False)
+    hook_font = load_font(74, bold=True)
+    title_font = load_font(34, bold=False)
+
+    draw.text((margin, 46), "POWER MUSIC", font=badge_font, fill=gold)
+    draw.rounded_rectangle((margin, 90, margin + 250, 96), radius=3, fill=ember)
+
+    hook_lines = _wrap_text(draw, compact_text(hook_text, 58).upper(), hook_font, 660)[:3]
+    while len(hook_lines) > 2 and hook_font.size > 54:
+        hook_font = load_font(hook_font.size - 4, bold=True)
+        hook_lines = _wrap_text(draw, compact_text(hook_text, 58).upper(), hook_font, 690)[:3]
+    y = 220
+    for line in hook_lines:
+        draw.text((margin, y), line, font=hook_font, fill=paper, stroke_width=4, stroke_fill=(0, 0, 0, 210))
+        y += hook_font.size + 8
+
+    title_clean = compact_text(title, 90)
+    if title_clean and title_clean.lower() != compact_text(hook_text, 90).lower():
+        for line in _wrap_text(draw, title_clean, title_font, 620)[:2]:
+            draw.text((margin, y + 18), line, font=title_font, fill=dim, stroke_width=2, stroke_fill=(0, 0, 0, 180))
+            y += title_font.size + 4
+
+    if subtitle:
+        sub_font = load_font(26, bold=False)
+        sub = compact_text(subtitle, 110)
+        for line in _wrap_text(draw, sub, sub_font, 640)[:2]:
+            draw.text((margin, h - 110), line, font=sub_font, fill=dim)
+            break
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    img.convert("RGB").save(output_path, quality=94)
+    return output_path.exists() and output_path.stat().st_size > 5000
+
+
+def _build_music_thumbnail(package, palette, title, subtitle, output_path):
+    hook_text = _thumbnail_hook_text(package, title)
+    raw_path = output_path.with_name("thumbnail_openai_raw.jpg")
+    thumbnail_model = _generate_music_thumbnail_background(package, title, subtitle, hook_text, raw_path)
+    if thumbnail_model:
+        if _draw_music_thumbnail_overlay(raw_path, output_path, palette, title, hook_text, subtitle):
+            return f"openai_{thumbnail_model}_exact_overlay"
+
+    fallback = _draw_frame(THUMB_SIZE, palette, title, subtitle, hook_text, package.get("coverPrompt"), 17)
+    fallback.save(output_path, quality=94)
+    return "local_exact_overlay_fallback"
+
+
 def _resize_cover(img, size):
     target_w, target_h = size
     src_w, src_h = img.size
@@ -283,7 +516,7 @@ def _compose_generated_frame(source_path, output_path, palette, beat):
         draw.text((margin + 24, h - 136), section, font=section_font, fill=dim)
 
     lyric = compact_text(beat.get("lyric") or beat.get("overlay"), 96)
-    if lyric:
+    if lyric and beat.get("showLyricOverlay"):
         lines = _wrap_text(draw, lyric, lyric_font, w - margin * 2 - 40)[:2]
         total_h = len(lines) * 52
         y = h - 92 - total_h
@@ -294,6 +527,41 @@ def _compose_generated_frame(source_path, output_path, palette, beat):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.convert("RGB").save(output_path, quality=93)
     return output_path.exists() and output_path.stat().st_size > 5000
+
+
+def _draw_music_visual_fallback_frame(size, palette, title, beat, seed):
+    """Text-light fallback frame used only when generated images are missing."""
+    img = _background(size, palette, seed=seed)
+    w, h = size
+    draw = ImageDraw.Draw(img, "RGBA")
+    paper = (246, 242, 232, 245)
+    dim = (210, 200, 184, 210)
+    ember = (*palette[2], 245)
+    margin = int(w * 0.055)
+    small_font = load_font(25, bold=False)
+    title_font = load_font(42, bold=True)
+    lyric_font = load_font(48, bold=True)
+
+    draw.text((margin, 44), "POWER MUSIC", font=small_font, fill=dim)
+    section = compact_text(beat.get("section"), 38).upper()
+    if section:
+        draw.text((margin, h - 92), section, font=small_font, fill=ember)
+
+    if beat.get("showLyricOverlay"):
+        lyric = compact_text(beat.get("lyric") or beat.get("overlay"), 92)
+        y = int(h * 0.68)
+        for line in _wrap_text(draw, lyric, lyric_font, w - margin * 2)[:2]:
+            draw.text((margin, y), line, font=lyric_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 190))
+            y += lyric_font.size + 8
+    else:
+        # Keep a small deterministic title only, so failed Comfy renders do not
+        # become fake lyric subtitles.
+        title_clean = compact_text(title, 80)
+        y = h - 165
+        for line in _wrap_text(draw, title_clean, title_font, int(w * 0.48))[:2]:
+            draw.text((margin, y), line, font=title_font, fill=paper, stroke_width=2, stroke_fill=(0, 0, 0, 180))
+            y += title_font.size + 4
+    return img.convert("RGB")
 
 
 def _run(cmd, timeout=900):
@@ -387,7 +655,7 @@ def _music_whisper_enabled():
 def _normalize_token_text(value):
     text = unicodedata.normalize("NFKD", str(value or "").lower())
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
-    return re.findall(r"[a-z0-9áéíóúñü]+", text, flags=re.I)
+    return re.findall(r"[a-z0-9]+", text, flags=re.I)
 
 
 def _word_token(value):
@@ -532,12 +800,43 @@ def _align_lyrics_to_transcribed_words(units, words, duration):
     return segments
 
 
+def _subtitle_alignment_quality(segments, units):
+    phrase_segments = [
+        segment for segment in (segments or [])
+        if segment.get("alignmentMode") == "phrase_match" and float(segment.get("alignmentScore") or 0) > 0
+    ]
+    scores = [float(segment.get("alignmentScore") or 0) for segment in phrase_segments]
+    avg_score = sum(scores) / max(1, len(scores))
+    phrase_ratio = len(phrase_segments) / max(1, len(segments or []))
+    coverage = len(segments or []) / max(1, len(units or []))
+    min_score = _env_ratio("CONTENT_FACTORY_MUSIC_SUBTITLE_MIN_ALIGNMENT_SCORE", DEFAULT_SUBTITLE_MIN_ALIGNMENT_SCORE)
+    min_phrase_ratio = _env_ratio("CONTENT_FACTORY_MUSIC_SUBTITLE_MIN_PHRASE_RATIO", DEFAULT_SUBTITLE_MIN_PHRASE_RATIO)
+    min_segments = min(4, max(1, len(units or []) // 4))
+    publishable = (
+        len(segments or []) >= min_segments
+        and coverage >= 0.35
+        and phrase_ratio >= min_phrase_ratio
+        and avg_score >= min_score
+    )
+    return {
+        "publishable": publishable,
+        "avgAlignmentScore": round(avg_score, 3),
+        "phraseMatchRatio": round(phrase_ratio, 3),
+        "coverage": round(coverage, 3),
+        "minAlignmentScore": min_score,
+        "minPhraseMatchRatio": min_phrase_ratio,
+        "phraseMatchedSegments": len(phrase_segments),
+        "minSegments": min_segments,
+    }
+
+
 def _build_whisper_subtitle_segments(package, audio_path, duration):
     diagnostics = {
         "enabled": bool(_music_whisper_enabled()),
         "model": "whisper-1",
         "words": 0,
         "segments": 0,
+        "publishable": False,
         "mode": "disabled",
         "error": "",
     }
@@ -570,9 +869,16 @@ def _build_whisper_subtitle_segments(package, audio_path, duration):
         return [], diagnostics
     segments = _align_lyrics_to_transcribed_words(units, words, duration)
     diagnostics["segments"] = len(segments)
-    diagnostics["mode"] = "whisper_word_aligned" if segments else "alignment_empty"
+    quality = _subtitle_alignment_quality(segments, units)
+    diagnostics.update(quality)
+    diagnostics["mode"] = "whisper_word_aligned" if segments and quality["publishable"] else "alignment_low_confidence"
     if not segments:
+        diagnostics["mode"] = "alignment_empty"
         diagnostics["error"] = "lyrics could not be aligned to transcription"
+        return [], diagnostics
+    if not quality["publishable"]:
+        diagnostics["error"] = "lyrics transcription alignment was too weak for publishable subtitles"
+        return [], diagnostics
     return segments, diagnostics
 
 
@@ -643,27 +949,54 @@ def _match_scene_for_section(scenes, section, index):
 
 
 def _visual_mood_from_line(line):
-    text = str(line or "").lower()
+    tokens = set(_normalize_token_text(line))
     signals = []
-    if any(word in text for word in ["miedo", "excusa", "duda", "tiembla", "cans", "caer"]):
+    if tokens & {"miedo", "duda", "caer", "cansado", "excusa", "tiembla"}:
         signals.append("inner resistance turning into controlled strength")
-    if any(word in text for word in ["cumplo", "promesa", "disciplina", "plan", "paso"]):
+    if tokens & {"cumplo", "promesa", "disciplina", "plan", "paso", "constancia"}:
         signals.append("discipline, commitment, forward motion")
-    if any(word in text for word in ["fuego", "hierro", "sudor", "entreno", "levanto"]):
-        signals.append("physical power, gym energy, sweat, metal, sunrise")
-    if any(word in text for word in ["niño", "futuro", "historia", "version"]):
-        signals.append("identity transformation, memory and future self")
-    if any(word in text for word in ["respiro", "calma", "silencio", "mente"]):
+    if tokens & {"fuego", "hierro", "sudor", "entreno", "levanto", "golpe"}:
+        signals.append("physical power, heat, texture, effort, controlled intensity")
+    if tokens & {"nino", "futuro", "historia", "version", "recuerdo"}:
+        signals.append("identity transformation, memory, future self")
+    if tokens & {"respiro", "calma", "silencio", "mente", "paz"}:
         signals.append("breath, focus, quiet confidence")
-    if any(word in text for word in ["no negocio", "decido", "elijo", "hoy", "nunca mas"]):
+    if tokens & {"decido", "elijo", "hoy", "nunca", "limite", "palabra"}:
         signals.append("decisive boundary, self-command, internal leadership")
-    if any(word in text for word in ["cama", "amanece", "despierto", "mañana", "dia"]):
+    if tokens & {"cama", "amanece", "despierto", "manana", "dia"}:
         signals.append("morning transition, leaving comfort, first disciplined action")
-    if any(word in text for word in ["corro", "calle", "ruta", "camino", "cima"]):
-        signals.append("forward movement, road, sunrise, endurance")
-    if any(word in text for word in ["mi palabra", "promesa", "contrato", "firma"]):
-        signals.append("oath, signature, contract with the stronger self")
+    if tokens & {"corro", "calle", "ruta", "camino", "cima"}:
+        signals.append("endurance, road, altitude, sunrise, directional movement")
     return ", ".join(signals) or "premium emotional motivation, identity, momentum"
+
+
+def _visual_story_moment(line, index, section):
+    tokens = set(_normalize_token_text(f"{section} {line}"))
+    motif_bank = [
+        "a quiet room before dawn, shoes on the floor, one decisive first step",
+        "a mirror with a strong silhouette facing its future self, no text on the glass",
+        "hands tying worn training shoes under cinematic window light, no visible lettering",
+        "a city street at blue hour with one focused figure in the distance, not running",
+        "a close-up of breath in cold air, face partly shadowed, controlled emotion",
+        "gym iron, chalk dust, and empty space, no brand marks, no readable labels",
+        "a symbolic threshold: door opening to sunrise, disciplined calm",
+        "a table with a blank notebook, pen, keys, and morning light, no written pages",
+        "a lone car at night on a wet road, headlights cutting through fog",
+        "an abstract but concrete symbol: ember light inside cracked stone, no text",
+    ]
+    if tokens & {"cama", "despierto", "manana", "amanece", "dia"}:
+        return "early morning bedroom transition, leaving comfort behind, cinematic first action"
+    if tokens & {"fuego", "hierro", "sudor", "entreno", "levanto"}:
+        return "physical effort still life: iron, sweat, breath, focused movement, no logos"
+    if tokens & {"miedo", "duda", "caer", "excusa"}:
+        return "internal resistance visualized as shadow and controlled posture, tension without melodrama"
+    if tokens & {"promesa", "palabra", "cumplo", "contrato"}:
+        return "oath-like scene with blank paper, hand near pen, dramatic light, no written words"
+    if tokens & {"corro", "ruta", "calle", "camino", "cima"}:
+        return "wide endurance landscape with directional movement; avoid repeating a male runner close-up"
+    if tokens & {"respiro", "calma", "silencio", "mente"}:
+        return "quiet breath and focus scene, cinematic close-up, negative space, no text"
+    return motif_bank[index % len(motif_bank)]
 
 
 def _build_music_visual_prompt(package, beat, scene, palette):
@@ -678,24 +1011,25 @@ def _build_music_visual_prompt(package, beat, scene, palette):
     section = compact_text(beat.get("section"), 60)
     scene_prompt = compact_text(scene.get("visualPrompt"), 520)
     mood = _visual_mood_from_line(lyric)
+    story_moment = compact_text(beat.get("storyMoment") or _visual_story_moment(lyric, int(beat.get("index") or 0), section), 320)
     colors = ", ".join(str(c) for c in (video.get("palette") or [])[:4]) or f"deep black, gold, ember red, {palette[0]}"
 
     return compact_text(
         (
             "PROMPT CONTRACT: generate ONE clean, text-free, 16:9 cinematic still for a music video. "
-            "Do not draw typography; subtitles will be added later by the renderer. "
+            "Do not draw typography, signs, logos, subtitles, captions, lyric sheets, or pseudo-text. "
             "Interpret the lyric semantically and emotionally, not as random decoration. "
-            "Flux Krea photoreal editorial quality, premium composition, clear subject, cinematic lighting, high emotional clarity. "
+            "Flux/Kontext/Krea photoreal editorial quality, premium composition, clear subject, cinematic lighting, high emotional clarity. "
             f"Song: {title}. Section: {section}. Style: {style}. Intention: {intention}. "
             f"Previous lyric context: {previous_lyric}. Current lyric to visualize: {lyric}. Next lyric context: {next_lyric}. "
             f"Meaning map: {mood}. Visual identity to keep consistent: {identity}. Palette: {colors}. "
-            f"Base scene direction: {scene_prompt}. "
-            "Choose a concrete, relevant image: a disciplined person in motion, gym iron, sunrise road, mirror transformation, breath in cold air, "
-            "a signed oath, focused eyes, shoes leaving the bedroom, city at dawn, or symbolic strength only when the lyric is abstract. "
-            "The image must make sense even if the subtitle is hidden. Avoid generic waveform backgrounds, empty graphic templates, random neon circles, stock-photo smiles, "
-            "fake text, logos, watermarks, UI, frame borders, captions, readable letters, misspelled typography, extra limbs, distorted hands."
+            f"Specific storyboard moment for this beat: {story_moment}. Base scene direction: {scene_prompt}. "
+            "Choose a concrete image that makes sense even if all subtitles are hidden. Vary subject, camera distance, setting, and action from beat to beat. "
+            "Do not repeat a man running unless the current lyric explicitly mentions running; prefer symbolic objects, close-ups, environments, silhouettes, and emotional action. "
+            "Avoid generic waveform backgrounds, empty graphic templates, random neon circles, stock-photo smiles, and repetitive gym/running shots. "
+            f"{TEXT_FREE_NEGATIVE_PROMPT} Avoid extra limbs, distorted hands, bad anatomy, malformed faces."
         ),
-        1600,
+        1900,
     )
 
 
@@ -717,7 +1051,7 @@ def _timed_segment_for_window(segments, start, end):
     return best_index, segments[best_index]
 
 
-def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_segments=None):
+def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_segments=None, show_lyric_overlay=False):
     scenes = _scene_list(package)
     units = _lyric_units(package.get("lyrics"))
     if not units:
@@ -754,9 +1088,12 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_se
         text_overlay = compact_text(unit.get("line"), 60) or compact_text(scene.get("textOverlay"), 60)
         prompt_context = {
             **unit,
+            "index": index,
             "previousLine": previous_unit.get("line") if isinstance(previous_unit, dict) else "",
             "nextLine": next_unit.get("line") if isinstance(next_unit, dict) else "",
         }
+        story_moment = _visual_story_moment(unit.get("line"), index, unit.get("section"))
+        prompt_context["storyMoment"] = story_moment
         prompt = _build_music_visual_prompt(package, prompt_context, scene, palette)
         beats.append(
             {
@@ -765,6 +1102,8 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_se
                 "lyric": compact_text(unit.get("line"), 180),
                 "subtitle": compact_text(unit.get("line"), 150),
                 "overlay": text_overlay,
+                "storyMoment": story_moment,
+                "showLyricOverlay": bool(show_lyric_overlay),
                 "prompt": prompt,
                 "start": round(start, 3),
                 "end": round(end, 3),
@@ -782,6 +1121,32 @@ def _comfy_music_enabled():
     return _env_bool("CONTENT_FACTORY_MUSIC_COMFY_ENABLED", default=default) and bool(os.getenv("COMFYUI_API_KEY"))
 
 
+def _music_image_workflow_spec(_select_image_workflow):
+    workflow = _select_image_workflow("narrativa")
+    workflow["label"] = os.getenv("CONTENT_FACTORY_MUSIC_COMFY_LABEL", "FLUX/Krea Power Music Premium")
+    workflow["width"] = _env_int("CONTENT_FACTORY_MUSIC_COMFY_WIDTH", int(workflow.get("width") or VIDEO_SIZE[0]))
+    workflow["height"] = _env_int("CONTENT_FACTORY_MUSIC_COMFY_HEIGHT", int(workflow.get("height") or VIDEO_SIZE[1]))
+    custom_workflow = os.getenv("CONTENT_FACTORY_MUSIC_COMFY_WORKFLOW_PATH", "").strip()
+    if custom_workflow:
+        path = Path(custom_workflow)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parents[1] / custom_workflow
+        workflow["workflow"] = path
+        workflow["label"] = os.getenv("CONTENT_FACTORY_MUSIC_COMFY_LABEL", f"Power Music custom workflow: {path.name}")
+    for env_name, key in [
+        ("CONTENT_FACTORY_MUSIC_COMFY_PROMPT_NODE", "prompt_node"),
+        ("CONTENT_FACTORY_MUSIC_COMFY_PROMPT_INPUT", "prompt_input"),
+        ("CONTENT_FACTORY_MUSIC_COMFY_SEED_NODE", "seed_node"),
+        ("CONTENT_FACTORY_MUSIC_COMFY_SEED_INPUT", "seed_input"),
+        ("CONTENT_FACTORY_MUSIC_COMFY_SIZE_NODE", "size_node"),
+        ("CONTENT_FACTORY_MUSIC_COMFY_SAVE_NODE", "save_node"),
+    ]:
+        value = os.getenv(env_name, "").strip()
+        if value:
+            workflow[key] = value
+    return workflow
+
+
 def _generate_comfy_beat_images(beats, images_dir):
     """Generate beat-aligned images with the existing Comfy/Flux pipeline.
 
@@ -795,6 +1160,8 @@ def _generate_comfy_beat_images(beats, images_dir):
         "generated": 0,
         "skipped": 0,
         "failed": 0,
+        "workflow": "",
+        "workflowLabel": "",
         "missing": [],
         "invalid": [],
         "error": "",
@@ -813,8 +1180,9 @@ def _generate_comfy_beat_images(beats, images_dir):
     try:
         from scripts.factory import generate_comfy_images, _select_image_workflow
 
-        workflow = _select_image_workflow("narrativa")
-        workflow["label"] = "FLUX/Krea Power Music"
+        workflow = _music_image_workflow_spec(_select_image_workflow)
+        stats["workflow"] = str(workflow.get("workflow") or "")
+        stats["workflowLabel"] = workflow.get("label") or ""
         result = generate_comfy_images(comfy_scenes, images_dir, workflow, pipeline_format="narrativa")
         stats.update(
             {
@@ -846,8 +1214,19 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     requested_interval = _env_float("CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS", DEFAULT_VISUAL_INTERVAL_SECONDS)
     max_visual_beats = _env_int("CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS", DEFAULT_MAX_VISUAL_BEATS)
     subtitle_segments, subtitle_diagnostics = _build_whisper_subtitle_segments(package, audio_path, duration)
-    subtitle_mode = "whisper_word_aligned" if subtitle_segments else "lyric_blocks_estimated"
-    beats, visual_interval = _build_visual_beats(package, duration, requested_interval, max_visual_beats, timed_segments=subtitle_segments)
+    subtitle_mode = "whisper_word_aligned" if subtitle_segments else "off_no_reliable_timestamps"
+    show_lyric_overlay = _env_bool(
+        "CONTENT_FACTORY_MUSIC_LYRIC_OVERLAY_ENABLED",
+        default=bool(subtitle_segments),
+    ) and bool(subtitle_segments)
+    beats, visual_interval = _build_visual_beats(
+        package,
+        duration,
+        requested_interval,
+        max_visual_beats,
+        timed_segments=subtitle_segments,
+        show_lyric_overlay=show_lyric_overlay,
+    )
 
     cover_path = output_dir / "cover.jpg"
     thumbnail_path = output_dir / "thumbnail.jpg"
@@ -859,9 +1238,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
 
     cover = _draw_frame(COVER_SIZE, palette, title, subtitle, package.get("mainHook") or title, package.get("coverPrompt"), 11, square=True)
     cover.save(cover_path, quality=94)
-    thumb_text = ((package.get("youtube") or {}).get("thumbnailText") if isinstance(package.get("youtube"), dict) else "") or package.get("mainHook") or title
-    thumb = _draw_frame(THUMB_SIZE, palette, title, subtitle, thumb_text, package.get("coverPrompt"), 17)
-    thumb.save(thumbnail_path, quality=94)
+    thumbnail_engine = _build_music_thumbnail(package, palette, title, subtitle, thumbnail_path)
 
     comfy_dir = output_dir / "comfy"
     comfy_stats = _generate_comfy_beat_images(beats, comfy_dir)
@@ -875,15 +1252,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         if comfy_path.exists() and comfy_path.stat().st_size > 5000 and _compose_generated_frame(comfy_path, image_path, palette, beat):
             generated_frames += 1
         else:
-            frame = _draw_frame(
-                VIDEO_SIZE,
-                palette,
-                title,
-                beat.get("section"),
-                beat.get("overlay") or package.get("mainHook") or title,
-                beat.get("prompt"),
-                100 + index,
-            )
+            frame = _draw_music_visual_fallback_frame(VIDEO_SIZE, palette, title, beat, 100 + index)
             frame.save(image_path, quality=92)
             fallback_frames += 1
 
@@ -959,7 +1328,8 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     if subtitle_segments:
         subtitle_count = _write_subtitle_segments(subtitle_segments, subtitles_path)
     else:
-        subtitle_count = _write_subtitle_file(beats, subtitles_path)
+        subtitles_path.write_text("", encoding="utf-8")
+        subtitle_count = 0
     metadata = {
         "trackId": track_id,
         "title": title,
@@ -969,6 +1339,8 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "visualIntervalSeconds": round(visual_interval, 3),
         "requestedVisualIntervalSeconds": round(requested_interval, 3),
         "visualProvider": "comfy_flux" if generated_frames else "local_fallback",
+        "thumbnailEngine": thumbnail_engine,
+        "showLyricOverlay": show_lyric_overlay,
         "comfy": comfy_stats,
         "generatedFrames": generated_frames,
         "fallbackFrames": fallback_frames,
@@ -988,6 +1360,8 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
                 "sourceScene": beat.get("sourceScene"),
                 "alignmentMode": beat.get("alignmentMode"),
                 "alignmentScore": beat.get("alignmentScore"),
+                "storyMoment": beat.get("storyMoment"),
+                "showLyricOverlay": beat.get("showLyricOverlay"),
                 "prompt": beat.get("prompt"),
             }
             for beat in beats
@@ -998,7 +1372,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
             "cover": cover_path.name,
             "lyrics": lyrics_path.name,
             "sunoPrompt": suno_path.name,
-            "subtitles": subtitles_path.name,
+            "subtitles": subtitles_path.name if subtitle_count else "",
         },
         "youtube": package.get("youtube") or {},
         "safetyNotes": package.get("safetyNotes") or [],
@@ -1012,7 +1386,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "metadata": metadata_path,
         "lyrics": lyrics_path,
         "sunoPrompt": suno_path,
-        "subtitles": subtitles_path,
+        "subtitles": subtitles_path if subtitle_count else None,
         "durationSeconds": duration,
         "sceneCount": len(beats),
         "visualBeatCount": len(beats),
@@ -1025,4 +1399,6 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "subtitleMode": metadata["subtitleMode"],
         "subtitleCount": metadata["subtitleCount"],
         "subtitleDiagnostics": metadata["subtitleDiagnostics"],
+        "thumbnailEngine": metadata["thumbnailEngine"],
+        "showLyricOverlay": metadata["showLyricOverlay"],
     }

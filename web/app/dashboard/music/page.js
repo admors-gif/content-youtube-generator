@@ -462,7 +462,17 @@ function renderStatusLabel(status) {
 function subtitleModeLabel(mode) {
   if (mode === "whisper_word_aligned") return "Whisper";
   if (mode === "lyric_blocks_estimated") return "SRT estimado";
+  if (mode === "off_no_reliable_timestamps") return "Sin subtítulos";
+  if (mode === "alignment_low_confidence") return "Sin subtítulos";
   return "";
+}
+
+function thumbnailEngineLabel(engine) {
+  const value = safeText(engine).toLowerCase();
+  if (!value) return "";
+  if (value.includes("openai")) return "Miniatura OpenAI";
+  if (value.includes("fallback")) return "Miniatura local";
+  return "Miniatura premium";
 }
 
 function AudioVersionList({
@@ -511,6 +521,7 @@ function AudioVersionList({
                   {active && <span style={pillStyle("ok")}>toma activa</span>}
                   <span style={pillStyle(renderStatusTone(render?.status))}>{renderStatusLabel(render?.status)}</span>
                   {subtitleModeLabel(render?.subtitleMode) && <span style={pillStyle(render?.subtitleMode === "whisper_word_aligned" ? "ok" : "neutral")}>{subtitleModeLabel(render?.subtitleMode)}</span>}
+                  {thumbnailEngineLabel(render?.thumbnailEngine) && <span style={pillStyle(render?.thumbnailEngine?.includes?.("openai") ? "ok" : "neutral")}>{thumbnailEngineLabel(render.thumbnailEngine)}</span>}
                 </div>
               </div>
               <div className="cf-music-version-actions">
@@ -553,7 +564,7 @@ function AudioVersionList({
                   Miniatura
                 </a>
               )}
-              {render?.subtitles?.url && (
+              {render?.subtitles?.url && Number(render?.subtitleCount || 0) > 0 && (
                 <a className="cf-button cf-button--subtle" href={render.subtitles.url} target="_blank" rel="noreferrer">
                   <Icon name="fileText" size={16} />
                   SRT
@@ -609,7 +620,7 @@ function RenderHistoryList({ renders, versions }) {
                   <span style={pillStyle(renderStatusTone(render.status))}>{renderStatusLabel(render.status)}</span>
                 </div>
                 <div className="cf-caption" style={{ marginTop: 6 }}>
-                  {[duration, beatCount ? `${beatCount} beats visuales` : "", render.visualProvider ? (render.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local") : "", subtitleModeLabel(render.subtitleMode), formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}
+                  {[duration, beatCount ? `${beatCount} beats visuales` : "", render.visualProvider ? (render.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local") : "", thumbnailEngineLabel(render.thumbnailEngine), subtitleModeLabel(render.subtitleMode), formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}
                 </div>
                 {render.error && <div className="cf-caption" style={{ color: "var(--bad)", marginTop: 6 }}>{safeText(render.error)}</div>}
               </div>
@@ -627,7 +638,7 @@ function RenderHistoryList({ renders, versions }) {
                   Miniatura
                 </a>
               )}
-              {render.subtitles?.url && (
+              {render.subtitles?.url && Number(render?.subtitleCount || 0) > 0 && (
                 <a className="cf-button cf-button--subtle" href={render.subtitles.url} target="_blank" rel="noreferrer">
                   <Icon name="fileText" size={16} />
                   SRT
@@ -1407,7 +1418,7 @@ export default function MusicStudioPage() {
                       Miniatura
                     </a>
                   )}
-                  {renderPanel?.subtitles?.url && (
+                  {renderPanel?.subtitles?.url && Number(renderPanel?.subtitleCount || 0) > 0 && (
                     <a className="cf-button cf-button--subtle" href={renderPanel.subtitles.url} target="_blank" rel="noreferrer" style={{ minHeight: 52 }}>
                       <Icon name="fileText" size={18} />
                       Subtitulos SRT
