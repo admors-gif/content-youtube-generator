@@ -14,20 +14,24 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 try:
     from scripts.power_music_director import (
         DIRECTOR_VERSION,
+        build_beat_shot_recipe,
         enrich_package_with_director_plan,
-        prompt_gate,
+        prompt_gate_for_recipe,
     )
 except Exception:  # pragma: no cover - keeps standalone script execution safe
     try:
-        from power_music_director import DIRECTOR_VERSION, enrich_package_with_director_plan, prompt_gate
+        from power_music_director import DIRECTOR_VERSION, build_beat_shot_recipe, enrich_package_with_director_plan, prompt_gate_for_recipe
     except Exception:  # pragma: no cover
         DIRECTOR_VERSION = "power_music_director_unavailable"
+
+        def build_beat_shot_recipe(section, line, index, plan):
+            return {}
 
         def enrich_package_with_director_plan(package, payload=None):
             return package
 
-        def prompt_gate(prompt):
-            return {"passed": True, "hits": [], "goodSignals": 0}
+        def prompt_gate_for_recipe(prompt, shot_recipe=None):
+            return {"passed": True, "hits": [], "goodSignals": 0, "physicsSignals": 0, "recipeId": ""}
 
 
 VIDEO_SIZE = (1920, 1080)
@@ -39,6 +43,9 @@ DEFAULT_MAX_VISUAL_BEATS = 120
 DEFAULT_MAX_COMFY_IMAGES = 120
 DEFAULT_SUBTITLE_MIN_ALIGNMENT_SCORE = 0.62
 DEFAULT_SUBTITLE_MIN_PHRASE_RATIO = 0.55
+DEFAULT_MUSIC_VISION_QA_MAX_FRAMES = 60
+DEFAULT_MUSIC_VISION_QA_MIN_SCORE = 82
+DEFAULT_MUSIC_VISION_QA_REGEN_ATTEMPTS = 1
 TEXT_FREE_NEGATIVE_PROMPT = (
     "No readable text, no letters, no typography, no captions, no lyrics, "
     "no logo, no watermark, no UI, no signs, no book pages, no posters, "
@@ -292,7 +299,7 @@ def _music_premium_thumbnail_enabled():
 
 
 def _music_vision_qa_enabled():
-    return _env_bool("CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED", default=False) and bool(os.getenv("OPENAI_API_KEY"))
+    return _env_bool("CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED", default=bool(os.getenv("OPENAI_API_KEY"))) and bool(os.getenv("OPENAI_API_KEY"))
 
 
 def _music_vision_qa_model():
@@ -300,7 +307,15 @@ def _music_vision_qa_model():
 
 
 def _music_vision_qa_max_frames():
-    return _env_int("CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MAX_FRAMES", 8)
+    return _env_int("CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MAX_FRAMES", DEFAULT_MUSIC_VISION_QA_MAX_FRAMES)
+
+
+def _music_vision_qa_min_score():
+    return _env_int("CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MIN_SCORE", DEFAULT_MUSIC_VISION_QA_MIN_SCORE)
+
+
+def _music_vision_qa_regen_attempts():
+    return _env_int("CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_REGEN_ATTEMPTS", DEFAULT_MUSIC_VISION_QA_REGEN_ATTEMPTS)
 
 
 def _parse_json_object(text):
@@ -337,8 +352,10 @@ def _evaluate_music_frame_with_openai_vision(image_path, beat):
             "Return only JSON with keys: passed boolean, score 0-100, issues array, hasReadableText boolean, "
             "hasRandomDomesticObject boolean, brandFit 0-100. Reject if the image has readable text, fake letters, "
             "logos, screens with writing, clothes iron, ironing board, random household objects, cheap stock-photo look, "
-            "or does not fit a premium symbolic music video. "
-            f"Beat context: section={compact_text(beat.get('section'), 60)}, storyMoment={compact_text(beat.get('storyMoment'), 240)}."
+            "floating weights, physically impossible props, a dumbbell/barbell between legs, running in office clothes, "
+            "deformed anatomy, mismatched human scale, or anything that does not fit a premium symbolic music video. "
+            f"Beat context: section={compact_text(beat.get('section'), 60)}, storyMoment={compact_text(beat.get('storyMoment'), 240)}, "
+            f"shotRecipe={json.dumps(beat.get('shotRecipe') or {}, ensure_ascii=False)[:1200]}."
         )
         response = client.chat.completions.create(
             model=_music_vision_qa_model(),
@@ -369,6 +386,45 @@ def _evaluate_music_frame_with_openai_vision(image_path, beat):
         return data
     except Exception as exc:
         return {"enabled": True, "passed": None, "score": None, "issues": ["vision_qa_failed"], "error": str(exc)[:300]}
+
+
+def _vision_qa_failed(qa_result):
+    if not isinstance(qa_result, dict) or not qa_result.get("enabled"):
+        return False
+    if qa_result.get("passed") is False:
+        return True
+    try:
+        score = float(qa_result.get("score"))
+    except Exception:
+        score = None
+    if score is not None and score < _music_vision_qa_min_score():
+        return True
+    try:
+        brand_fit = float(qa_result.get("brandFit"))
+    except Exception:
+        brand_fit = None
+    if brand_fit is not None and brand_fit < _music_vision_qa_min_score():
+        return True
+    for key in ["hasReadableText", "hasRandomDomesticObject"]:
+        if qa_result.get(key) is True:
+            return True
+    return False
+
+
+def _qa_repair_prompt(prompt, qa_result, beat, attempt):
+    issues = ", ".join(str(item) for item in (qa_result.get("issues") or [])[:8]) if isinstance(qa_result, dict) else ""
+    recipe = beat.get("shotRecipe") if isinstance(beat.get("shotRecipe"), dict) else {}
+    return compact_text(
+        (
+            f"{prompt}\n\n"
+            f"STRICT REPAIR PASS {attempt}: previous frame failed QA issues: {issues}. "
+            "Regenerate with simpler, safer composition. One subject only. Objects must be physically grounded with clear contact shadows. "
+            "No floating weights, no object between legs, no deformed human body, no mismatched human scale, no random domestic objects, no text, no logos. "
+            f"Follow locked shot recipe exactly: subject={recipe.get('subject')}; wardrobe={recipe.get('wardrobe')}; "
+            f"action={recipe.get('action')}; propRules={recipe.get('propRules')}; composition={recipe.get('composition')}."
+        ),
+        2600,
+    )
 
 
 def _write_openai_image_data(image_data, output_path):
@@ -1121,6 +1177,8 @@ def _build_music_visual_prompt(package, beat, scene, palette):
     director_plan = director_plan if isinstance(director_plan, dict) else {}
     visual_bible = director_plan.get("visualBible") if isinstance(director_plan.get("visualBible"), dict) else {}
     visual_world_plan = director_plan.get("visualWorld") if isinstance(director_plan.get("visualWorld"), dict) else {}
+    shot_recipe = beat.get("shotRecipe") if isinstance(beat.get("shotRecipe"), dict) else {}
+    recipe_control = shot_recipe.get("controlNet") if isinstance(shot_recipe.get("controlNet"), dict) else {}
     identity = compact_text(video.get("visualIdentity"), 260) or "premium cinematic motivational music-video identity"
     visual_world = compact_text(video.get("visualWorld"), 260) or "symbolic power visualizer: luxury, discipline, ambition, desire, victory, shadow, controlled movement"
     scene_strategy = compact_text(video.get("sceneStrategy"), 280) or "emotional blocks and recurring motifs instead of literal lyric illustration"
@@ -1143,6 +1201,20 @@ def _build_music_visual_prompt(package, beat, scene, palette):
             f"HARD EXCLUSIONS: {TEXT_FREE_NEGATIVE_PROMPT} No extra limbs, distorted hands, bad anatomy, malformed faces. "
             "Visualizer mode: symbolic, aspirational, powerful, premium; do not illustrate the lyric literally word by word. "
             "The exact song title, lyrics, and captions are NOT part of the image; backend overlays text only on thumbnail/cover. "
+            "LOCKED SHOT RECIPE: obey this recipe above all other visual ideas. "
+            f"Recipe id: {shot_recipe.get('id') or 'none'}. Category: {shot_recipe.get('category') or 'symbolic'}. "
+            f"Recipe subject: {shot_recipe.get('subject') or 'single premium symbolic scene'}. "
+            f"Human policy: {shot_recipe.get('humanPolicy') or 'avoid detailed anatomy; use silhouette when possible'}. "
+            f"Wardrobe: {shot_recipe.get('wardrobe') or 'coherent cinematic wardrobe only'}. "
+            f"Action: {shot_recipe.get('action') or 'controlled stillness, physically believable'}. "
+            f"Prop rules: {shot_recipe.get('propRules') or 'one prop cluster only, physically grounded, no random objects'}. "
+            f"Composition: {shot_recipe.get('composition') or 'clean premium composition with negative space'}. "
+            f"Camera: {shot_recipe.get('camera') or 'cinematic camera, realistic perspective'}. "
+            f"Physics: {shot_recipe.get('physics') or 'gravity correct, contact shadows, realistic scale, no floating objects'}. "
+            f"Control guidance: {recipe_control.get('recommended') or 'none'} because {recipe_control.get('reason') or 'prompt-only lock'}. "
+            f"Recipe negative constraints: {', '.join(str(item) for item in (shot_recipe.get('negativeConstraints') or [])[:14])}. "
+            "Do not mix conflicting actions and wardrobe. If the subject is running or training, use athletic wear only. "
+            "Weights must rest on floor, rack, or bench with visible contact shadows. No object can float or sit between legs. "
             "Flux/Kontext/Krea photoreal editorial quality, premium composition, cinematic lighting, strong symmetry, high emotional clarity. "
             f"Music Director: {DIRECTOR_VERSION}. Director world: {director_world}. "
             f"Section: {section}. Music style: {style}. Core intention: {intention}. "
@@ -1191,6 +1263,8 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_se
     beat_count = min(max_beats, target_count)
     actual_interval = duration / max(1, beat_count)
     palette = _palette(package)
+    director_plan = (_video_concept(package).get("directorPlan") if isinstance(_video_concept(package), dict) else {}) or package.get("musicVideoDirector")
+    director_plan = director_plan if isinstance(director_plan, dict) else {}
     beats = []
     for index in range(beat_count):
         start = index * actual_interval
@@ -1219,10 +1293,12 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_se
             "previousLine": previous_unit.get("line") if isinstance(previous_unit, dict) else "",
             "nextLine": next_unit.get("line") if isinstance(next_unit, dict) else "",
         }
-        story_moment = _visual_story_moment(unit.get("line"), index, unit.get("section"))
+        shot_recipe = build_beat_shot_recipe(unit.get("section"), unit.get("line"), index, director_plan)
+        prompt_context["shotRecipe"] = shot_recipe
+        story_moment = compact_text(shot_recipe.get("summary"), 360) or _visual_story_moment(unit.get("line"), index, unit.get("section"))
         prompt_context["storyMoment"] = story_moment
         prompt = _build_music_visual_prompt(package, prompt_context, scene, palette)
-        prompt_quality = prompt_gate(prompt)
+        prompt_quality = prompt_gate_for_recipe(prompt, shot_recipe)
         beats.append(
             {
                 "scene_number": index + 1,
@@ -1231,6 +1307,7 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_se
                 "subtitle": compact_text(unit.get("line"), 150),
                 "overlay": text_overlay,
                 "storyMoment": story_moment,
+                "shotRecipe": shot_recipe,
                 "showLyricOverlay": bool(show_lyric_overlay),
                 "prompt": prompt,
                 "promptGate": prompt_quality,
@@ -1269,6 +1346,8 @@ def _music_image_workflow_spec(_select_image_workflow):
         ("CONTENT_FACTORY_MUSIC_COMFY_SEED_INPUT", "seed_input"),
         ("CONTENT_FACTORY_MUSIC_COMFY_SIZE_NODE", "size_node"),
         ("CONTENT_FACTORY_MUSIC_COMFY_SAVE_NODE", "save_node"),
+        ("CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_NODE", "control_image_node"),
+        ("CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_INPUT", "control_image_input"),
     ]:
         value = os.getenv(env_name, "").strip()
         if value:
@@ -1300,7 +1379,14 @@ def _generate_comfy_beat_images(beats, images_dir):
         return stats
 
     max_images = _env_int("CONTENT_FACTORY_MUSIC_MAX_COMFY_IMAGES", DEFAULT_MAX_COMFY_IMAGES)
-    comfy_scenes = [{"scene_number": beat["scene_number"], "prompt": beat["prompt"]} for beat in beats[:max_images]]
+    comfy_scenes = [
+        {
+            "scene_number": beat["scene_number"],
+            "prompt": beat["prompt"],
+            "shotRecipe": beat.get("shotRecipe") or {},
+        }
+        for beat in beats[:max_images]
+    ]
     if not comfy_scenes:
         return stats
 
@@ -1322,6 +1408,55 @@ def _generate_comfy_beat_images(beats, images_dir):
                 "invalid": result.get("invalid") or [],
             }
         )
+    except Exception as exc:
+        stats["error"] = str(exc)[:500]
+    return stats
+
+
+def _regenerate_comfy_beat_image(beat, comfy_dir):
+    stats = {
+        "attempted": False,
+        "success": False,
+        "error": "",
+        "result": {},
+    }
+    if not _comfy_music_enabled():
+        stats["error"] = "comfy_disabled"
+        return stats
+    try:
+        scene_num = int(beat.get("scene_number") or 0)
+    except Exception:
+        scene_num = 0
+    if scene_num <= 0:
+        stats["error"] = "invalid_scene_number"
+        return stats
+    comfy_dir = Path(comfy_dir)
+    comfy_dir.mkdir(parents=True, exist_ok=True)
+    comfy_path = comfy_dir / f"scene_{scene_num:04d}.png"
+    if comfy_path.exists():
+        try:
+            comfy_path.unlink()
+        except Exception:
+            pass
+    try:
+        from scripts.factory import generate_comfy_images, _select_image_workflow
+
+        workflow = _music_image_workflow_spec(_select_image_workflow)
+        stats["attempted"] = True
+        result = generate_comfy_images(
+            [
+                {
+                    "scene_number": scene_num,
+                    "prompt": beat.get("prompt") or "",
+                    "shotRecipe": beat.get("shotRecipe") or {},
+                }
+            ],
+            comfy_dir,
+            workflow,
+            pipeline_format="narrativa",
+        )
+        stats["result"] = result if isinstance(result, dict) else {}
+        stats["success"] = comfy_path.exists() and comfy_path.stat().st_size > 5000
     except Exception as exc:
         stats["error"] = str(exc)[:500]
     return stats
@@ -1375,21 +1510,54 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     generated_frames = 0
     fallback_frames = 0
     vision_qa_results = []
+    qa_regenerated_frames = 0
+    qa_replaced_frames = 0
     vision_qa_max_frames = _music_vision_qa_max_frames() if _music_vision_qa_enabled() else 0
     for index, beat in enumerate(beats, start=1):
         image_path = assets_dir / f"beat_{index:03d}.jpg"
         segment_path = segments_dir / f"segment_{index:03d}.mp4"
         comfy_path = comfy_dir / f"scene_{index:04d}.png"
+        frame_source = "comfy"
         if comfy_path.exists() and comfy_path.stat().st_size > 5000 and _compose_generated_frame(comfy_path, image_path, palette, beat):
             generated_frames += 1
         else:
             frame = _draw_music_visual_fallback_frame(VIDEO_SIZE, palette, title, beat, 100 + index)
             frame.save(image_path, quality=92)
             fallback_frames += 1
+            frame_source = "local_fallback"
 
         if vision_qa_max_frames and len(vision_qa_results) < vision_qa_max_frames:
             qa_result = _evaluate_music_frame_with_openai_vision(image_path, beat)
             qa_result["index"] = index
+            qa_result["source"] = frame_source
+            if _vision_qa_failed(qa_result):
+                qa_result["repairAttempts"] = []
+                for attempt in range(1, _music_vision_qa_regen_attempts() + 1):
+                    if frame_source != "comfy":
+                        break
+                    original_prompt = beat.get("prompt") or ""
+                    beat["prompt"] = _qa_repair_prompt(original_prompt, qa_result, beat, attempt)
+                    beat["promptGate"] = prompt_gate_for_recipe(beat["prompt"], beat.get("shotRecipe") or {})
+                    repair_stats = _regenerate_comfy_beat_image(beat, comfy_dir)
+                    qa_result["repairAttempts"].append(repair_stats)
+                    if repair_stats.get("success") and _compose_generated_frame(comfy_path, image_path, palette, beat):
+                        qa_regenerated_frames += 1
+                        repaired_qa = _evaluate_music_frame_with_openai_vision(image_path, beat)
+                        repaired_qa["index"] = index
+                        repaired_qa["source"] = "comfy_repaired"
+                        repaired_qa["repairedFrom"] = qa_result
+                        qa_result = repaired_qa
+                        if not _vision_qa_failed(qa_result):
+                            break
+                    else:
+                        beat["prompt"] = original_prompt
+                if _vision_qa_failed(qa_result):
+                    frame = _draw_music_visual_fallback_frame(VIDEO_SIZE, palette, title, beat, 800 + index)
+                    frame.save(image_path, quality=92)
+                    qa_replaced_frames += 1
+                    if frame_source != "local_fallback":
+                        fallback_frames += 1
+                    qa_result["replacement"] = "local_fallback_after_vision_qa"
             vision_qa_results.append(qa_result)
 
         segment_duration = max(0.5, float(beat.get("duration") or visual_interval))
@@ -1478,6 +1646,9 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
                 "index": beat.get("scene_number"),
                 "hits": (beat.get("promptGate") or {}).get("hits") or [],
                 "goodSignals": (beat.get("promptGate") or {}).get("goodSignals"),
+                "physicsSignals": (beat.get("promptGate") or {}).get("physicsSignals"),
+                "recipeId": (beat.get("promptGate") or {}).get("recipeId"),
+                "recipeIssues": (beat.get("promptGate") or {}).get("recipeIssues") or [],
             }
             for beat in beats
             if not (beat.get("promptGate") or {}).get("passed")
@@ -1489,6 +1660,10 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "checked": len(vision_qa_results),
         "passed": sum(1 for item in vision_qa_results if item.get("passed") is True),
         "failed": sum(1 for item in vision_qa_results if item.get("passed") is False),
+        "minScore": _music_vision_qa_min_score(),
+        "regenAttempts": _music_vision_qa_regen_attempts(),
+        "regeneratedFrames": qa_regenerated_frames,
+        "replacedFrames": qa_replaced_frames,
         "results": vision_qa_results,
     }
     metadata = {
@@ -1505,8 +1680,8 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "comfy": comfy_stats,
         "generatedFrames": generated_frames,
         "fallbackFrames": fallback_frames,
-        "renderer": "power_music_video_v4_director_symbolic_visualizer",
-        "visualizerMode": "symbolic_premium_text_free_director_v2",
+        "renderer": "power_music_video_v5_shot_controlled_vision_qa",
+        "visualizerMode": "symbolic_premium_text_free_director_v3",
         "directorVersion": DIRECTOR_VERSION,
         "musicVideoDirector": director_plan,
         "promptGateSummary": prompt_gate_summary,
@@ -1528,6 +1703,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
                 "alignmentScore": beat.get("alignmentScore"),
                 "storyMoment": beat.get("storyMoment"),
                 "showLyricOverlay": beat.get("showLyricOverlay"),
+                "shotRecipe": beat.get("shotRecipe"),
                 "promptGate": beat.get("promptGate"),
                 "prompt": beat.get("prompt"),
             }

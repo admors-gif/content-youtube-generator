@@ -322,7 +322,7 @@ def _select_image_workflow(pipeline_format: str) -> dict:
     }
 
 
-def _apply_image_workflow_inputs(nodes: dict, spec: dict, prompt: str, scene_number: int) -> int:
+def _apply_image_workflow_inputs(nodes: dict, spec: dict, prompt: str, scene_number: int, scene=None) -> int:
     prompt_node = nodes[spec["prompt_node"]]["inputs"]
     prompt_node[spec["prompt_input"]] = prompt
 
@@ -340,6 +340,15 @@ def _apply_image_workflow_inputs(nodes: dict, spec: dict, prompt: str, scene_num
     save_inputs = nodes.get(spec.get("save_node"), {}).get("inputs", {})
     if "filename_prefix" in save_inputs:
         save_inputs["filename_prefix"] = f"scene_{scene_number:04d}"
+
+    scene = scene if isinstance(scene, dict) else {}
+    control_image_path = str(scene.get("control_image_path") or scene.get("controlImagePath") or "").strip()
+    control_node = str(spec.get("control_image_node") or "").strip()
+    control_input = str(spec.get("control_image_input") or "").strip()
+    if control_image_path and control_node and control_input and control_node in nodes:
+        control_inputs = nodes.get(control_node, {}).get("inputs", {})
+        if isinstance(control_inputs, dict):
+            control_inputs[control_input] = control_image_path
     return seed
 
 
@@ -365,6 +374,7 @@ def _run_single_image_job(
     img_path: Path,
     image_jobs: dict,
     attempt_label: str = "primary",
+    scene=None,
 ) -> bool:
     nodes = copy.deepcopy(base_workflow)
     final_prompt = _build_image_prompt(
@@ -372,7 +382,7 @@ def _run_single_image_job(
         pipeline_format=pipeline_format,
         provider=workflow_spec["provider"],
     )
-    seed = _apply_image_workflow_inputs(nodes, workflow_spec, final_prompt, scene_number)
+    seed = _apply_image_workflow_inputs(nodes, workflow_spec, final_prompt, scene_number, scene=scene)
 
     previous_record = image_jobs.get(str(scene_number), {})
     record = previous_record if attempt_label != "primary" else {"sceneNumber": scene_number}
@@ -792,6 +802,7 @@ def generate_comfy_images(scenes, images_dir, workflow_spec, pipeline_format="na
                     img_path,
                     image_jobs,
                     attempt_label="primary",
+                    scene=scene,
                 )
             if not ok and fallback_spec and fallback_workflow:
                 record = image_jobs.get(str(num), {})
@@ -809,6 +820,7 @@ def generate_comfy_images(scenes, images_dir, workflow_spec, pipeline_format="na
                     img_path,
                     image_jobs,
                     attempt_label="fallback",
+                    scene=scene,
                 )
             
             if ok:

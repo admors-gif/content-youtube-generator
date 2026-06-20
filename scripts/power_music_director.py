@@ -3,7 +3,7 @@ import re
 from datetime import datetime, timezone
 
 
-DIRECTOR_VERSION = "power_music_director_v2_no_luma_runway"
+DIRECTOR_VERSION = "power_music_director_v3_shot_control_qa"
 
 EXCLUDED_VIDEO_TOOLS = {
     "luma": "disabled_by_request",
@@ -31,6 +31,13 @@ BANNED_IMAGE_OBJECTS = [
     "cash rain",
     "tacky flexing",
     "repetitive runner close-up",
+    "floating weights",
+    "floating objects",
+    "object between legs",
+    "impossible scale",
+    "deformed human body",
+    "office suit while running",
+    "two mismatched people",
 ]
 
 PROMPT_REJECTION_MARKERS = [
@@ -147,6 +154,86 @@ VISUAL_WORLDS = {
 }
 
 
+SHOT_ARCHETYPES = {
+    "grounded_training_still": {
+        "category": "object_still_life",
+        "humanPolicy": "no visible full human body; optional blurred silhouette only in background",
+        "subject": "steel barbell plates or dumbbells resting on rubber gym floor or mounted on a rack",
+        "wardrobe": "none; if a person is barely visible, technical athletic wear only",
+        "action": "static grounded object with contact shadows",
+        "propRules": "weights must touch floor, rack or bench; never floating; never between legs; one prop cluster only",
+        "composition": "low 35mm close-up, object in lower third, clean negative space, realistic gravity",
+        "camera": "low-angle close detail, shallow depth of field, cinematic side light",
+        "controlNet": {"recommended": "depth_or_canny", "reason": "locks object grounding and perspective"},
+    },
+    "athletic_motion_wide": {
+        "category": "human_wide_pose",
+        "humanPolicy": "single distant silhouette, full body allowed only if pose is simple and readable",
+        "subject": "one athlete moving through a wide road, track tunnel or rooftop training space",
+        "wardrobe": "technical athletic wear, running shoes, no office suit, no formal clothing",
+        "action": "controlled forward stride, not a twisted sprint, feet grounded",
+        "propRules": "no loose weights, no random bags, no signs, no screens",
+        "composition": "wide shot with horizon line, subject small in frame, clear ground contact",
+        "camera": "wide 28mm cinematic frame, motion direction left-to-right or toward sunrise",
+        "controlNet": {"recommended": "openpose_or_dwpose", "reason": "prevents broken running anatomy"},
+    },
+    "controlled_portrait": {
+        "category": "human_portrait",
+        "humanPolicy": "one person only, waist-up or three-quarter crop; avoid hands as the main focus",
+        "subject": "confident person with calm power, partial silhouette, strong posture",
+        "wardrobe": "tailored dark clothing, elegant and coherent with location; no running in formal wear",
+        "action": "standing, turning slightly, looking past camera, controlled emotion",
+        "propRules": "no props unless one minimal architectural element supports the frame",
+        "composition": "waist-up portrait, symmetrical architecture, clean background, realistic proportions",
+        "camera": "85mm editorial portrait, gold rim light, shallow depth of field",
+        "controlNet": {"recommended": "pose", "reason": "keeps shoulders, head and torso coherent"},
+    },
+    "status_architecture": {
+        "category": "environment_symbol",
+        "humanPolicy": "optional tiny silhouette; no close anatomy",
+        "subject": "luxury architecture, black marble, glass tower, city reflections",
+        "wardrobe": "if silhouette appears, tailored dark clothing and grounded stance",
+        "action": "still, poised, architectural power",
+        "propRules": "no cash rain, no clutter, no brand logos, no posters",
+        "composition": "strong symmetry, one vanishing point, premium negative space",
+        "camera": "wide 35mm architectural shot with controlled light",
+        "controlNet": {"recommended": "depth", "reason": "locks perspective and prevents impossible scale"},
+    },
+    "shadow_symbol": {
+        "category": "environment_symbol",
+        "humanPolicy": "no detailed human anatomy; use shadow or silhouette only",
+        "subject": "dark hallway, split shadow, ember inside cracked stone, smoke and light",
+        "wardrobe": "none",
+        "action": "symbolic pressure turning into control",
+        "propRules": "one symbol only, physically grounded or embedded in the scene",
+        "composition": "minimal centered symbol, high contrast, no random objects",
+        "camera": "locked-off symmetrical frame, cinematic haze, negative space",
+        "controlNet": {"recommended": "depth_or_none", "reason": "simple symbolic scene has lower anatomy risk"},
+    },
+    "victory_rooftop": {
+        "category": "human_wide_pose",
+        "humanPolicy": "single distant silhouette only, no close face, no detailed hands",
+        "subject": "one grounded figure on a sunrise rooftop above the city",
+        "wardrobe": "athletic jacket or tailored minimal dark clothing depending on song world; no mixed formal running action",
+        "action": "standing still, walking slowly, or looking over city; no sprinting",
+        "propRules": "no floating props, no phones, no papers, no signs",
+        "composition": "wide sunrise composition, figure small, strong horizon, grounded feet",
+        "camera": "wide cinematic sunrise shot, gentle lens flare, strong silhouette",
+        "controlNet": {"recommended": "depth", "reason": "locks rooftop perspective and ground plane"},
+    },
+}
+
+
+ARCHETYPE_SEQUENCE = [
+    "status_architecture",
+    "controlled_portrait",
+    "grounded_training_still",
+    "shadow_symbol",
+    "athletic_motion_wide",
+    "victory_rooftop",
+]
+
+
 def compact_text(value, limit=400):
     text = " ".join(str(value or "").replace("\x00", " ").split()).strip()
     return text[:limit]
@@ -183,6 +270,81 @@ def choose_visual_world(package, payload=None):
     if tokens & {"nino", "infancia", "futuro", "pasado", "historia", "protejo", "promesa"}:
         return "inner_child_victory"
     return "shadow_to_power"
+
+
+def choose_shot_archetype(section, line, index, world_key=None):
+    tokens = _tokens(f"{section} {line}")
+    if tokens & {"pesa", "pesas", "hierro", "dumbbell", "barbell", "gym", "entreno", "levanto", "fuerza", "sudor"}:
+        return "grounded_training_still"
+    if tokens & {"corro", "correr", "running", "ruta", "calle", "camino", "cima", "paso", "cardio"}:
+        return "athletic_motion_wide"
+    if tokens & {"mujer", "reina", "diosa", "presencia", "mirada", "magnetismo", "ella"}:
+        return "controlled_portrait"
+    if tokens & {"dinero", "exito", "rico", "riqueza", "lujo", "estatus", "gano", "meta", "oro"}:
+        return "status_architecture"
+    if tokens & {"miedo", "duda", "caer", "excusa", "sombra", "ansiedad", "dolor"}:
+        return "shadow_symbol"
+    if tokens & {"final", "victoria", "cumplo", "promesa", "subo", "cima"}:
+        return "victory_rooftop"
+    if world_key == "athletic_power" and index % 4 == 1:
+        return "grounded_training_still"
+    if world_key == "feminine_power" and index % 3 == 1:
+        return "controlled_portrait"
+    if world_key == "luxury_ascent" and index % 3 != 2:
+        return "status_architecture"
+    return ARCHETYPE_SEQUENCE[index % len(ARCHETYPE_SEQUENCE)]
+
+
+def build_shot_recipe(section, sample_line, index, plan):
+    plan = plan if isinstance(plan, dict) else {}
+    world = plan.get("visualWorld") if isinstance(plan.get("visualWorld"), dict) else {}
+    world_key = world.get("key") or "shadow_to_power"
+    archetype_id = choose_shot_archetype(section, sample_line, index, world_key)
+    archetype = copy.deepcopy(SHOT_ARCHETYPES.get(archetype_id) or SHOT_ARCHETYPES["shadow_symbol"])
+    locations = world.get("locations") or VISUAL_WORLDS.get(world_key, VISUAL_WORLDS["shadow_to_power"])["locations"]
+    motifs = world.get("motifs") or VISUAL_WORLDS.get(world_key, VISUAL_WORLDS["shadow_to_power"])["motifs"]
+    location = locations[index % len(locations)]
+    motif = motifs[index % len(motifs)]
+    continuity_key = f"{world_key}:{archetype_id}:{index % 4}"
+    strict_physics = [
+        "all visible objects obey gravity",
+        "every object has contact shadows",
+        "no object floats unless it is smoke, haze or light",
+        "no prop is placed between legs",
+        "one subject scale only; no mismatched body sizes",
+        "if a person runs, clothing must be athletic, never an office suit",
+        "if clothing is formal, action is standing or slow walking only",
+    ]
+    recipe = {
+        "id": archetype_id,
+        "index": index,
+        "continuityKey": continuity_key,
+        "location": location,
+        "motif": motif,
+        "summary": f"{archetype['category']} | {archetype['subject']} | {location}",
+        "humanPolicy": archetype["humanPolicy"],
+        "subject": archetype["subject"],
+        "wardrobe": archetype["wardrobe"],
+        "action": archetype["action"],
+        "propRules": archetype["propRules"],
+        "composition": archetype["composition"],
+        "camera": archetype["camera"],
+        "physics": strict_physics,
+        "controlNet": archetype["controlNet"],
+        "negativeConstraints": [
+            *BANNED_IMAGE_OBJECTS,
+            "extra limbs",
+            "bad anatomy",
+            "distorted hands",
+            "malformed face",
+            "two bodies merged",
+            "floating dumbbell",
+            "floating barbell",
+            "office clothes while running",
+            "repeated identical runner shot",
+        ],
+    }
+    return recipe
 
 
 def _director_nodes():
@@ -286,8 +448,12 @@ def build_music_video_director_plan(package, payload=None):
             },
             "postImageVisionGate": {
                 "enabledByEnv": "CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED",
-                "goal": "flag generated frames with readable text, random domestic objects, weak click appeal or off-brand imagery",
-                "default": "off_to_avoid_extra_cost",
+                "goal": "flag generated frames with readable text, random domestic objects, broken anatomy, floating objects or off-brand imagery",
+                "default": "on_when_OPENAI_API_KEY_is_available",
+            },
+            "autoRepairGate": {
+                "enabled": True,
+                "action": "regenerate failed Comfy frames once with stricter prompt, then replace with local fallback if still failing",
             },
             "thumbnailGate": {
                 "engine": "OpenAI Images when OPENAI_API_KEY is present, exact title overlay rendered by backend",
@@ -316,8 +482,9 @@ def build_music_video_director_plan(package, payload=None):
             },
             "images": {
                 "primary": "ComfyUI/Flux",
+                "controlNet": "ready through shotRecipe.controlNet and custom Comfy workflow env vars",
                 "thumbnail": "OpenAI Images background + backend exact text overlay",
-                "critic": "OpenAI Vision optional",
+                "critic": "OpenAI Vision QA with auto-repair/replacement",
                 "excluded": ["Luma", "Runway"],
             },
             "render": {
@@ -350,36 +517,63 @@ def prompt_gate(prompt):
     text = str(prompt or "").lower()
     hits = [marker for marker in PROMPT_REJECTION_MARKERS if marker in text]
     good_signals = sum(1 for signal in ["cinematic", "text-free", "symbolic", "premium"] if signal in text)
+    physics_signals = sum(1 for signal in ["grounded", "contact shadow", "gravity", "not floating", "physically"] if signal in text)
     return {
-        "passed": not hits and good_signals >= 2,
+        "passed": not hits and good_signals >= 2 and physics_signals >= 1,
         "hits": hits,
         "goodSignals": good_signals,
+        "physicsSignals": physics_signals,
     }
+
+
+def prompt_gate_for_recipe(prompt, shot_recipe=None):
+    result = prompt_gate(prompt)
+    recipe = shot_recipe if isinstance(shot_recipe, dict) else {}
+    recipe_issues = []
+    text = str(prompt or "").lower()
+    if (
+        recipe.get("id") == "athletic_motion_wide"
+        and (("office suit" in text and "no office suit" not in text) or ("formal clothing" in text and "no formal clothing" not in text))
+    ):
+        recipe_issues.append("athletic_motion_with_formal_clothing")
+    floating_is_negated = any(marker in text for marker in ["no floating", "never floating", "no object can float", "must touch floor"])
+    if recipe.get("id") == "grounded_training_still" and "floating" in text and not floating_is_negated:
+        recipe_issues.append("training_prop_can_float")
+    if recipe_issues:
+        result["passed"] = False
+    result["recipeIssues"] = recipe_issues
+    result["recipeId"] = recipe.get("id") or ""
+    return result
 
 
 def director_scene_prompt(section, sample_line, index, plan):
     plan = plan if isinstance(plan, dict) else {}
     world = plan.get("visualWorld") if isinstance(plan.get("visualWorld"), dict) else VISUAL_WORLDS["shadow_to_power"]
     bible = plan.get("visualBible") if isinstance(plan.get("visualBible"), dict) else {}
-    locations = world.get("locations") or VISUAL_WORLDS["shadow_to_power"]["locations"]
-    motifs = world.get("motifs") or VISUAL_WORLDS["shadow_to_power"]["motifs"]
     cameras = bible.get("cameraLanguage") or ["strong symmetry", "premium editorial lighting"]
-    location = locations[index % len(locations)]
-    motif = motifs[index % len(motifs)]
     camera = cameras[index % len(cameras)]
+    recipe = build_shot_recipe(section, sample_line, index, plan)
+    negatives = ", ".join(recipe.get("negativeConstraints", [])[:18])
+    physics = "; ".join(recipe.get("physics", [])[:7])
     return compact_text(
         (
             "16:9 cinematic text-free premium music visualizer still. "
             f"Section: {compact_text(section, 60)}. "
             f"Lyric emotion metadata only, do not render words: {compact_text(sample_line, 160)}. "
             f"Visual world: {compact_text(world.get('description'), 240)}. "
-            f"Scene: {location}. Core motif: {motif}. Camera: {camera}. "
-            "One clear iconic subject, high contrast, polished music-video lighting, clean negative space, strong composition. "
+            f"LOCKED SHOT RECIPE: {recipe['id']}. Subject: {recipe['subject']}. Location: {recipe['location']}. Motif: {recipe['motif']}. "
+            f"Wardrobe: {recipe['wardrobe']}. Action: {recipe['action']}. Prop rules: {recipe['propRules']}. "
+            f"Composition: {recipe['composition']}. Camera: {recipe['camera']}; {camera}. Physics: {physics}. "
+            "One clear iconic subject, high contrast, polished music-video lighting, clean negative space, strong composition, realistic contact shadows, physically grounded objects. "
             "No readable text, no letters, no logos, no signs, no screens, no pseudo-words, no random household objects, "
-            "no clothes iron, no ironing board, no office papers, no cheap motivational poster, no literal lyric illustration."
+            f"no clothes iron, no ironing board, no office papers, no cheap motivational poster, no literal lyric illustration. Negative constraints: {negatives}."
         ),
-        900,
+        1400,
     )
+
+
+def build_beat_shot_recipe(section, line, index, plan):
+    return build_shot_recipe(section, line, index, plan)
 
 
 def _lyric_sections(lyrics, limit=8):
@@ -434,6 +628,12 @@ def enrich_package_with_director_plan(package, payload=None):
     video["scenes"] = [
         {
             "section": compact_text(item.get("section"), 60) or f"Scene {index + 1}",
+            "shotRecipe": build_shot_recipe(
+                item.get("section"),
+                " / ".join(item.get("lines") or []),
+                index,
+                plan,
+            ),
             "visualPrompt": director_scene_prompt(
                 item.get("section"),
                 " / ".join(item.get("lines") or []),
@@ -448,7 +648,7 @@ def enrich_package_with_director_plan(package, payload=None):
     package["videoConcept"] = video
     package["musicVideoDirector"] = plan
     notes = package.get("productionNotes") if isinstance(package.get("productionNotes"), list) else []
-    director_note = "Music Director v2 activo: visualizer simbolico premium, sin Luma/Runway, sin texto dentro de imagenes."
+    director_note = "Music Director v3 activo: shot recipes, fisica visual, QA y reparacion automatica sin Luma/Runway."
     if director_note not in notes:
         package["productionNotes"] = [*notes, director_note][:12]
     return package

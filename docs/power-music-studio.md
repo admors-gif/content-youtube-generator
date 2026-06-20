@@ -16,7 +16,7 @@ Power Music Studio convierte una idea de crecimiento personal en un paquete crea
 - metadata de YouTube.
 - upload del audio final descargado de Suno.
 - produccion de video final en VPS con visuales generativos locales, Ken Burns, thumbnail, cover y metadata.
-- Music Director v2 para visuales premium simbolicos, sin Luma y sin Runway.
+- Music Director v3 para visuales premium simbolicos con recetas por beat, QA visual, sin Luma y sin Runway.
 - multiples tomas/versiones de audio por una misma letra.
 - calificador de letra sin costo extra.
 - importacion de canciones ya creadas: pegar letra, crear track, subir audio de Suno y renderizar video.
@@ -40,7 +40,7 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - Guarda historial de videos por toma en `musicTracks/{trackId}.renders[]`.
 - Renderiza el video en worker/Celery con fallback a background task si la cola no esta disponible.
 - No usa Luma por default.
-- Renderer v4: Music Director v2 + timeline visual por letra. Divide el audio en beats de ~5 segundos, genera prompts Flux por linea/seccion de la cancion y ensambla con Ken Burns en FFmpeg.
+- Renderer v5: Music Director v3 + timeline visual por letra. Divide el audio en beats de ~5 segundos, genera prompts Flux por linea/seccion con recetas visuales bloqueadas y ensambla con Ken Burns en FFmpeg.
 - Si `COMFYUI_API_KEY` esta configurado y `CONTENT_FACTORY_MUSIC_COMFY_ENABLED` no esta desactivado, intenta generar imagenes reales con Flux/Krea via Comfy.
 - Si Comfy falla o no esta configurado, usa fallback local limpio sin mostrar prompts tecnicos en pantalla.
 - Si `OPENAI_API_KEY` esta configurado y `CONTENT_FACTORY_MUSIC_WHISPER_SUBTITLES_ENABLED` no esta desactivado, transcribe el audio con Whisper, alinea la letra con timestamps reales y usa esas lineas para subtitulos y prompts visuales.
@@ -48,27 +48,29 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - El score de letra es heuristico: no llama otro modelo ni consume API adicional.
 - Luma y Runway quedan excluidos por decision de producto para este motor musical.
 
-## Music Director v2
+## Music Director v3
 
 Archivo principal: `scripts/power_music_director.py`.
 
-Objetivo: convertir la letra y la intencion de la cancion en una biblia visual reutilizable antes de pedir imagenes. El director decide un mundo visual, motivos permitidos, objetos prohibidos, reglas de continuidad y un contrato de prompt para que Comfy/Flux genere frames premium sin texto quemado.
+Objetivo: convertir la letra y la intencion de la cancion en una biblia visual reutilizable antes de pedir imagenes. El director decide un mundo visual, motivos permitidos, objetos prohibidos, reglas de continuidad y una receta visual por beat para que Comfy/Flux genere frames premium sin texto quemado ni objetos incoherentes.
 
 Lo que hace hoy:
 
 - Elige uno de estos mundos: `luxury_ascent`, `athletic_power`, `feminine_power`, `inner_child_victory` o `shadow_to_power`.
 - Reescribe la direccion visual del paquete con escenas simbolicas y text-free.
 - Prohibe letras, logos, pantallas con texto, pseudo-palabras, posters, planchas, objetos domesticos aleatorios y visuales literales por cada frase.
+- Asigna `shotRecipe` por beat: sujeto, vestuario, accion, props, camara, composicion, reglas de fisica y guia ControlNet sugerida.
+- Rechaza prompts que no incluyan senales fisicas como gravedad, contacto con el piso y objetos aterrizados.
 - Guarda `package.musicVideoDirector` y `videoConcept.directorPlan`.
-- Agrega `directorVersion`, `musicVideoDirector` y `promptGateSummary` en metadata del render.
-- Expone badges `Director v2`, `Sin Luma`, `Sin Runway` en la UI de musica.
+- Agrega `directorVersion`, `musicVideoDirector`, `promptGateSummary`, `shotRecipe` y `visionQa` en metadata del render.
+- Expone badges `Director v3`, `Sin Luma`, `Sin Runway` en la UI de musica.
 
 Contratos preparados:
 
 - LangGraph: el plan guarda nodos listos (`creative_brief`, `scene_planner`, `prompt_gate`, `image_generation`, `vision_critic`, `renderer`, `analytics`) para convertir el flujo en grafo stateful si el motor musical crece.
 - Inngest: el plan deja eventos sugeridos para retries y jobs largos sin bloquear UI.
 - n8n: recomendado solo para automatizaciones externas como avisos, archivado o checklist de publicacion.
-- OpenAI Vision QA: disponible via `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED`, pero apagado por default para evitar costo extra. Si se prende, revisa hasta `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MAX_FRAMES` frames y guarda `visionQa` en metadata.
+- OpenAI Vision QA: disponible via `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED`; por default se activa si existe `OPENAI_API_KEY`. Revisa hasta `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MAX_FRAMES` frames, intenta reparar con Comfy y reemplaza con fallback local si la imagen tiene texto, objetos domesticos, pesas flotando, anatomia rota, ropa incongruente o escala imposible.
 - Remotion: marcado como ready si despues queremos plantillas animadas reutilizables; el render actual sigue en FFmpeg porque ya es estable.
 - Qdrant/PostHog/Langfuse: se guardan campos listos en metadata para memoria visual, medicion y trazabilidad futura.
 
@@ -89,9 +91,13 @@ CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS=5
 CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS=120
 CONTENT_FACTORY_MUSIC_MAX_COMFY_IMAGES=120
 CONTENT_FACTORY_MUSIC_WHISPER_SUBTITLES_ENABLED=true
-CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED=false
+CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED=true
 CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MODEL=gpt-4o-mini
-CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MAX_FRAMES=8
+CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MAX_FRAMES=60
+CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MIN_SCORE=82
+CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_REGEN_ATTEMPTS=1
+CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_NODE=
+CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_INPUT=
 ANTHROPIC_API_KEY=...
 COMFYUI_API_KEY=...
 OPENAI_API_KEY=...
@@ -103,6 +109,8 @@ Notas de costo visual:
 - `CONTENT_FACTORY_MUSIC_MAX_COMFY_IMAGES` limita cuantas imagenes se mandan a Comfy por render.
 - Los beats que excedan el limite o fallen entran con fallback local.
 - Para apagar Comfy sin romper el render: `CONTENT_FACTORY_MUSIC_COMFY_ENABLED=false`.
+- Para apagar QA visual sin romper el render: `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED=false`.
+- Los nodos `CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_NODE` y `CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_INPUT` solo se llenan cuando haya un workflow custom de Comfy con entrada ControlNet/pose/depth/canny.
 
 Frontend:
 

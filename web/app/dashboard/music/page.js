@@ -478,8 +478,25 @@ function thumbnailEngineLabel(engine) {
 function directorVersionLabel(version) {
   const value = safeText(version).toLowerCase();
   if (!value) return "";
+  if (value.includes("director_v3") || value.includes("shot_control_qa")) return "Director v3";
   if (value.includes("director_v2") || value.includes("no_luma_runway")) return "Director v2";
   return "Director";
+}
+
+function visionQaLabel(visionQa) {
+  if (!visionQa || typeof visionQa !== "object" || !visionQa.enabled) return "";
+  const checked = Number(visionQa.checked || 0);
+  const replaced = Number(visionQa.replacedFrames || 0);
+  if (replaced > 0) return `QA visual: ${replaced} reemplazos`;
+  if (checked > 0) return `QA visual: ${checked} checks`;
+  return "QA visual";
+}
+
+function visionQaTone(visionQa) {
+  const replaced = Number(visionQa?.replacedFrames || 0);
+  const failed = Number(visionQa?.failed || 0);
+  if (replaced > 0 || failed > 0) return "ember";
+  return "ok";
 }
 
 function AudioVersionList({
@@ -528,6 +545,7 @@ function AudioVersionList({
                   {active && <span style={pillStyle("ok")}>toma activa</span>}
                   <span style={pillStyle(renderStatusTone(render?.status))}>{renderStatusLabel(render?.status)}</span>
                   {directorVersionLabel(render?.directorVersion) && <span style={pillStyle("neutral")}>{directorVersionLabel(render.directorVersion)}</span>}
+                  {visionQaLabel(render?.visionQa) && <span style={pillStyle(visionQaTone(render.visionQa))}>{visionQaLabel(render.visionQa)}</span>}
                   {subtitleModeLabel(render?.subtitleMode) && <span style={pillStyle(render?.subtitleMode === "whisper_word_aligned" ? "ok" : "neutral")}>{subtitleModeLabel(render?.subtitleMode)}</span>}
                   {thumbnailEngineLabel(render?.thumbnailEngine) && <span style={pillStyle(render?.thumbnailEngine?.includes?.("openai") ? "ok" : "neutral")}>{thumbnailEngineLabel(render.thumbnailEngine)}</span>}
                 </div>
@@ -627,6 +645,7 @@ function RenderHistoryList({ renders, versions }) {
                   <strong style={{ color: "var(--paper)" }}>{label}</strong>
                   <span style={pillStyle(renderStatusTone(render.status))}>{renderStatusLabel(render.status)}</span>
                   {directorVersionLabel(render?.directorVersion) && <span style={pillStyle("neutral")}>{directorVersionLabel(render.directorVersion)}</span>}
+                  {visionQaLabel(render?.visionQa) && <span style={pillStyle(visionQaTone(render.visionQa))}>{visionQaLabel(render.visionQa)}</span>}
                 </div>
                 <div className="cf-caption" style={{ marginTop: 6 }}>
                   {[duration, beatCount ? `${beatCount} beats visuales` : "", render.visualProvider ? (render.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local") : "", thumbnailEngineLabel(render.thumbnailEngine), subtitleModeLabel(render.subtitleMode), formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}
@@ -1508,7 +1527,7 @@ export default function MusicStudioPage() {
                 </p>
                 {packageData.musicVideoDirector?.version && (
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "var(--s-4) 0 0" }}>
-                    <span style={pillStyle("ok")}>Director v2</span>
+                    <span style={pillStyle("ok")}>Director v3</span>
                     <span style={pillStyle("neutral")}>Sin Luma</span>
                     <span style={pillStyle("neutral")}>Sin Runway</span>
                   </div>
