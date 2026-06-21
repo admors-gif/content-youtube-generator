@@ -1,9 +1,11 @@
 import copy
+import hashlib
 import re
+import unicodedata
 from datetime import datetime, timezone
 
 
-DIRECTOR_VERSION = "power_music_director_v3_shot_control_qa"
+DIRECTOR_VERSION = "power_music_director_v4_song_seed_lyric_metaphor"
 
 EXCLUDED_VIDEO_TOOLS = {
     "luma": "disabled_by_request",
@@ -151,6 +153,63 @@ VISUAL_WORLDS = {
             "calm posture under pressure",
         ],
     },
+    "urban_night_drive": {
+        "label": "Urban Night Drive",
+        "description": "night movement, ambition in transit, neon reflections, disciplined momentum through the city",
+        "palette": ["near black", "sodium gold", "electric blue", "deep crimson"],
+        "locations": [
+            "wet empty boulevard with premium car headlights in the distance",
+            "underground parking ramp with cinematic reflections",
+            "city overpass at midnight with light trails",
+            "glass elevator rising through a dark tower",
+            "tunnel exit opening into city light",
+        ],
+        "motifs": [
+            "headlights cutting fog",
+            "wet asphalt reflections",
+            "single moving silhouette",
+            "clean road lines",
+            "distant skyline glow",
+        ],
+    },
+    "summit_resolve": {
+        "label": "Summit Resolve",
+        "description": "endurance, altitude, open air, earned clarity and victory without noise",
+        "palette": ["deep navy", "cold stone gray", "sunrise gold", "ember orange"],
+        "locations": [
+            "mountain road at first light",
+            "concrete stair climb under sunrise",
+            "empty overlook above a sleeping city",
+            "windy rooftop edge with clear horizon",
+            "minimal desert road with long shadow",
+        ],
+        "motifs": [
+            "long shadow moving forward",
+            "breath in cold air",
+            "distant summit line",
+            "sunrise edge light",
+            "grounded lone figure",
+        ],
+    },
+    "mind_forge": {
+        "label": "Mind Forge",
+        "description": "mental discipline, focus, pressure turned into structure, inner fire made precise",
+        "palette": ["graphite black", "white hot light", "deep ember", "steel blue"],
+        "locations": [
+            "minimal black studio with geometric light",
+            "concrete room with a single vertical beam",
+            "dark training lab with clean symmetry",
+            "empty arena floor under one spotlight",
+            "steel corridor with precise light strips",
+        ],
+        "motifs": [
+            "focused eyes in shadow",
+            "ember line inside concrete",
+            "steel texture",
+            "geometric beam of light",
+            "controlled breath",
+        ],
+    },
 }
 
 
@@ -239,8 +298,14 @@ def compact_text(value, limit=400):
     return text[:limit]
 
 
+def _ascii_text(value):
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = text.encode("ascii", "ignore").decode("ascii")
+    return text.lower()
+
+
 def _tokens(value):
-    return set(re.findall(r"[a-zA-Z0-9_]+", str(value or "").lower()))
+    return set(re.findall(r"[a-z0-9_]+", _ascii_text(value)))
 
 
 def _text_blob(package, payload=None):
@@ -259,6 +324,32 @@ def _text_blob(package, payload=None):
     return " ".join(str(part or "") for part in parts)
 
 
+def _stable_song_seed(package, payload=None):
+    payload = payload or {}
+    raw = "||".join(
+        str(part or "")
+        for part in [
+            package.get("title"),
+            package.get("subtitle"),
+            package.get("mainHook"),
+            package.get("mantra"),
+            package.get("lyrics"),
+            payload.get("visualIdentity"),
+            payload.get("theme"),
+        ]
+    )
+    if not raw.strip():
+        raw = "power_music"
+    return int(hashlib.sha256(raw.encode("utf-8")).hexdigest()[:10], 16)
+
+
+def _seeded_item(items, index, seed, stride=1):
+    clean = [item for item in (items or []) if item]
+    if not clean:
+        return ""
+    return clean[(int(index or 0) * stride + int(seed or 0)) % len(clean)]
+
+
 def choose_visual_world(package, payload=None):
     tokens = _tokens(_text_blob(package, payload))
     if tokens & {"dinero", "exito", "rico", "riqueza", "lujo", "estatus", "millonario", "oro"}:
@@ -269,10 +360,16 @@ def choose_visual_world(package, payload=None):
         return "feminine_power"
     if tokens & {"nino", "infancia", "futuro", "pasado", "historia", "protejo", "promesa"}:
         return "inner_child_victory"
+    if tokens & {"carro", "auto", "manejar", "noche", "ciudad", "calle", "neon", "velocidad", "ruta"}:
+        return "urban_night_drive"
+    if tokens & {"cima", "subo", "montana", "altura", "amanecer", "resistencia", "camino", "avanzar"}:
+        return "summit_resolve"
+    if tokens & {"mente", "enfoque", "silencio", "control", "presion", "forja", "metal", "vision"}:
+        return "mind_forge"
     return "shadow_to_power"
 
 
-def choose_shot_archetype(section, line, index, world_key=None):
+def choose_shot_archetype(section, line, index, world_key=None, seed=0):
     tokens = _tokens(f"{section} {line}")
     if tokens & {"pesa", "pesas", "hierro", "dumbbell", "barbell", "gym", "entreno", "levanto", "fuerza", "sudor"}:
         return "grounded_training_still"
@@ -286,26 +383,147 @@ def choose_shot_archetype(section, line, index, world_key=None):
         return "shadow_symbol"
     if tokens & {"final", "victoria", "cumplo", "promesa", "subo", "cima"}:
         return "victory_rooftop"
-    if world_key == "athletic_power" and index % 4 == 1:
+    seeded_index = int(index or 0) + int(seed or 0)
+    if world_key == "athletic_power" and seeded_index % 4 == 1:
         return "grounded_training_still"
-    if world_key == "feminine_power" and index % 3 == 1:
+    if world_key == "feminine_power" and seeded_index % 3 == 1:
         return "controlled_portrait"
-    if world_key == "luxury_ascent" and index % 3 != 2:
+    if world_key == "luxury_ascent" and seeded_index % 3 != 2:
         return "status_architecture"
-    return ARCHETYPE_SEQUENCE[index % len(ARCHETYPE_SEQUENCE)]
+    return ARCHETYPE_SEQUENCE[seeded_index % len(ARCHETYPE_SEQUENCE)]
+
+
+def lyric_visual_metaphor(section, line, index, plan=None):
+    plan = plan if isinstance(plan, dict) else {}
+    world = plan.get("visualWorld") if isinstance(plan.get("visualWorld"), dict) else {}
+    world_key = world.get("key") or "shadow_to_power"
+    seed = int(plan.get("songVisualSeed") or 0)
+    tokens = _tokens(f"{section} {line}")
+
+    if tokens & {"excusa", "miedo", "duda", "ansiedad", "caer", "dolor"}:
+        options = [
+            "a dark room split by one clean beam of light, pressure becoming direction",
+            "a cracked concrete wall with a controlled ember line inside, resistance turning into power",
+            "a lone figure standing still while shadow breaks behind them, calm under pressure",
+        ]
+    elif tokens & {"cumplo", "promesa", "palabra", "elijo", "decido", "plan"}:
+        options = [
+            "a grounded figure crossing a bright threshold, commitment made visible without papers or text",
+            "a single silhouette at the center of a clean arena floor, decision and self-command",
+            "a precise vertical light beam over a strong posture, promise turned into structure",
+        ]
+    elif tokens & {"fuego", "hierro", "sudor", "fuerza", "levanto", "entreno", "golpe"}:
+        options = [
+            "steel equipment under dramatic light with chalk dust and real contact shadows",
+            "a controlled training still life: grounded iron, heat, breath, effort, no floating props",
+            "an athlete silhouette beside grounded equipment, power restrained and believable",
+        ]
+    elif tokens & {"corro", "ruta", "camino", "cima", "paso", "subo", "avanzar"}:
+        options = [
+            "a wide open path at first light, one small grounded figure moving toward the horizon",
+            "a concrete stair climb with long shadow and sunrise edge light",
+            "a road line disappearing toward a distant summit, endurance without clutter",
+        ]
+    elif tokens & {"dinero", "exito", "riqueza", "oro", "lujo", "estatus", "gano", "meta"}:
+        options = [
+            "black marble and city lights reflected under a calm powerful silhouette",
+            "a glass tower lobby at night, elegant ambition without cash or logos",
+            "a luxury staircase with one figure ascending, status earned through discipline",
+        ]
+    elif tokens & {"mujer", "reina", "diosa", "presencia", "mirada", "magnetismo"}:
+        options = [
+            "a confident feminine silhouette in an elegant corridor, authority without objectification",
+            "a controlled editorial portrait with gold rim light and clean negative space",
+            "a poised figure on a city balcony, magnetism shown through posture and light",
+        ]
+    elif tokens & {"mente", "silencio", "respiro", "calma", "enfoque", "vision", "control"}:
+        options = [
+            "a minimal black studio with geometric light, focus becoming a physical structure",
+            "a close controlled breath in cold light, quiet confidence and mental discipline",
+            "a steel corridor with precise light strips, internal order made visible",
+        ]
+    elif world_key == "urban_night_drive":
+        options = [
+            "wet asphalt and distant headlights, ambition moving through the night",
+            "a tunnel exit opening into city light, momentum with no random props",
+            "an underground ramp with clean reflections and one grounded silhouette",
+        ]
+    elif world_key == "summit_resolve":
+        options = [
+            "a lone figure against a sunrise horizon, earned clarity after pressure",
+            "a mountain road with long shadow and open air, victory without noise",
+            "an empty overlook above the city, calm power after the climb",
+        ]
+    elif world_key == "mind_forge":
+        options = [
+            "ember light inside concrete geometry, pressure turned into precise focus",
+            "a dark training lab with one spotlight, mind forged into discipline",
+            "graphite shadows and white-hot light, internal fire made controlled",
+        ]
+    else:
+        options = [
+            "a symbolic power scene where shadow becomes movement and control",
+            "a strong silhouette in a premium cinematic space, identity becoming action",
+            "a minimal high-contrast scene with one clear subject and emotional pressure",
+        ]
+    return compact_text(_seeded_item(options, index, seed, stride=2), 260)
+
+
+def _coherent_location(archetype_id, proposed_location, world_key, index, seed):
+    location = compact_text(proposed_location, 160)
+    if archetype_id == "grounded_training_still":
+        bank = [
+            "industrial training space with dramatic light",
+            "minimal boxing gym with one spotlight",
+            "rubber gym floor beside a steel rack",
+            "dark training lab with clean symmetry",
+            "cold air rooftop training corner",
+        ]
+        return _seeded_item(bank, index, seed, stride=2)
+    if archetype_id == "athletic_motion_wide":
+        bank = [
+            "wide road at blue hour",
+            "empty stadium tunnel before sunrise",
+            "mountain road at first light",
+            "city overpass at midnight with clean ground plane",
+            "concrete stair climb under sunrise",
+        ]
+        return _seeded_item(bank, index, seed, stride=2)
+    if archetype_id == "victory_rooftop":
+        bank = [
+            "sunrise rooftop above the city",
+            "empty overlook above a sleeping city",
+            "windy rooftop edge with clear horizon",
+            "wide elevated terrace at first light",
+            "glass tower rooftop with distant skyline",
+        ]
+        return _seeded_item(bank, index, seed, stride=2)
+    if archetype_id == "status_architecture" and world_key not in {"luxury_ascent", "urban_night_drive"}:
+        bank = [
+            "glass tower lobby at night",
+            "black marble penthouse with city lights",
+            "opulent staircase with deep shadows",
+            "underground parking ramp with cinematic reflections",
+            "wet avenue outside a luxury building",
+        ]
+        return _seeded_item(bank, index, seed, stride=2)
+    return location
 
 
 def build_shot_recipe(section, sample_line, index, plan):
     plan = plan if isinstance(plan, dict) else {}
     world = plan.get("visualWorld") if isinstance(plan.get("visualWorld"), dict) else {}
     world_key = world.get("key") or "shadow_to_power"
-    archetype_id = choose_shot_archetype(section, sample_line, index, world_key)
+    seed = int(plan.get("songVisualSeed") or 0)
+    archetype_id = choose_shot_archetype(section, sample_line, index, world_key, seed=seed)
     archetype = copy.deepcopy(SHOT_ARCHETYPES.get(archetype_id) or SHOT_ARCHETYPES["shadow_symbol"])
     locations = world.get("locations") or VISUAL_WORLDS.get(world_key, VISUAL_WORLDS["shadow_to_power"])["locations"]
     motifs = world.get("motifs") or VISUAL_WORLDS.get(world_key, VISUAL_WORLDS["shadow_to_power"])["motifs"]
-    location = locations[index % len(locations)]
-    motif = motifs[index % len(motifs)]
-    continuity_key = f"{world_key}:{archetype_id}:{index % 4}"
+    location = _seeded_item(locations, index, seed, stride=2)
+    location = _coherent_location(archetype_id, location, world_key, index, seed)
+    motif = _seeded_item(motifs, index, seed // 7, stride=3)
+    metaphor = lyric_visual_metaphor(section, sample_line, index, plan)
+    continuity_key = f"{world_key}:{archetype_id}:{seed % 997}:{index % 4}"
     strict_physics = [
         "all visible objects obey gravity",
         "every object has contact shadows",
@@ -321,7 +539,8 @@ def build_shot_recipe(section, sample_line, index, plan):
         "continuityKey": continuity_key,
         "location": location,
         "motif": motif,
-        "summary": f"{archetype['category']} | {archetype['subject']} | {location}",
+        "lyricMetaphor": metaphor,
+        "summary": f"{archetype['category']} | {metaphor} | {location}",
         "humanPolicy": archetype["humanPolicy"],
         "subject": archetype["subject"],
         "wardrobe": archetype["wardrobe"],
@@ -389,6 +608,7 @@ def _director_nodes():
 
 def build_music_video_director_plan(package, payload=None):
     package = package if isinstance(package, dict) else {}
+    song_seed = _stable_song_seed(package, payload)
     world_key = choose_visual_world(package, payload)
     world = copy.deepcopy(VISUAL_WORLDS[world_key])
     identity = compact_text(
@@ -403,11 +623,20 @@ def build_music_video_director_plan(package, payload=None):
     return {
         "version": DIRECTOR_VERSION,
         "createdAtIso": datetime.now(timezone.utc).isoformat(),
+        "songVisualSeed": song_seed,
         "excludedTools": EXCLUDED_VIDEO_TOOLS,
         "primaryOutcome": "make music videos feel premium, coherent and watchable without literal lyric images",
         "visualWorld": {
             "key": world_key,
             **world,
+            "locations": [
+                _seeded_item(world.get("locations") or [], index, song_seed, stride=2)
+                for index in range(len(world.get("locations") or []))
+            ],
+            "motifs": [
+                _seeded_item(world.get("motifs") or [], index, song_seed // 7, stride=3)
+                for index in range(len(world.get("motifs") or []))
+            ],
         },
         "visualBible": {
             "identity": identity,
@@ -555,11 +784,13 @@ def director_scene_prompt(section, sample_line, index, plan):
     recipe = build_shot_recipe(section, sample_line, index, plan)
     negatives = ", ".join(recipe.get("negativeConstraints", [])[:18])
     physics = "; ".join(recipe.get("physics", [])[:7])
+    metaphor = recipe.get("lyricMetaphor") or lyric_visual_metaphor(section, sample_line, index, plan)
     return compact_text(
         (
             "16:9 cinematic text-free premium music visualizer still. "
             f"Section: {compact_text(section, 60)}. "
             f"Lyric emotion metadata only, do not render words: {compact_text(sample_line, 160)}. "
+            f"Lyric-derived visual metaphor to express visually: {metaphor}. "
             f"Visual world: {compact_text(world.get('description'), 240)}. "
             f"LOCKED SHOT RECIPE: {recipe['id']}. Subject: {recipe['subject']}. Location: {recipe['location']}. Motif: {recipe['motif']}. "
             f"Wardrobe: {recipe['wardrobe']}. Action: {recipe['action']}. Prop rules: {recipe['propRules']}. "
@@ -648,7 +879,7 @@ def enrich_package_with_director_plan(package, payload=None):
     package["videoConcept"] = video
     package["musicVideoDirector"] = plan
     notes = package.get("productionNotes") if isinstance(package.get("productionNotes"), list) else []
-    director_note = "Music Director v3 activo: shot recipes, fisica visual, QA y reparacion automatica sin Luma/Runway."
+    director_note = "Music Director v4 activo: seed visual por cancion, metaforas de letra, shot recipes, fisica visual, QA y reparacion automatica sin Luma/Runway."
     if director_note not in notes:
         package["productionNotes"] = [*notes, director_note][:12]
     return package

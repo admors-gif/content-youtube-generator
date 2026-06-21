@@ -17,11 +17,12 @@ try:
         DIRECTOR_VERSION,
         build_beat_shot_recipe,
         enrich_package_with_director_plan,
+        lyric_visual_metaphor,
         prompt_gate_for_recipe,
     )
 except Exception:  # pragma: no cover - keeps standalone script execution safe
     try:
-        from power_music_director import DIRECTOR_VERSION, build_beat_shot_recipe, enrich_package_with_director_plan, prompt_gate_for_recipe
+        from power_music_director import DIRECTOR_VERSION, build_beat_shot_recipe, enrich_package_with_director_plan, lyric_visual_metaphor, prompt_gate_for_recipe
     except Exception:  # pragma: no cover
         DIRECTOR_VERSION = "power_music_director_unavailable"
 
@@ -30,6 +31,9 @@ except Exception:  # pragma: no cover - keeps standalone script execution safe
 
         def enrich_package_with_director_plan(package, payload=None):
             return package
+
+        def lyric_visual_metaphor(section, line, index, plan=None):
+            return ""
 
         def prompt_gate_for_recipe(prompt, shot_recipe=None):
             return {"passed": True, "hits": [], "goodSignals": 0, "physicsSignals": 0, "recipeId": ""}
@@ -2289,7 +2293,7 @@ def _build_music_visual_prompt(package, beat, scene, palette):
             f"Section: {section}. Music style: {style}. Core intention: {intention}. "
             f"Visual world: {visual_world}. Scene strategy: {scene_strategy}. "
             f"Emotional cue derived from the lyric: {mood}. Visual identity to keep consistent: {identity}. Palette: {colors}. "
-            f"Controlled motif for this beat: {story_moment}. Optional safe base scene direction: {scene_prompt}. "
+            f"Lyric-derived visual metaphor for this beat, highest priority after shot recipe: {story_moment}. Optional safe base scene direction: {scene_prompt}. "
             f"Allowed visual objects and motifs: {allowed_objects}. Camera language: {camera_language}. "
             f"Banned objects and failure modes: {banned_objects}. "
             "Prefer premium power motifs: confident silhouettes, luxury architecture, black marble, city lights, steel dumbbells or barbells, wet roads, sunrise rooftops, gold reflections, controlled movement. "
@@ -2375,7 +2379,13 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_se
         }
         shot_recipe = build_beat_shot_recipe(unit.get("section"), unit.get("line"), index, director_plan)
         prompt_context["shotRecipe"] = shot_recipe
-        story_moment = compact_text(shot_recipe.get("summary"), 360) or _visual_story_moment(unit.get("line"), index, unit.get("section"))
+        lyric_moment = lyric_visual_metaphor(unit.get("section"), unit.get("line"), index, director_plan)
+        story_moment = (
+            compact_text(lyric_moment, 360)
+            or compact_text(shot_recipe.get("lyricMetaphor"), 360)
+            or _visual_story_moment(unit.get("line"), index, unit.get("section"))
+            or compact_text(shot_recipe.get("summary"), 360)
+        )
         prompt_context["storyMoment"] = story_moment
         prompt = _build_music_visual_prompt(package, prompt_context, scene, palette)
         prompt_quality = prompt_gate_for_recipe(prompt, shot_recipe)
@@ -2756,6 +2766,22 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
             if not (beat.get("promptGate") or {}).get("passed")
         ][:8],
     }
+    visual_beat_samples = [
+        {
+            "index": beat.get("scene_number"),
+            "section": beat.get("section"),
+            "lyric": compact_text(beat.get("lyric"), 150),
+            "start": beat.get("start"),
+            "end": beat.get("end"),
+            "sourceScene": beat.get("sourceScene"),
+            "storyMoment": compact_text(beat.get("storyMoment"), 260),
+            "shotRecipeId": ((beat.get("shotRecipe") or {}).get("id") if isinstance(beat.get("shotRecipe"), dict) else ""),
+            "location": ((beat.get("shotRecipe") or {}).get("location") if isinstance(beat.get("shotRecipe"), dict) else ""),
+            "motif": ((beat.get("shotRecipe") or {}).get("motif") if isinstance(beat.get("shotRecipe"), dict) else ""),
+            "prompt": compact_text(beat.get("prompt"), 700),
+        }
+        for beat in beats[:24]
+    ]
     vision_qa_summary = {
         "enabled": bool(_music_vision_qa_enabled()),
         "model": _music_vision_qa_model() if _music_vision_qa_enabled() else "",
@@ -2789,10 +2815,12 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "localFallbackFrames": local_fallback_frames,
         "fallbackFrameMode": _music_fallback_frame_mode(),
         "renderer": "power_music_video_v5_shot_controlled_vision_qa",
-        "visualizerMode": "symbolic_premium_text_free_director_v3",
+        "visualizerMode": "symbolic_premium_text_free_director_v4",
         "directorVersion": DIRECTOR_VERSION,
         "musicVideoDirector": director_plan,
+        "songVisualSeed": director_plan.get("songVisualSeed") if isinstance(director_plan, dict) else None,
         "promptGateSummary": prompt_gate_summary,
+        "visualBeatSamples": visual_beat_samples,
         "visionQa": vision_qa_summary,
         "subtitleMode": subtitle_mode,
         "subtitleCount": subtitle_count,
@@ -2866,7 +2894,9 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "renderer": metadata["renderer"],
         "directorVersion": metadata["directorVersion"],
         "musicVideoDirector": metadata["musicVideoDirector"],
+        "songVisualSeed": metadata["songVisualSeed"],
         "promptGateSummary": metadata["promptGateSummary"],
+        "visualBeatSamples": metadata["visualBeatSamples"],
         "visionQa": metadata["visionQa"],
         "subtitleMode": metadata["subtitleMode"],
         "subtitleCount": metadata["subtitleCount"],

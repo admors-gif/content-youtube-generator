@@ -494,6 +494,7 @@ function thumbnailEngineLabel(engine) {
 function directorVersionLabel(version) {
   const value = safeText(version).toLowerCase();
   if (!value) return "";
+  if (value.includes("director_v4") || value.includes("song_seed_lyric_metaphor")) return "Director v4";
   if (value.includes("director_v3") || value.includes("shot_control_qa")) return "Director v3";
   if (value.includes("director_v2") || value.includes("no_luma_runway")) return "Director v2";
   return "Director";
@@ -862,6 +863,79 @@ function VisualSceneList({ scenes }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function RenderPromptSamples({ render }) {
+  const items = Array.isArray(render?.visualBeatSamples) ? render.visualBeatSamples : [];
+  const world = render?.musicVideoDirector?.visualWorld || {};
+  const worldLabel = safeText(world.label || world.key);
+  const seed = safeText(render?.songVisualSeed || render?.musicVideoDirector?.songVisualSeed);
+  if (!items.length) {
+    return (
+      <div style={{ display: "grid", gap: 12 }}>
+        <p className="cf-caption" style={{ margin: 0 }}>
+          Esta toma no trae muestras de prompts en el documento. En renders nuevos apareceran aqui los beats visuales reales.
+        </p>
+        {render?.metadata?.url && (
+          <a className="cf-button cf-button--subtle" href={render.metadata.url} target="_blank" rel="noreferrer" style={{ width: "fit-content" }}>
+            <Icon name="fileText" size={16} />
+            Abrir metadata completa
+          </a>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {worldLabel && <span style={pillStyle("neutral")}>Mundo: {worldLabel}</span>}
+        {seed && <span style={pillStyle("neutral")}>Seed visual: {seed}</span>}
+        <span style={pillStyle("ok")}>{items.length} muestras</span>
+        {render?.metadata?.url && (
+          <a className="cf-button cf-button--subtle" href={render.metadata.url} target="_blank" rel="noreferrer" style={{ minHeight: 34, padding: "0 12px" }}>
+            <Icon name="fileText" size={14} />
+            Metadata
+          </a>
+        )}
+      </div>
+      <div style={{ display: "grid", gap: 10 }}>
+        {items.map((beat, index) => {
+          const title = [
+            `Beat ${String(beat?.index || index + 1).padStart(2, "0")}`,
+            safeText(beat?.section),
+            safeText(beat?.shotRecipeId),
+          ].filter(Boolean).join(" - ");
+          return (
+            <div key={`${beat?.index || index}-${beat?.start || ""}`} className="cf-music-scene-card">
+              <div className="cf-mono-sm" style={{ color: "var(--ember)", marginBottom: 8 }}>
+                {title}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                {beat?.start !== undefined && beat?.end !== undefined && (
+                  <span style={pillStyle("neutral")}>{Number(beat.start).toFixed(1)}s - {Number(beat.end).toFixed(1)}s</span>
+                )}
+                {safeText(beat?.location) && <span style={pillStyle("neutral")}>{safeText(beat.location)}</span>}
+                {safeText(beat?.motif) && <span style={pillStyle("neutral")}>{safeText(beat.motif)}</span>}
+              </div>
+              {safeText(beat?.lyric) && (
+                <p style={{ color: "var(--paper)", lineHeight: 1.55, margin: "0 0 10px" }}>
+                  {safeText(beat.lyric)}
+                </p>
+              )}
+              {safeText(beat?.storyMoment) && (
+                <p style={{ color: "var(--paper-dim)", lineHeight: 1.55, margin: "0 0 10px" }}>
+                  {safeText(beat.storyMoment)}
+                </p>
+              )}
+              <div style={{ color: "var(--paper-mute)", lineHeight: 1.55 }}>
+                {safeText(beat?.prompt, "Prompt pendiente.")}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1829,6 +1903,16 @@ export default function MusicStudioPage() {
             />
           </Section>
 
+          {renderPanel?.status === "completed" && (
+            <Section
+              label="Auditoria visual"
+              title="Prompts reales del render"
+              actions={renderPanel?.directorVersion ? <span style={pillStyle("neutral")}>{directorVersionLabel(renderPanel.directorVersion)}</span> : null}
+            >
+              <RenderPromptSamples render={renderPanel} />
+            </Section>
+          )}
+
           <div
             style={{
               display: "grid",
@@ -1872,7 +1956,7 @@ export default function MusicStudioPage() {
                 </p>
                 {packageData.musicVideoDirector?.version && (
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "var(--s-4) 0 0" }}>
-                    <span style={pillStyle("ok")}>Director v3</span>
+                    <span style={pillStyle("ok")}>{directorVersionLabel(packageData.musicVideoDirector.version)}</span>
                     <span style={pillStyle("neutral")}>Sin Luma</span>
                     <span style={pillStyle("neutral")}>Sin Runway</span>
                   </div>

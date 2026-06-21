@@ -16,7 +16,7 @@ Power Music Studio convierte una idea de crecimiento personal en un paquete crea
 - metadata de YouTube.
 - upload del audio final descargado de Suno.
 - produccion de video final en VPS con visuales generativos locales, Ken Burns, thumbnail, cover y metadata.
-- Music Director v3 para visuales premium simbolicos con recetas por beat, QA visual, sin Luma y sin Runway.
+- Music Director v4 para visuales premium simbolicos con seed visual por cancion, metaforas derivadas de letra, recetas por beat, QA visual, sin Luma y sin Runway.
 - multiples tomas/versiones de audio por una misma letra.
 - calificador de letra sin costo extra.
 - importacion de canciones ya creadas: pegar letra, crear track, subir audio de Suno y renderizar video.
@@ -40,7 +40,7 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - Guarda historial de videos por toma en `musicTracks/{trackId}.renders[]`.
 - Renderiza el video en worker/Celery con fallback a background task si la cola no esta disponible.
 - No usa Luma por default.
-- Renderer v5: Music Director v3 + timeline visual por letra. Divide el audio en beats de ~5 segundos, genera prompts Flux por linea/seccion con recetas visuales bloqueadas y ensambla con Ken Burns en FFmpeg.
+- Renderer v5: Music Director v4 + timeline visual por letra. Divide el audio en beats de ~5 segundos, genera prompts Flux por linea/seccion con recetas visuales bloqueadas, seed visual unico por cancion y ensambla con Ken Burns en FFmpeg.
 - Si `COMFYUI_API_KEY` esta configurado y `CONTENT_FACTORY_MUSIC_COMFY_ENABLED` no esta desactivado, intenta generar imagenes reales con Flux/Krea via Comfy.
 - Si Comfy falla o no esta configurado, usa fallback de miniatura raw/OpenAI con frases de impacto; si no hay miniatura util, cae al fallback local limpio.
 - Timing multi-proveedor: intenta alinear la letra con timestamps reales por palabra usando `ELEVENLABS_API_KEY` + Scribe v2, luego OpenAI Whisper, luego Deepgram. La transcripcion puede guiar visuales aunque no sea suficientemente confiable para publicar subtitulos.
@@ -52,22 +52,24 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - El score de letra es heuristico: no llama otro modelo ni consume API adicional.
 - Luma y Runway quedan excluidos por decision de producto para este motor musical.
 
-## Music Director v3
+## Music Director v4
 
 Archivo principal: `scripts/power_music_director.py`.
 
-Objetivo: convertir la letra y la intencion de la cancion en una biblia visual reutilizable antes de pedir imagenes. El director decide un mundo visual, motivos permitidos, objetos prohibidos, reglas de continuidad y una receta visual por beat para que Comfy/Flux genere frames premium sin texto quemado ni objetos incoherentes.
+Objetivo: convertir la letra y la intencion de la cancion en una biblia visual reutilizable antes de pedir imagenes. El director decide un mundo visual, motivos permitidos, objetos prohibidos, reglas de continuidad, una metafora visual derivada de cada bloque de letra y una receta visual por beat para que Comfy/Flux genere frames premium sin texto quemado ni objetos incoherentes.
 
 Lo que hace hoy:
 
-- Elige uno de estos mundos: `luxury_ascent`, `athletic_power`, `feminine_power`, `inner_child_victory` o `shadow_to_power`.
+- Elige uno de estos mundos: `luxury_ascent`, `athletic_power`, `feminine_power`, `inner_child_victory`, `shadow_to_power`, `urban_night_drive`, `summit_resolve` o `mind_forge`.
+- Genera `songVisualSeed` desde titulo/letra/hook/identidad visual para que dos canciones parecidas mantengan marca pero no repitan la misma secuencia de locaciones, motivos y arquetipos.
+- Convierte cada linea o bloque en `lyricMetaphor`: una escena simbolica concreta que el prompt prioriza antes de caer en plantillas genericas.
 - Reescribe la direccion visual del paquete con escenas simbolicas y text-free.
 - Prohibe letras, logos, pantallas con texto, pseudo-palabras, posters, planchas, objetos domesticos aleatorios y visuales literales por cada frase.
 - Asigna `shotRecipe` por beat: sujeto, vestuario, accion, props, camara, composicion, reglas de fisica y guia ControlNet sugerida.
 - Rechaza prompts que no incluyan senales fisicas como gravedad, contacto con el piso y objetos aterrizados.
 - Guarda `package.musicVideoDirector` y `videoConcept.directorPlan`.
-- Agrega `directorVersion`, `musicVideoDirector`, `promptGateSummary`, `shotRecipe` y `visionQa` en metadata del render.
-- Expone badges `Director v3`, `Sin Luma`, `Sin Runway` en la UI de musica.
+- Agrega `directorVersion`, `songVisualSeed`, `musicVideoDirector`, `promptGateSummary`, `visualBeatSamples`, `shotRecipe` y `visionQa` en metadata del render.
+- Expone badges `Director v4`, `Sin Luma`, `Sin Runway` en la UI de musica y una seccion de auditoria con prompts reales del render.
 
 Contratos preparados:
 
