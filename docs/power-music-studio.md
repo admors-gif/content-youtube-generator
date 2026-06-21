@@ -42,9 +42,9 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - No usa Luma por default.
 - Renderer v5: Music Director v3 + timeline visual por letra. Divide el audio en beats de ~5 segundos, genera prompts Flux por linea/seccion con recetas visuales bloqueadas y ensambla con Ken Burns en FFmpeg.
 - Si `COMFYUI_API_KEY` esta configurado y `CONTENT_FACTORY_MUSIC_COMFY_ENABLED` no esta desactivado, intenta generar imagenes reales con Flux/Krea via Comfy.
-- Si Comfy falla o no esta configurado, usa fallback local limpio sin mostrar prompts tecnicos en pantalla.
-- Si `OPENAI_API_KEY` esta configurado y `CONTENT_FACTORY_MUSIC_WHISPER_SUBTITLES_ENABLED` no esta desactivado, transcribe el audio con Whisper, alinea la letra con timestamps reales y usa esas lineas para subtitulos y prompts visuales.
-- Si Whisper falla, no se cae el render: el renderer usa `lyric_blocks_estimated`.
+- Si Comfy falla o no esta configurado, usa fallback de miniatura raw/OpenAI con frases de impacto; si no hay miniatura util, cae al fallback local limpio.
+- Timing multi-proveedor: intenta alinear la letra con timestamps reales por palabra usando `ELEVENLABS_API_KEY` + Scribe v2, luego OpenAI Whisper, luego Deepgram. La transcripcion puede guiar visuales aunque no sea suficientemente confiable para publicar subtitulos.
+- Si el timing falla, no se cae el render: el renderer usa distribucion estimada por bloques de letra.
 - El score de letra es heuristico: no llama otro modelo ni consume API adicional.
 - Luma y Runway quedan excluidos por decision de producto para este motor musical.
 
@@ -72,6 +72,8 @@ Contratos preparados:
 - n8n: recomendado solo para automatizaciones externas como avisos, archivado o checklist de publicacion.
 - OpenAI Vision QA: disponible via `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED`; por default se activa si existe `OPENAI_API_KEY`. Revisa hasta `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MAX_FRAMES` frames, intenta reparar con Comfy y reemplaza con fallback local si la imagen tiene texto, objetos domesticos, pesas flotando, anatomia rota, ropa incongruente o escala imposible.
 - Fallback visual: si Comfy no entrega imagen para un beat, el renderer usa la miniatura raw de OpenAI como base visual; si no existe raw pero la miniatura final viene de OpenAI, usa un recorte hacia la zona visual; si solo existe miniatura local con texto, cae al fallback local abstracto para no repetir letras gigantes dentro del video.
+- Fallback con frases: cuando una escena cae a fallback, el renderer puede colocar una frase breve de la cancion o una frase motivacional generada de forma deterministica por backend. No modifica la letra original.
+- Huecos instrumentales: si el proveedor de timestamps detecta largos espacios sin voz, esos beats se tratan como pasajes instrumentales y no fuerzan prompts literales de la linea anterior.
 - Remotion: marcado como ready si despues queremos plantillas animadas reutilizables; el render actual sigue en FFmpeg porque ya es estable.
 - Qdrant/PostHog/Langfuse: se guardan campos listos en metadata para memoria visual, medicion y trazabilidad futura.
 
@@ -91,18 +93,28 @@ CONTENT_FACTORY_MUSIC_COMFY_ENABLED=true
 CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS=5
 CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS=120
 CONTENT_FACTORY_MUSIC_MAX_COMFY_IMAGES=120
-CONTENT_FACTORY_MUSIC_WHISPER_SUBTITLES_ENABLED=true
+CONTENT_FACTORY_MUSIC_TRANSCRIPTION_ENABLED=true
+CONTENT_FACTORY_MUSIC_TRANSCRIPTION_PROVIDERS=elevenlabs,openai,deepgram
+CONTENT_FACTORY_MUSIC_TRANSCRIPTION_LANGUAGE=es
+CONTENT_FACTORY_MUSIC_ELEVENLABS_STT_MODEL=scribe_v2
+CONTENT_FACTORY_MUSIC_DEEPGRAM_MODEL=nova-3
+CONTENT_FACTORY_MUSIC_TIMED_VISUALS_MIN_COVERAGE=0.18
+CONTENT_FACTORY_MUSIC_INSTRUMENTAL_GAP_SECONDS=2.8
 CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED=true
 CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MODEL=gpt-4o-mini
 CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MAX_FRAMES=60
 CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MIN_SCORE=82
-CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_REGEN_ATTEMPTS=1
+CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_SOFT_MIN_SCORE=70
+CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_REGEN_ATTEMPTS=2
 CONTENT_FACTORY_MUSIC_FALLBACK_FRAME_MODE=thumbnail
+CONTENT_FACTORY_MUSIC_FALLBACK_QUOTES_ENABLED=true
 CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_NODE=
 CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_INPUT=
 ANTHROPIC_API_KEY=...
 COMFYUI_API_KEY=...
 OPENAI_API_KEY=...
+ELEVENLABS_API_KEY=...
+DEEPGRAM_API_KEY=...
 ```
 
 Notas de costo visual:
@@ -113,6 +125,8 @@ Notas de costo visual:
 - Para apagar Comfy sin romper el render: `CONTENT_FACTORY_MUSIC_COMFY_ENABLED=false`.
 - Para apagar QA visual sin romper el render: `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED=false`.
 - Para volver al fallback abstracto anterior: `CONTENT_FACTORY_MUSIC_FALLBACK_FRAME_MODE=local`.
+- Para apagar frases sobre fallback: `CONTENT_FACTORY_MUSIC_FALLBACK_QUOTES_ENABLED=false`.
+- Si solo quieres usar ElevenLabs Scribe para timing: `CONTENT_FACTORY_MUSIC_TRANSCRIPTION_PROVIDERS=elevenlabs`.
 - Los nodos `CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_NODE` y `CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_INPUT` solo se llenan cuando haya un workflow custom de Comfy con entrada ControlNet/pose/depth/canny.
 
 Frontend:

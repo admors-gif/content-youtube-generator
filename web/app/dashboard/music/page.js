@@ -460,11 +460,23 @@ function renderStatusLabel(status) {
 }
 
 function subtitleModeLabel(mode) {
-  if (mode === "whisper_word_aligned") return "Whisper";
+  if (mode === "whisper_word_aligned" || mode === "openai_word_aligned") return "Timing OpenAI";
+  if (mode === "elevenlabs_word_aligned") return "Timing ElevenLabs";
+  if (mode === "deepgram_word_aligned") return "Timing Deepgram";
+  if (mode === "elevenlabs_timed_visuals_low_confidence") return "Timing ElevenLabs visual";
+  if (mode === "openai_timed_visuals_low_confidence") return "Timing OpenAI visual";
+  if (mode === "deepgram_timed_visuals_low_confidence") return "Timing Deepgram visual";
   if (mode === "lyric_blocks_estimated") return "SRT estimado";
   if (mode === "off_no_reliable_timestamps") return "Sin subtítulos";
   if (mode === "alignment_low_confidence") return "Sin subtítulos";
   return "";
+}
+
+function subtitleModeTone(mode) {
+  const value = safeText(mode).toLowerCase();
+  if (value.endsWith("_word_aligned") || value === "whisper_word_aligned") return "ok";
+  if (value.includes("timed_visuals")) return "neutral";
+  return "neutral";
 }
 
 function thumbnailEngineLabel(engine) {
@@ -504,6 +516,12 @@ function fallbackFrameLabel(render) {
   const localFrames = Number(render?.localFallbackFrames || 0);
   if (thumbnailFrames > 0) return `Fallback miniatura: ${thumbnailFrames}`;
   if (localFrames > 0) return `Fallback local: ${localFrames}`;
+  return "";
+}
+
+function instrumentalBeatLabel(render) {
+  const count = Number(render?.instrumentalBeatCount || 0);
+  if (count > 0) return `Instrumental: ${count}`;
   return "";
 }
 
@@ -555,7 +573,8 @@ function AudioVersionList({
                   {directorVersionLabel(render?.directorVersion) && <span style={pillStyle("neutral")}>{directorVersionLabel(render.directorVersion)}</span>}
                   {visionQaLabel(render?.visionQa) && <span style={pillStyle(visionQaTone(render.visionQa))}>{visionQaLabel(render.visionQa)}</span>}
                   {fallbackFrameLabel(render) && <span style={pillStyle("neutral")}>{fallbackFrameLabel(render)}</span>}
-                  {subtitleModeLabel(render?.subtitleMode) && <span style={pillStyle(render?.subtitleMode === "whisper_word_aligned" ? "ok" : "neutral")}>{subtitleModeLabel(render?.subtitleMode)}</span>}
+                  {instrumentalBeatLabel(render) && <span style={pillStyle("neutral")}>{instrumentalBeatLabel(render)}</span>}
+                  {subtitleModeLabel(render?.subtitleMode) && <span style={pillStyle(subtitleModeTone(render?.subtitleMode))}>{subtitleModeLabel(render?.subtitleMode)}</span>}
                   {thumbnailEngineLabel(render?.thumbnailEngine) && <span style={pillStyle(render?.thumbnailEngine?.includes?.("openai") ? "ok" : "neutral")}>{thumbnailEngineLabel(render.thumbnailEngine)}</span>}
                 </div>
               </div>
@@ -656,6 +675,7 @@ function RenderHistoryList({ renders, versions }) {
                   {directorVersionLabel(render?.directorVersion) && <span style={pillStyle("neutral")}>{directorVersionLabel(render.directorVersion)}</span>}
                   {visionQaLabel(render?.visionQa) && <span style={pillStyle(visionQaTone(render.visionQa))}>{visionQaLabel(render.visionQa)}</span>}
                   {fallbackFrameLabel(render) && <span style={pillStyle("neutral")}>{fallbackFrameLabel(render)}</span>}
+                  {instrumentalBeatLabel(render) && <span style={pillStyle("neutral")}>{instrumentalBeatLabel(render)}</span>}
                 </div>
                 <div className="cf-caption" style={{ marginTop: 6 }}>
                   {[duration, beatCount ? `${beatCount} beats visuales` : "", render.visualProvider ? (render.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local") : "", thumbnailEngineLabel(render.thumbnailEngine), subtitleModeLabel(render.subtitleMode), formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}

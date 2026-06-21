@@ -7,6 +7,7 @@ import re
 import subprocess
 import unicodedata
 import urllib.request
+import mimetypes
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -45,7 +46,9 @@ DEFAULT_SUBTITLE_MIN_ALIGNMENT_SCORE = 0.62
 DEFAULT_SUBTITLE_MIN_PHRASE_RATIO = 0.55
 DEFAULT_MUSIC_VISION_QA_MAX_FRAMES = 60
 DEFAULT_MUSIC_VISION_QA_MIN_SCORE = 82
-DEFAULT_MUSIC_VISION_QA_REGEN_ATTEMPTS = 1
+DEFAULT_MUSIC_VISION_QA_SOFT_MIN_SCORE = 70
+DEFAULT_MUSIC_VISION_QA_REGEN_ATTEMPTS = 2
+DEFAULT_MUSIC_INSTRUMENTAL_GAP_SECONDS = 2.8
 TEXT_FREE_NEGATIVE_PROMPT = (
     "No readable text, no letters, no typography, no captions, no lyrics, "
     "no logo, no watermark, no UI, no signs, no book pages, no posters, "
@@ -314,8 +317,20 @@ def _music_vision_qa_min_score():
     return _env_int("CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MIN_SCORE", DEFAULT_MUSIC_VISION_QA_MIN_SCORE)
 
 
+def _music_vision_qa_soft_min_score():
+    return _env_int("CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_SOFT_MIN_SCORE", DEFAULT_MUSIC_VISION_QA_SOFT_MIN_SCORE)
+
+
 def _music_vision_qa_regen_attempts():
     return _env_int("CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_REGEN_ATTEMPTS", DEFAULT_MUSIC_VISION_QA_REGEN_ATTEMPTS)
+
+
+def _music_instrumental_gap_seconds():
+    return _env_float("CONTENT_FACTORY_MUSIC_INSTRUMENTAL_GAP_SECONDS", DEFAULT_MUSIC_INSTRUMENTAL_GAP_SECONDS)
+
+
+def _music_fallback_quotes_enabled():
+    return _env_bool("CONTENT_FACTORY_MUSIC_FALLBACK_QUOTES_ENABLED", default=True)
 
 
 def _music_fallback_frame_mode():
@@ -398,23 +413,53 @@ def _evaluate_music_frame_with_openai_vision(image_path, beat):
 def _vision_qa_failed(qa_result):
     if not isinstance(qa_result, dict) or not qa_result.get("enabled"):
         return False
-    if qa_result.get("passed") is False:
+    issue_text = " ".join(str(item).lower() for item in (qa_result.get("issues") or []))
+    hard_markers = [
+        "readable text",
+        "fake letters",
+        "pseudo",
+        "logo",
+        "watermark",
+        "household",
+        "domestic",
+        "iron",
+        "ironing",
+        "floating",
+        "weight",
+        "dumbbell",
+        "barbell",
+        "between legs",
+        "anatomy",
+        "deformed",
+        "mismatched",
+        "scale",
+        "office clothes",
+        "stock-photo",
+        "stock photo",
+    ]
+    if qa_result.get("hasReadableText") is True or qa_result.get("hasRandomDomesticObject") is True:
+        qa_result["hardRejected"] = True
+        return True
+    if any(marker in issue_text for marker in hard_markers):
+        qa_result["hardRejected"] = True
         return True
     try:
         score = float(qa_result.get("score"))
     except Exception:
         score = None
-    if score is not None and score < _music_vision_qa_min_score():
+    soft_min = _music_vision_qa_soft_min_score()
+    if score is not None and score < soft_min:
         return True
     try:
         brand_fit = float(qa_result.get("brandFit"))
     except Exception:
         brand_fit = None
-    if brand_fit is not None and brand_fit < _music_vision_qa_min_score():
+    if brand_fit is not None and brand_fit < soft_min:
         return True
-    for key in ["hasReadableText", "hasRandomDomesticObject"]:
-        if qa_result.get(key) is True:
-            return True
+    min_score = _music_vision_qa_min_score()
+    if qa_result.get("passed") is False or (score is not None and score < min_score) or (brand_fit is not None and brand_fit < min_score):
+        qa_result["softAccepted"] = True
+        return False
     return False
 
 
@@ -681,6 +726,38 @@ def _compose_generated_frame(source_path, output_path, palette, beat):
     return output_path.exists() and output_path.stat().st_size > 5000
 
 
+def _draw_fallback_quote(draw, quote, box, palette):
+    if not _music_fallback_quotes_enabled():
+        return False
+    quote = compact_text(quote, 92)
+    if not quote:
+        return False
+    x1, y1, x2, y2 = box
+    max_width = max(240, x2 - x1)
+    font = load_font(56, bold=True)
+    lines = _wrap_text(draw, quote, font, max_width)[:2]
+    while len(lines) > 2 and font.size > 34:
+        font = load_font(font.size - 4, bold=True)
+        lines = _wrap_text(draw, quote, font, max_width)[:2]
+    line_h = font.size + 10
+    total_h = line_h * len(lines)
+    y = min(y2 - total_h, max(y1, y2 - total_h))
+    paper = (246, 242, 232, 248)
+    accent = (*palette[1], 230)
+    draw.rounded_rectangle(
+        (x1 - 22, y - 20, x2 + 22, y + total_h + 22),
+        radius=24,
+        fill=(0, 0, 0, 96),
+        outline=(*palette[2], 105),
+        width=2,
+    )
+    draw.line((x1, y - 4, min(x2, x1 + 180), y - 4), fill=accent, width=5)
+    for line in lines:
+        draw.text((x1, y), line, font=font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 210))
+        y += line_h
+    return True
+
+
 def _draw_music_visual_fallback_frame(size, palette, title, beat, seed):
     """Text-free fallback frame used only when generated images are missing."""
     img = _background(size, palette, seed=seed)
@@ -714,6 +791,8 @@ def _draw_music_visual_fallback_frame(size, palette, title, beat, seed):
             paper = (246, 242, 232, 245)
             draw.text((margin, y), line, font=lyric_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 190))
             y += lyric_font.size + 8
+    else:
+        _draw_fallback_quote(draw, beat.get("fallbackQuote"), (margin, int(h * 0.58), int(w * 0.72), h - margin - 34), palette)
     return img.convert("RGB")
 
 
@@ -778,6 +857,8 @@ def _compose_thumbnail_fallback_frame(thumbnail_path, output_path, palette, beat
         for line in _wrap_text(draw, lyric, lyric_font, w - 170)[:2]:
             draw.text((84, y), line, font=lyric_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 190))
             y += 52
+    else:
+        _draw_fallback_quote(draw, beat.get("fallbackQuote"), (96, int(h * 0.61), int(w * 0.66), h - 112), palette)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.convert("RGB").save(output_path, quality=93)
@@ -882,6 +963,44 @@ def _music_whisper_enabled():
     return _env_bool("CONTENT_FACTORY_MUSIC_WHISPER_SUBTITLES_ENABLED", default=default) and bool(os.getenv("OPENAI_API_KEY"))
 
 
+def _music_transcription_enabled():
+    return _env_bool("CONTENT_FACTORY_MUSIC_TRANSCRIPTION_ENABLED", default=True)
+
+
+def _music_transcription_provider_order():
+    configured = [
+        item.strip().lower()
+        for item in os.getenv("CONTENT_FACTORY_MUSIC_TRANSCRIPTION_PROVIDERS", "").split(",")
+        if item.strip()
+    ]
+    order = configured or ["elevenlabs", "openai", "deepgram"]
+    clean = []
+    aliases = {"whisper": "openai", "scribe": "elevenlabs"}
+    for provider in order:
+        normalized = aliases.get(provider, provider)
+        if normalized in {"elevenlabs", "openai", "deepgram"} and normalized not in clean:
+            clean.append(normalized)
+    return clean or ["openai"]
+
+
+def _music_transcription_language():
+    return os.getenv("CONTENT_FACTORY_MUSIC_TRANSCRIPTION_LANGUAGE", "es").strip() or "es"
+
+
+def _music_transcription_timeout():
+    return _env_int("CONTENT_FACTORY_MUSIC_TRANSCRIPTION_TIMEOUT_SECONDS", 180)
+
+
+def _provider_api_key(provider):
+    if provider == "elevenlabs":
+        return os.getenv("ELEVENLABS_API_KEY", "").strip() or os.getenv("XI_API_KEY", "").strip()
+    if provider == "openai":
+        return os.getenv("OPENAI_API_KEY", "").strip()
+    if provider == "deepgram":
+        return os.getenv("DEEPGRAM_API_KEY", "").strip() or os.getenv("DEEPGRAM_API_TOKEN", "").strip()
+    return ""
+
+
 def _normalize_token_text(value):
     text = unicodedata.normalize("NFKD", str(value or "").lower())
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
@@ -897,7 +1016,8 @@ def _clean_transcribed_words(words, duration):
     clean = []
     for item in words or []:
         raw = item if isinstance(item, dict) else {}
-        token = _word_token(raw.get("word"))
+        word_text = raw.get("word") or raw.get("text") or raw.get("punctuated_word")
+        token = _word_token(word_text)
         if not token:
             continue
         try:
@@ -911,7 +1031,7 @@ def _clean_transcribed_words(words, duration):
             end = min(end, max(start + 0.05, float(duration)))
         clean.append(
             {
-                "word": compact_text(raw.get("word"), 40),
+                "word": compact_text(word_text, 40),
                 "token": token,
                 "start": start,
                 "end": max(end, start + 0.05),
@@ -1060,56 +1180,209 @@ def _subtitle_alignment_quality(segments, units):
     }
 
 
-def _build_whisper_subtitle_segments(package, audio_path, duration):
-    diagnostics = {
-        "enabled": bool(_music_whisper_enabled()),
+def _audio_mime_type(audio_path):
+    guessed, _ = mimetypes.guess_type(str(audio_path))
+    return guessed or "audio/mpeg"
+
+
+def _transcribe_with_elevenlabs_scribe(audio_path):
+    api_key = _provider_api_key("elevenlabs")
+    if not api_key:
+        raise RuntimeError("ELEVENLABS_API_KEY not configured")
+    import httpx
+
+    endpoint = os.getenv("CONTENT_FACTORY_MUSIC_ELEVENLABS_STT_ENDPOINT", "https://api.elevenlabs.io/v1/speech-to-text").strip()
+    model = os.getenv("CONTENT_FACTORY_MUSIC_ELEVENLABS_STT_MODEL", "scribe_v2").strip() or "scribe_v2"
+    with open(audio_path, "rb") as file_obj:
+        response = httpx.post(
+            endpoint,
+            headers={"xi-api-key": api_key},
+            params={"enable_logging": "true"},
+            data={
+                "model_id": model,
+                "language_code": _music_transcription_language(),
+                "timestamps_granularity": "word",
+                "tag_audio_events": "false",
+                "diarize": "false",
+            },
+            files={"file": (Path(audio_path).name, file_obj, _audio_mime_type(audio_path))},
+            timeout=_music_transcription_timeout(),
+        )
+    if response.status_code >= 400:
+        raise RuntimeError(f"ElevenLabs STT HTTP {response.status_code}: {compact_text(response.text, 300)}")
+    data = response.json()
+    if isinstance(data, dict) and isinstance(data.get("transcripts"), dict):
+        first = next(iter(data["transcripts"].values()), {})
+        if isinstance(first, dict):
+            data = first
+    return {
+        "provider": "elevenlabs",
+        "model": model,
+        "text": data.get("text") if isinstance(data, dict) else "",
+        "words": data.get("words") if isinstance(data, dict) else [],
+        "rawLanguage": data.get("language_code") if isinstance(data, dict) else "",
+    }
+
+
+def _transcribe_with_openai_whisper(audio_path):
+    api_key = _provider_api_key("openai")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY not configured")
+    try:
+        from scripts.generate_subtitles import transcribe_with_whisper
+    except Exception:
+        from generate_subtitles import transcribe_with_whisper
+
+    transcription = transcribe_with_whisper(Path(audio_path))
+    if not isinstance(transcription, dict):
+        raise RuntimeError("OpenAI Whisper returned empty transcription")
+    return {
+        "provider": "openai",
         "model": "whisper-1",
+        "text": transcription.get("text") or "",
+        "words": transcription.get("words") or [],
+    }
+
+
+def _transcribe_with_deepgram(audio_path):
+    api_key = _provider_api_key("deepgram")
+    if not api_key:
+        raise RuntimeError("DEEPGRAM_API_KEY not configured")
+    import httpx
+
+    model = os.getenv("CONTENT_FACTORY_MUSIC_DEEPGRAM_MODEL", "nova-3").strip() or "nova-3"
+    endpoint = os.getenv("CONTENT_FACTORY_MUSIC_DEEPGRAM_ENDPOINT", "https://api.deepgram.com/v1/listen").strip()
+    params = {
+        "model": model,
+        "smart_format": "true",
+        "punctuate": "true",
+        "utterances": "true",
+        "utt_split": os.getenv("CONTENT_FACTORY_MUSIC_DEEPGRAM_UTT_SPLIT", "0.8"),
+    }
+    language = _music_transcription_language()
+    if language:
+        params["language"] = language
+    data = Path(audio_path).read_bytes()
+    response = httpx.post(
+        endpoint,
+        headers={"Authorization": f"Token {api_key}", "Content-Type": _audio_mime_type(audio_path)},
+        params=params,
+        content=data,
+        timeout=_music_transcription_timeout(),
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Deepgram STT HTTP {response.status_code}: {compact_text(response.text, 300)}")
+    payload = response.json()
+    alternatives = (((payload.get("results") or {}).get("channels") or [{}])[0].get("alternatives") or [{}])
+    primary = alternatives[0] if alternatives else {}
+    return {
+        "provider": "deepgram",
+        "model": model,
+        "text": primary.get("transcript") or "",
+        "words": primary.get("words") or [],
+    }
+
+
+def _transcribe_music_audio(provider, audio_path):
+    if provider == "elevenlabs":
+        return _transcribe_with_elevenlabs_scribe(audio_path)
+    if provider == "deepgram":
+        return _transcribe_with_deepgram(audio_path)
+    return _transcribe_with_openai_whisper(audio_path)
+
+
+def _build_music_timed_segments(package, audio_path, duration):
+    providers = _music_transcription_provider_order()
+    diagnostics = {
+        "enabled": bool(_music_transcription_enabled()),
+        "providers": providers,
+        "provider": "",
+        "model": "",
         "words": 0,
         "segments": 0,
         "publishable": False,
+        "visualUsable": False,
         "mode": "disabled",
         "error": "",
+        "attempts": [],
     }
     if not diagnostics["enabled"]:
-        diagnostics["mode"] = "disabled"
-        diagnostics["error"] = "OPENAI_API_KEY not configured or CONTENT_FACTORY_MUSIC_WHISPER_SUBTITLES_ENABLED=false"
+        diagnostics["error"] = "CONTENT_FACTORY_MUSIC_TRANSCRIPTION_ENABLED=false"
         return [], diagnostics
     units = _lyric_units(package.get("lyrics"))
     if not units:
         diagnostics["mode"] = "no_lyrics"
         diagnostics["error"] = "lyrics not available"
         return [], diagnostics
-    try:
-        from scripts.generate_subtitles import transcribe_with_whisper
 
-        transcription = transcribe_with_whisper(Path(audio_path))
-    except Exception as exc:
-        diagnostics["mode"] = "transcription_failed"
-        diagnostics["error"] = str(exc)[:500]
-        return [], diagnostics
-    if not isinstance(transcription, dict):
-        diagnostics["mode"] = "transcription_empty"
-        diagnostics["error"] = "OpenAI transcription did not return words"
-        return [], diagnostics
-    words = _clean_transcribed_words(transcription.get("words") or [], duration)
-    diagnostics["words"] = len(words)
-    if not words:
-        diagnostics["mode"] = "transcription_no_words"
-        diagnostics["error"] = "Whisper returned no word timestamps"
-        return [], diagnostics
-    segments = _align_lyrics_to_transcribed_words(units, words, duration)
-    diagnostics["segments"] = len(segments)
-    quality = _subtitle_alignment_quality(segments, units)
-    diagnostics.update(quality)
-    diagnostics["mode"] = "whisper_word_aligned" if segments and quality["publishable"] else "alignment_low_confidence"
-    if not segments:
-        diagnostics["mode"] = "alignment_empty"
-        diagnostics["error"] = "lyrics could not be aligned to transcription"
-        return [], diagnostics
-    if not quality["publishable"]:
-        diagnostics["error"] = "lyrics transcription alignment was too weak for publishable subtitles"
-        return [], diagnostics
-    return segments, diagnostics
+    last_error = ""
+    for provider in providers:
+        attempt = {"provider": provider, "status": "pending", "words": 0, "segments": 0, "error": ""}
+        diagnostics["attempts"].append(attempt)
+        if not _provider_api_key(provider):
+            attempt["status"] = "skipped"
+            attempt["error"] = f"{provider} API key not configured"
+            last_error = attempt["error"]
+            continue
+        try:
+            transcription = _transcribe_music_audio(provider, audio_path)
+            attempt["model"] = transcription.get("model") if isinstance(transcription, dict) else ""
+        except Exception as exc:
+            attempt["status"] = "failed"
+            attempt["error"] = str(exc)[:500]
+            last_error = attempt["error"]
+            continue
+        words = _clean_transcribed_words((transcription or {}).get("words") or [], duration)
+        attempt["words"] = len(words)
+        if not words:
+            attempt["status"] = "no_words"
+            attempt["error"] = f"{provider} returned no word timestamps"
+            last_error = attempt["error"]
+            continue
+        segments = _align_lyrics_to_transcribed_words(units, words, duration)
+        attempt["segments"] = len(segments)
+        quality = _subtitle_alignment_quality(segments, units)
+        visual_usable = bool(segments) and quality.get("coverage", 0) >= _env_ratio(
+            "CONTENT_FACTORY_MUSIC_TIMED_VISUALS_MIN_COVERAGE",
+            0.18,
+        )
+        attempt.update({**quality, "visualUsable": visual_usable})
+        if not segments:
+            attempt["status"] = "alignment_empty"
+            attempt["error"] = "lyrics could not be aligned to transcription"
+            last_error = attempt["error"]
+            continue
+        diagnostics.update(quality)
+        diagnostics.update(
+            {
+                "provider": provider,
+                "model": (transcription or {}).get("model") or "",
+                "words": len(words),
+                "segments": len(segments),
+                "visualUsable": visual_usable,
+            }
+        )
+        if quality["publishable"]:
+            attempt["status"] = "publishable"
+            diagnostics["mode"] = f"{provider}_word_aligned"
+            return segments, diagnostics
+        if visual_usable:
+            attempt["status"] = "visual_timing_only"
+            diagnostics["mode"] = f"{provider}_timed_visuals_low_confidence"
+            diagnostics["error"] = "alignment usable for visual timing but not strong enough for publishable subtitles"
+            return segments, diagnostics
+        attempt["status"] = "low_confidence"
+        attempt["error"] = "lyrics transcription alignment was too weak"
+        last_error = attempt["error"]
+
+    diagnostics["mode"] = "transcription_failed"
+    diagnostics["error"] = last_error or "no transcription provider produced word timestamps"
+    return [], diagnostics
+
+
+def _build_whisper_subtitle_segments(package, audio_path, duration):
+    # Backwards-compatible wrapper for older call sites and metadata names.
+    return _build_music_timed_segments(package, audio_path, duration)
 
 
 def _video_concept(package):
@@ -1183,6 +1456,54 @@ def _lyric_units(lyrics):
         if clean:
             units.append({"section": current_section, "line": clean})
     return units
+
+
+def _fallback_quote_pack(package):
+    candidates = []
+
+    def add(value):
+        text = compact_text(value, 72)
+        text = re.sub(r"^\[[^\]]+\]\s*", "", text).strip(" -.,;:")
+        if not text:
+            return
+        if 8 <= len(text) <= 72 and not any(text.lower() == existing.lower() for existing in candidates):
+            candidates.append(text)
+
+    for key in ["mainHook", "mantra", "subtitle", "title"]:
+        add(package.get(key))
+
+    for unit in _lyric_units(package.get("lyrics")):
+        line = compact_text(unit.get("line"), 72)
+        if 16 <= len(line) <= 64:
+            add(line)
+        if len(candidates) >= 10:
+            break
+
+    for phrase in [
+        "Mas rapido. Mas fuerte.",
+        "No negocies con tu excusa.",
+        "Hazlo aunque nadie mire.",
+        "El fuego tambien se entrena.",
+        "Tu disciplina habla por ti.",
+        "La fuerza se construye en silencio.",
+        "Cuando duela, sigue.",
+        "No pares antes de verte cambiar.",
+        "Convierte presion en poder.",
+        "Hoy no gana la excusa.",
+    ]:
+        add(phrase)
+    return candidates[:14]
+
+
+def _fallback_quote_for_index(quote_pack, index):
+    if not quote_pack:
+        return ""
+    return compact_text(quote_pack[index % len(quote_pack)], 92)
+
+
+def _instrumental_visual_line(package, index):
+    pack = _fallback_quote_pack(package)
+    return _fallback_quote_for_index(pack, index) or compact_text(package.get("mainHook") or package.get("title"), 120) or "Instrumental power passage"
 
 
 def _match_scene_for_section(scenes, section, index):
@@ -1318,9 +1639,11 @@ def _build_music_visual_prompt(package, beat, scene, palette):
 
 def _timed_segment_for_window(segments, start, end):
     if not segments:
-        return 0, {}
+        return 0, {}, 0.0, 0.0
     best_index = 0
     best_score = -1.0
+    best_overlap = 0.0
+    best_distance = 0.0
     midpoint = (float(start or 0) + float(end or 0)) / 2
     for index, segment in enumerate(segments):
         seg_start = float(segment.get("start") or 0)
@@ -1331,7 +1654,9 @@ def _timed_segment_for_window(segments, start, end):
         if score > best_score:
             best_score = score
             best_index = index
-    return best_index, segments[best_index]
+            best_overlap = overlap
+            best_distance = distance
+    return best_index, segments[best_index], best_overlap, best_distance
 
 
 def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_segments=None, show_lyric_overlay=False):
@@ -1349,19 +1674,26 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_se
     palette = _palette(package)
     director_plan = (_video_concept(package).get("directorPlan") if isinstance(_video_concept(package), dict) else {}) or package.get("musicVideoDirector")
     director_plan = director_plan if isinstance(director_plan, dict) else {}
+    fallback_quotes = _fallback_quote_pack(package)
+    instrumental_gap_seconds = _music_instrumental_gap_seconds()
     beats = []
     for index in range(beat_count):
         start = index * actual_interval
         end = duration if index == beat_count - 1 else min(duration, (index + 1) * actual_interval)
+        is_instrumental_gap = False
         if timed_segments:
-            segment_index, segment = _timed_segment_for_window(timed_segments, start, end)
-            unit = {"section": segment.get("section"), "line": segment.get("line") or segment.get("text")}
+            segment_index, segment, overlap, distance = _timed_segment_for_window(timed_segments, start, end)
+            is_instrumental_gap = overlap < 0.18 and distance >= instrumental_gap_seconds
+            if is_instrumental_gap:
+                unit = {"section": "Instrumental", "line": _instrumental_visual_line(package, index)}
+            else:
+                unit = {"section": segment.get("section"), "line": segment.get("line") or segment.get("text")}
             previous_segment = timed_segments[max(0, segment_index - 1)] if timed_segments else {}
             next_segment = timed_segments[min(len(timed_segments) - 1, segment_index + 1)] if timed_segments else {}
             previous_unit = {"line": previous_segment.get("line") or previous_segment.get("text")}
             next_unit = {"line": next_segment.get("line") or next_segment.get("text")}
-            alignment_mode = segment.get("alignmentMode") or "timed"
-            alignment_score = segment.get("alignmentScore")
+            alignment_mode = "instrumental_gap" if is_instrumental_gap else (segment.get("alignmentMode") or "timed")
+            alignment_score = None if is_instrumental_gap else segment.get("alignmentScore")
         else:
             unit_index = min(len(units) - 1, int((index / max(1, beat_count)) * len(units)))
             unit = units[unit_index]
@@ -1392,6 +1724,7 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_se
                 "overlay": text_overlay,
                 "storyMoment": story_moment,
                 "shotRecipe": shot_recipe,
+                "fallbackQuote": _fallback_quote_for_index(fallback_quotes, index),
                 "showLyricOverlay": bool(show_lyric_overlay),
                 "prompt": prompt,
                 "promptGate": prompt_quality,
@@ -1401,6 +1734,7 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_se
                 "sourceScene": scene.get("section"),
                 "alignmentMode": alignment_mode,
                 "alignmentScore": alignment_score,
+                "isInstrumentalGap": bool(is_instrumental_gap),
             }
         )
     return beats, actual_interval
@@ -1562,11 +1896,12 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     requested_interval = _env_float("CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS", DEFAULT_VISUAL_INTERVAL_SECONDS)
     max_visual_beats = _env_int("CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS", DEFAULT_MAX_VISUAL_BEATS)
     subtitle_segments, subtitle_diagnostics = _build_whisper_subtitle_segments(package, audio_path, duration)
-    subtitle_mode = "whisper_word_aligned" if subtitle_segments else "off_no_reliable_timestamps"
+    subtitle_publishable = bool(subtitle_segments) and bool(subtitle_diagnostics.get("publishable"))
+    subtitle_mode = subtitle_diagnostics.get("mode") or ("off_no_reliable_timestamps" if not subtitle_segments else "alignment_low_confidence")
     show_lyric_overlay = _env_bool(
         "CONTENT_FACTORY_MUSIC_LYRIC_OVERLAY_ENABLED",
         default=False,
-    ) and bool(subtitle_segments)
+    ) and subtitle_publishable
     beats, visual_interval = _build_visual_beats(
         package,
         duration,
@@ -1728,7 +2063,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
 
     lyrics_path.write_text(str(package.get("lyrics") or ""), encoding="utf-8")
     suno_path.write_text(str(package.get("sunoPrompt") or ""), encoding="utf-8")
-    if subtitle_segments:
+    if subtitle_publishable:
         subtitle_count = _write_subtitle_segments(subtitle_segments, subtitles_path)
     else:
         subtitles_path.write_text("", encoding="utf-8")
@@ -1760,6 +2095,9 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "passed": sum(1 for item in vision_qa_results if item.get("passed") is True),
         "failed": sum(1 for item in vision_qa_results if item.get("passed") is False),
         "minScore": _music_vision_qa_min_score(),
+        "softMinScore": _music_vision_qa_soft_min_score(),
+        "softAccepted": sum(1 for item in vision_qa_results if item.get("softAccepted")),
+        "hardRejected": sum(1 for item in vision_qa_results if item.get("hardRejected")),
         "regenAttempts": _music_vision_qa_regen_attempts(),
         "regeneratedFrames": qa_regenerated_frames,
         "replacedFrames": qa_replaced_frames,
@@ -1791,6 +2129,9 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "subtitleMode": subtitle_mode,
         "subtitleCount": subtitle_count,
         "subtitleDiagnostics": subtitle_diagnostics,
+        "transcriptionProvider": subtitle_diagnostics.get("provider") or "",
+        "fallbackQuotePack": _fallback_quote_pack(package),
+        "instrumentalBeatCount": sum(1 for beat in beats if beat.get("isInstrumentalGap")),
         "visualBeats": [
             {
                 "index": beat["scene_number"],
@@ -1803,7 +2144,9 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
                 "sourceScene": beat.get("sourceScene"),
                 "alignmentMode": beat.get("alignmentMode"),
                 "alignmentScore": beat.get("alignmentScore"),
+                "isInstrumentalGap": beat.get("isInstrumentalGap"),
                 "storyMoment": beat.get("storyMoment"),
+                "fallbackQuote": beat.get("fallbackQuote"),
                 "showLyricOverlay": beat.get("showLyricOverlay"),
                 "shotRecipe": beat.get("shotRecipe"),
                 "promptGate": beat.get("promptGate"),
@@ -1851,6 +2194,9 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "subtitleMode": metadata["subtitleMode"],
         "subtitleCount": metadata["subtitleCount"],
         "subtitleDiagnostics": metadata["subtitleDiagnostics"],
+        "transcriptionProvider": metadata["transcriptionProvider"],
+        "fallbackQuotePack": metadata["fallbackQuotePack"],
+        "instrumentalBeatCount": metadata["instrumentalBeatCount"],
         "thumbnailEngine": metadata["thumbnailEngine"],
         "showLyricOverlay": metadata["showLyricOverlay"],
         "visualizerMode": metadata["visualizerMode"],
