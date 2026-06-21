@@ -71,6 +71,7 @@ Contratos preparados:
 - Inngest: el plan deja eventos sugeridos para retries y jobs largos sin bloquear UI.
 - n8n: recomendado solo para automatizaciones externas como avisos, archivado o checklist de publicacion.
 - OpenAI Vision QA: disponible via `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED`; por default se activa si existe `OPENAI_API_KEY`. Revisa hasta `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MAX_FRAMES` frames, intenta reparar con Comfy y reemplaza con fallback local si la imagen tiene texto, objetos domesticos, pesas flotando, anatomia rota, ropa incongruente o escala imposible.
+- Fallback visual: si Comfy no entrega imagen para un beat, el renderer usa la miniatura raw de OpenAI como base visual; si no existe raw pero la miniatura final viene de OpenAI, usa un recorte hacia la zona visual; si solo existe miniatura local con texto, cae al fallback local abstracto para no repetir letras gigantes dentro del video.
 - Remotion: marcado como ready si despues queremos plantillas animadas reutilizables; el render actual sigue en FFmpeg porque ya es estable.
 - Qdrant/PostHog/Langfuse: se guardan campos listos en metadata para memoria visual, medicion y trazabilidad futura.
 
@@ -96,6 +97,7 @@ CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MODEL=gpt-4o-mini
 CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MAX_FRAMES=60
 CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MIN_SCORE=82
 CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_REGEN_ATTEMPTS=1
+CONTENT_FACTORY_MUSIC_FALLBACK_FRAME_MODE=thumbnail
 CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_NODE=
 CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_INPUT=
 ANTHROPIC_API_KEY=...
@@ -110,6 +112,7 @@ Notas de costo visual:
 - Los beats que excedan el limite o fallen entran con fallback local.
 - Para apagar Comfy sin romper el render: `CONTENT_FACTORY_MUSIC_COMFY_ENABLED=false`.
 - Para apagar QA visual sin romper el render: `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED=false`.
+- Para volver al fallback abstracto anterior: `CONTENT_FACTORY_MUSIC_FALLBACK_FRAME_MODE=local`.
 - Los nodos `CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_NODE` y `CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_INPUT` solo se llenan cuando haya un workflow custom de Comfy con entrada ControlNet/pose/depth/canny.
 
 Frontend:

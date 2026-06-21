@@ -499,6 +499,14 @@ function visionQaTone(visionQa) {
   return "ok";
 }
 
+function fallbackFrameLabel(render) {
+  const thumbnailFrames = Number(render?.thumbnailFallbackFrames || 0);
+  const localFrames = Number(render?.localFallbackFrames || 0);
+  if (thumbnailFrames > 0) return `Fallback miniatura: ${thumbnailFrames}`;
+  if (localFrames > 0) return `Fallback local: ${localFrames}`;
+  return "";
+}
+
 function AudioVersionList({
   versions,
   activeId,
@@ -546,6 +554,7 @@ function AudioVersionList({
                   <span style={pillStyle(renderStatusTone(render?.status))}>{renderStatusLabel(render?.status)}</span>
                   {directorVersionLabel(render?.directorVersion) && <span style={pillStyle("neutral")}>{directorVersionLabel(render.directorVersion)}</span>}
                   {visionQaLabel(render?.visionQa) && <span style={pillStyle(visionQaTone(render.visionQa))}>{visionQaLabel(render.visionQa)}</span>}
+                  {fallbackFrameLabel(render) && <span style={pillStyle("neutral")}>{fallbackFrameLabel(render)}</span>}
                   {subtitleModeLabel(render?.subtitleMode) && <span style={pillStyle(render?.subtitleMode === "whisper_word_aligned" ? "ok" : "neutral")}>{subtitleModeLabel(render?.subtitleMode)}</span>}
                   {thumbnailEngineLabel(render?.thumbnailEngine) && <span style={pillStyle(render?.thumbnailEngine?.includes?.("openai") ? "ok" : "neutral")}>{thumbnailEngineLabel(render.thumbnailEngine)}</span>}
                 </div>
@@ -646,6 +655,7 @@ function RenderHistoryList({ renders, versions }) {
                   <span style={pillStyle(renderStatusTone(render.status))}>{renderStatusLabel(render.status)}</span>
                   {directorVersionLabel(render?.directorVersion) && <span style={pillStyle("neutral")}>{directorVersionLabel(render.directorVersion)}</span>}
                   {visionQaLabel(render?.visionQa) && <span style={pillStyle(visionQaTone(render.visionQa))}>{visionQaLabel(render.visionQa)}</span>}
+                  {fallbackFrameLabel(render) && <span style={pillStyle("neutral")}>{fallbackFrameLabel(render)}</span>}
                 </div>
                 <div className="cf-caption" style={{ marginTop: 6 }}>
                   {[duration, beatCount ? `${beatCount} beats visuales` : "", render.visualProvider ? (render.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local") : "", thumbnailEngineLabel(render.thumbnailEngine), subtitleModeLabel(render.subtitleMode), formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}

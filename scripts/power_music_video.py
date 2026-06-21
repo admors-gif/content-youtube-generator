@@ -318,6 +318,13 @@ def _music_vision_qa_regen_attempts():
     return _env_int("CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_REGEN_ATTEMPTS", DEFAULT_MUSIC_VISION_QA_REGEN_ATTEMPTS)
 
 
+def _music_fallback_frame_mode():
+    value = os.getenv("CONTENT_FACTORY_MUSIC_FALLBACK_FRAME_MODE", "thumbnail").strip().lower()
+    if value in {"local", "abstract", "off"}:
+        return "local"
+    return "thumbnail"
+
+
 def _parse_json_object(text):
     raw = str(text or "").strip()
     if not raw:
@@ -708,6 +715,83 @@ def _draw_music_visual_fallback_frame(size, palette, title, beat, seed):
             draw.text((margin, y), line, font=lyric_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 190))
             y += lyric_font.size + 8
     return img.convert("RGB")
+
+
+def _thumbnail_fallback_source(thumbnail_path, thumbnail_engine=""):
+    thumbnail_path = Path(thumbnail_path)
+    raw_path = thumbnail_path.with_name("thumbnail_openai_raw.jpg")
+    if raw_path.exists() and raw_path.stat().st_size > 5000:
+        return raw_path, "thumbnail_raw"
+    if (
+        str(thumbnail_engine or "").lower().startswith("openai")
+        and thumbnail_path.exists()
+        and thumbnail_path.stat().st_size > 5000
+    ):
+        return thumbnail_path, "thumbnail_cropped"
+    return None, ""
+
+
+def _compose_thumbnail_fallback_frame(thumbnail_path, output_path, palette, beat, seed, thumbnail_engine=""):
+    source_path, source_label = _thumbnail_fallback_source(thumbnail_path, thumbnail_engine=thumbnail_engine)
+    if not source_path:
+        return False, ""
+    try:
+        img = Image.open(source_path).convert("RGB")
+    except Exception:
+        return False, ""
+
+    # The final thumbnail can contain title text on the left. For video fallback
+    # frames, crop toward the visual area so the frame feels related without
+    # repeating cover typography across the whole song.
+    if source_label == "thumbnail_cropped":
+        src_w, src_h = img.size
+        crop_left = int(src_w * 0.52)
+        crop = img.crop((crop_left, 0, src_w, src_h))
+        img = _resize_cover(crop, VIDEO_SIZE)
+    else:
+        img = _resize_cover(img, VIDEO_SIZE)
+
+    img = img.convert("RGBA").filter(ImageFilter.GaussianBlur(0.55))
+    shade = Image.new("RGBA", VIDEO_SIZE, (0, 0, 0, 0))
+    px = shade.load()
+    w, h = VIDEO_SIZE
+    for y in range(h):
+        for x in range(w):
+            edge = max(abs((x / max(1, w - 1)) - 0.5), abs((y / max(1, h - 1)) - 0.5)) * 2
+            alpha = int(34 + max(0.0, edge - 0.35) * 104)
+            px[x, y] = (0, 0, 0, min(156, alpha))
+    img = Image.alpha_composite(img, shade)
+
+    draw = ImageDraw.Draw(img, "RGBA")
+    gold = (*palette[1], 125)
+    ember = (*palette[2], 145)
+    scene_number = int(beat.get("scene_number") or 0)
+    offset = (seed + scene_number * 37) % 180
+    draw.line((90 + offset, h - 96, w - 120, h - 96), fill=gold, width=3)
+    draw.rounded_rectangle((74, 64, w - 74, h - 64), radius=34, outline=ember, width=2)
+
+    if beat.get("showLyricOverlay"):
+        paper = (246, 242, 232, 245)
+        lyric_font = load_font(44, bold=True)
+        lyric = compact_text(beat.get("lyric") or beat.get("overlay"), 96)
+        y = h - 168
+        for line in _wrap_text(draw, lyric, lyric_font, w - 170)[:2]:
+            draw.text((84, y), line, font=lyric_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 190))
+            y += 52
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    img.convert("RGB").save(output_path, quality=93)
+    return output_path.exists() and output_path.stat().st_size > 5000, source_label
+
+
+def _write_music_fallback_frame(thumbnail_path, image_path, palette, title, beat, seed, thumbnail_engine=""):
+    if _music_fallback_frame_mode() == "thumbnail":
+        ok, source = _compose_thumbnail_fallback_frame(thumbnail_path, image_path, palette, beat, seed, thumbnail_engine=thumbnail_engine)
+        if ok:
+            return source
+    frame = _draw_music_visual_fallback_frame(VIDEO_SIZE, palette, title, beat, seed)
+    frame.save(image_path, quality=92)
+    return "local_fallback"
 
 
 def _run(cmd, timeout=900):
@@ -1509,6 +1593,8 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     segment_paths = []
     generated_frames = 0
     fallback_frames = 0
+    thumbnail_fallback_frames = 0
+    local_fallback_frames = 0
     vision_qa_results = []
     qa_regenerated_frames = 0
     qa_replaced_frames = 0
@@ -1521,10 +1607,12 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         if comfy_path.exists() and comfy_path.stat().st_size > 5000 and _compose_generated_frame(comfy_path, image_path, palette, beat):
             generated_frames += 1
         else:
-            frame = _draw_music_visual_fallback_frame(VIDEO_SIZE, palette, title, beat, 100 + index)
-            frame.save(image_path, quality=92)
+            frame_source = _write_music_fallback_frame(thumbnail_path, image_path, palette, title, beat, 100 + index, thumbnail_engine=thumbnail_engine)
             fallback_frames += 1
-            frame_source = "local_fallback"
+            if frame_source.startswith("thumbnail"):
+                thumbnail_fallback_frames += 1
+            else:
+                local_fallback_frames += 1
 
         if vision_qa_max_frames and len(vision_qa_results) < vision_qa_max_frames:
             qa_result = _evaluate_music_frame_with_openai_vision(image_path, beat)
@@ -1552,12 +1640,23 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
                     else:
                         beat["prompt"] = original_prompt
                 if _vision_qa_failed(qa_result):
-                    frame = _draw_music_visual_fallback_frame(VIDEO_SIZE, palette, title, beat, 800 + index)
-                    frame.save(image_path, quality=92)
+                    replacement_source = _write_music_fallback_frame(
+                        thumbnail_path,
+                        image_path,
+                        palette,
+                        title,
+                        beat,
+                        800 + index,
+                        thumbnail_engine=thumbnail_engine,
+                    )
                     qa_replaced_frames += 1
-                    if frame_source != "local_fallback":
+                    if frame_source not in {"local_fallback", "thumbnail_raw", "thumbnail_cropped"}:
                         fallback_frames += 1
-                    qa_result["replacement"] = "local_fallback_after_vision_qa"
+                        if replacement_source.startswith("thumbnail"):
+                            thumbnail_fallback_frames += 1
+                        else:
+                            local_fallback_frames += 1
+                    qa_result["replacement"] = f"{replacement_source}_after_vision_qa"
             vision_qa_results.append(qa_result)
 
         segment_duration = max(0.5, float(beat.get("duration") or visual_interval))
@@ -1674,12 +1773,15 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "visualBeatCount": len(beats),
         "visualIntervalSeconds": round(visual_interval, 3),
         "requestedVisualIntervalSeconds": round(requested_interval, 3),
-        "visualProvider": "comfy_flux" if generated_frames else "local_fallback",
+        "visualProvider": "comfy_flux" if generated_frames else ("thumbnail_fallback" if thumbnail_fallback_frames else "local_fallback"),
         "thumbnailEngine": thumbnail_engine,
         "showLyricOverlay": show_lyric_overlay,
         "comfy": comfy_stats,
         "generatedFrames": generated_frames,
         "fallbackFrames": fallback_frames,
+        "thumbnailFallbackFrames": thumbnail_fallback_frames,
+        "localFallbackFrames": local_fallback_frames,
+        "fallbackFrameMode": _music_fallback_frame_mode(),
         "renderer": "power_music_video_v5_shot_controlled_vision_qa",
         "visualizerMode": "symbolic_premium_text_free_director_v3",
         "directorVersion": DIRECTOR_VERSION,
@@ -1737,6 +1839,9 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "visualProvider": metadata["visualProvider"],
         "generatedFrames": generated_frames,
         "fallbackFrames": fallback_frames,
+        "thumbnailFallbackFrames": thumbnail_fallback_frames,
+        "localFallbackFrames": local_fallback_frames,
+        "fallbackFrameMode": metadata["fallbackFrameMode"],
         "comfy": comfy_stats,
         "renderer": metadata["renderer"],
         "directorVersion": metadata["directorVersion"],
