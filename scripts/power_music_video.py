@@ -45,8 +45,10 @@ THUMB_SIZE = (1280, 720)
 COVER_SIZE = (1080, 1080)
 FPS = 30
 DEFAULT_VISUAL_INTERVAL_SECONDS = 5.0
+DEFAULT_OPENAI_VISUAL_INTERVAL_SECONDS = 10.0
 DEFAULT_MAX_VISUAL_BEATS = 120
 DEFAULT_MAX_COMFY_IMAGES = 120
+DEFAULT_MAX_OPENAI_IMAGES = 72
 DEFAULT_SUBTITLE_MIN_ALIGNMENT_SCORE = 0.62
 DEFAULT_SUBTITLE_MIN_PHRASE_RATIO = 0.55
 DEFAULT_MUSIC_VISION_QA_MAX_FRAMES = 60
@@ -301,6 +303,80 @@ def _music_thumbnail_size(model):
     if str(model).startswith("gpt-image"):
         return "1536x1024"
     return "1792x1024"
+
+
+def _music_openai_images_enabled():
+    return _env_bool("CONTENT_FACTORY_MUSIC_OPENAI_IMAGES_ENABLED", default=True) and bool(os.getenv("OPENAI_API_KEY"))
+
+
+def _music_visual_provider():
+    configured = os.getenv("CONTENT_FACTORY_MUSIC_VISUAL_PROVIDER", "").strip().lower()
+    aliases = {
+        "openai": "openai_images",
+        "openai_image": "openai_images",
+        "openai_images": "openai_images",
+        "gpt_image": "openai_images",
+        "gpt_images": "openai_images",
+        "comfy": "comfy_flux",
+        "comfyui": "comfy_flux",
+        "comfy_flux": "comfy_flux",
+        "flux": "comfy_flux",
+        "auto": "auto",
+    }
+    provider = aliases.get(configured, configured)
+    if provider in {"openai_images", "comfy_flux"}:
+        return provider
+    if provider == "auto" or not provider:
+        return "openai_images" if _music_openai_images_enabled() else "comfy_flux"
+    return "comfy_flux"
+
+
+def _music_visual_interval_seconds(provider):
+    if provider == "openai_images":
+        return _env_float("CONTENT_FACTORY_MUSIC_OPENAI_VISUAL_INTERVAL_SECONDS", DEFAULT_OPENAI_VISUAL_INTERVAL_SECONDS)
+    return _env_float("CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS", DEFAULT_VISUAL_INTERVAL_SECONDS)
+
+
+def _music_openai_image_model():
+    return os.getenv("CONTENT_FACTORY_MUSIC_OPENAI_IMAGE_MODEL", "gpt-image-2").strip() or "gpt-image-2"
+
+
+def _music_openai_image_model_candidates():
+    configured = [
+        item.strip()
+        for item in os.getenv("CONTENT_FACTORY_MUSIC_OPENAI_IMAGE_MODELS", "").split(",")
+        if item.strip()
+    ]
+    if configured:
+        return configured
+    primary = _music_openai_image_model()
+    candidates = [primary]
+    for fallback in ["gpt-image-1.5", "gpt-image-1"]:
+        if fallback not in candidates:
+            candidates.append(fallback)
+    return candidates
+
+
+def _music_openai_image_quality():
+    return os.getenv("CONTENT_FACTORY_MUSIC_OPENAI_IMAGE_QUALITY", "medium").strip() or "medium"
+
+
+def _music_openai_image_size(model):
+    configured = os.getenv("CONTENT_FACTORY_MUSIC_OPENAI_IMAGE_SIZE", "").strip()
+    if configured:
+        return configured
+    if str(model).startswith("gpt-image"):
+        return "1536x1024"
+    return "1792x1024"
+
+
+def _music_openai_image_cost_estimate(count, quality):
+    estimates = {
+        "low": _env_float("CONTENT_FACTORY_MUSIC_OPENAI_IMAGE_COST_LOW_USD", 0.005),
+        "medium": _env_float("CONTENT_FACTORY_MUSIC_OPENAI_IMAGE_COST_MEDIUM_USD", 0.041),
+        "high": _env_float("CONTENT_FACTORY_MUSIC_OPENAI_IMAGE_COST_HIGH_USD", 0.165),
+    }
+    return round(max(0, int(count or 0)) * estimates.get(str(quality or "").lower(), estimates["medium"]), 4)
 
 
 def _music_premium_thumbnail_enabled():
@@ -2435,6 +2511,132 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_se
     return beats, actual_interval
 
 
+def _build_openai_music_visual_prompt(beat):
+    shot_recipe = beat.get("shotRecipe") if isinstance(beat.get("shotRecipe"), dict) else {}
+    base_prompt = compact_text(beat.get("prompt"), 2600)
+    story_moment = compact_text(beat.get("storyMoment"), 360)
+    lyric = compact_text(beat.get("lyric"), 220)
+    section = compact_text(beat.get("section"), 80)
+    return compact_text(
+        (
+            "Create ONE premium 16:9 landscape cinematic still for a motivational music video. "
+            "This is not a thumbnail and must contain absolutely no text. "
+            f"{TEXT_FREE_NEGATIVE_PROMPT} "
+            "Use a grounded, physically believable scene with one clear subject or symbolic focus. "
+            "Avoid random objects, floating props, deformed anatomy, mismatched scale, fake letters, posters, screens, signage, and PowerPoint-style graphics. "
+            "Prefer expensive, polished music-video imagery: disciplined motion, controlled power, luxury architecture, sunrise city, steel, black marble, gold reflections, shadow-to-victory energy. "
+            "Make it emotionally connected to the song but not a literal illustration of every lyric. "
+            f"Song section metadata: {section}. Lyric metadata, do not render as text: {lyric}. "
+            f"Visual metaphor for this beat: {story_moment}. "
+            f"Locked shot recipe: subject={shot_recipe.get('subject')}; wardrobe={shot_recipe.get('wardrobe')}; action={shot_recipe.get('action')}; "
+            f"prop rules={shot_recipe.get('propRules')}; composition={shot_recipe.get('composition')}; physics={shot_recipe.get('physics')}. "
+            f"Full visual prompt contract: {base_prompt}"
+        ),
+        3600,
+    )
+
+
+def _generate_openai_beat_images(beats, images_dir):
+    stats = {
+        "enabled": False,
+        "requested": 0,
+        "generated": 0,
+        "skipped": 0,
+        "failed": 0,
+        "model": "",
+        "quality": _music_openai_image_quality(),
+        "size": "",
+        "estimatedCostUsd": 0,
+        "missing": [],
+        "error": "",
+    }
+    if not _music_openai_images_enabled():
+        stats["error"] = "OPENAI_API_KEY not configured or CONTENT_FACTORY_MUSIC_OPENAI_IMAGES_ENABLED=false"
+        return stats
+
+    max_images = _env_int("CONTENT_FACTORY_MUSIC_MAX_OPENAI_IMAGES", DEFAULT_MAX_OPENAI_IMAGES)
+    selected_beats = list(beats[:max(0, max_images)])
+    if not selected_beats:
+        return stats
+
+    stats["enabled"] = True
+    stats["requested"] = len(selected_beats)
+    stats["estimatedCostUsd"] = _music_openai_image_cost_estimate(stats["requested"], stats["quality"])
+    images_dir = Path(images_dir)
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", "").strip())
+        candidates = _music_openai_image_model_candidates()
+        active_model = ""
+        last_error = ""
+        for beat in selected_beats:
+            scene_num = int(beat.get("scene_number") or 0)
+            if scene_num <= 0:
+                continue
+            output_path = images_dir / f"scene_{scene_num:04d}.jpg"
+            if output_path.exists() and output_path.stat().st_size > 5000:
+                stats["skipped"] += 1
+                continue
+            prompt = _build_openai_music_visual_prompt(beat)
+            models = [active_model] + [item for item in candidates if item != active_model] if active_model else candidates
+            generated = False
+            for model in models:
+                if not model:
+                    continue
+                params = {
+                    "model": model,
+                    "prompt": prompt,
+                    "size": _music_openai_image_size(model),
+                    "quality": stats["quality"],
+                    "n": 1,
+                }
+                if str(model).startswith("gpt-image"):
+                    params["output_format"] = "jpeg"
+                    params["output_compression"] = 92
+                try:
+                    response = client.images.generate(**params)
+                except Exception as exc:
+                    last_error = str(exc)[:300]
+                    if "output_format" in last_error or "output_compression" in last_error:
+                        params.pop("output_format", None)
+                        params.pop("output_compression", None)
+                        try:
+                            response = client.images.generate(**params)
+                        except Exception as retry_exc:
+                            last_error = str(retry_exc)[:300]
+                            print(f"   [music-openai-images] scene {scene_num} {model} retry failed: {last_error}", flush=True)
+                            continue
+                    else:
+                        print(f"   [music-openai-images] scene {scene_num} {model} failed: {last_error}", flush=True)
+                        continue
+                data = getattr(response, "data", None) or []
+                if data and _write_openai_image_data(data[0], output_path):
+                    active_model = model
+                    stats["model"] = model
+                    stats["size"] = params.get("size") or ""
+                    stats["generated"] += 1
+                    generated = True
+                    break
+                last_error = "Image API returned no data"
+            if not generated:
+                stats["failed"] += 1
+                stats["missing"].append(scene_num)
+        if last_error and stats["failed"]:
+            stats["error"] = last_error
+        if not stats["model"] and candidates:
+            stats["model"] = candidates[0]
+            stats["size"] = _music_openai_image_size(candidates[0])
+        return stats
+    except Exception as exc:
+        stats["error"] = str(exc)[:500]
+        stats["failed"] = stats["requested"] - stats["generated"] - stats["skipped"]
+        stats["missing"] = [int(beat.get("scene_number") or 0) for beat in selected_beats if int(beat.get("scene_number") or 0) > 0]
+        return stats
+
+
 def _comfy_music_enabled():
     default = bool(os.getenv("COMFYUI_API_KEY"))
     return _env_bool("CONTENT_FACTORY_MUSIC_COMFY_ENABLED", default=default) and bool(os.getenv("COMFYUI_API_KEY"))
@@ -2588,7 +2790,8 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     subtitle = compact_text(package.get("subtitle") or package.get("mainHook"), 160)
     palette = _palette(package)
     duration = probe_audio_duration(audio_path)
-    requested_interval = _env_float("CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS", DEFAULT_VISUAL_INTERVAL_SECONDS)
+    preferred_visual_provider = _music_visual_provider()
+    requested_interval = _music_visual_interval_seconds(preferred_visual_provider)
     max_visual_beats = _env_int("CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS", DEFAULT_MAX_VISUAL_BEATS)
     subtitle_segments, subtitle_diagnostics = _build_whisper_subtitle_segments(package, audio_path, duration)
     subtitle_publishable = bool(subtitle_segments) and bool(subtitle_diagnostics.get("publishable"))
@@ -2620,10 +2823,45 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     cover.save(cover_path, quality=94)
     thumbnail_engine = _build_music_thumbnail(package, palette, title, subtitle, thumbnail_path)
 
+    openai_dir = output_dir / "openai_images"
     comfy_dir = output_dir / "comfy"
-    comfy_stats = _generate_comfy_beat_images(beats, comfy_dir)
+    openai_stats = _generate_openai_beat_images(beats, openai_dir) if preferred_visual_provider == "openai_images" else {
+        "enabled": False,
+        "requested": 0,
+        "generated": 0,
+        "skipped": 0,
+        "failed": 0,
+        "model": "",
+        "quality": _music_openai_image_quality(),
+        "size": "",
+        "estimatedCostUsd": 0,
+        "missing": [],
+        "error": "visual provider is not openai_images",
+    }
+    if preferred_visual_provider == "openai_images":
+        missing_for_comfy = [
+            beat
+            for beat in beats
+            if not (openai_dir / f"scene_{int(beat.get('scene_number') or 0):04d}.jpg").exists()
+        ]
+        comfy_stats = _generate_comfy_beat_images(missing_for_comfy, comfy_dir) if missing_for_comfy else {
+            "enabled": False,
+            "requested": 0,
+            "generated": 0,
+            "skipped": 0,
+            "failed": 0,
+            "workflow": "",
+            "workflowLabel": "",
+            "missing": [],
+            "invalid": [],
+            "error": "openai_images generated all requested beats",
+        }
+    else:
+        comfy_stats = _generate_comfy_beat_images(beats, comfy_dir)
     segment_paths = []
     generated_frames = 0
+    openai_generated_frames = 0
+    comfy_generated_frames = 0
     fallback_frames = 0
     thumbnail_fallback_frames = 0
     local_fallback_frames = 0
@@ -2635,10 +2873,28 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     for index, beat in enumerate(beats, start=1):
         image_path = assets_dir / f"beat_{index:03d}.jpg"
         segment_path = segments_dir / f"segment_{index:03d}.mp4"
+        openai_path = openai_dir / f"scene_{index:04d}.jpg"
         comfy_path = comfy_dir / f"scene_{index:04d}.png"
-        frame_source = "comfy"
-        if comfy_path.exists() and comfy_path.stat().st_size > 5000 and _compose_generated_frame(comfy_path, image_path, palette, beat):
+        frame_source = ""
+        generated_source = ""
+        source_candidates = []
+        if preferred_visual_provider == "openai_images":
+            source_candidates.append(("openai_images", openai_path))
+            source_candidates.append(("comfy", comfy_path))
+        else:
+            source_candidates.append(("comfy", comfy_path))
+            source_candidates.append(("openai_images", openai_path))
+        for candidate_source, candidate_path in source_candidates:
+            if candidate_path.exists() and candidate_path.stat().st_size > 5000 and _compose_generated_frame(candidate_path, image_path, palette, beat):
+                generated_source = candidate_source
+                frame_source = candidate_source
+                break
+        if generated_source:
             generated_frames += 1
+            if generated_source == "openai_images":
+                openai_generated_frames += 1
+            elif generated_source == "comfy":
+                comfy_generated_frames += 1
         else:
             frame_source = _write_music_fallback_frame(thumbnail_path, image_path, palette, title, beat, 100 + index, thumbnail_engine=thumbnail_engine)
             fallback_frames += 1
@@ -2834,11 +3090,15 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "visualBeatCount": len(beats),
         "visualIntervalSeconds": round(visual_interval, 3),
         "requestedVisualIntervalSeconds": round(requested_interval, 3),
-        "visualProvider": "comfy_flux" if generated_frames else ("thumbnail_fallback" if thumbnail_fallback_frames else "local_fallback"),
+        "preferredVisualProvider": preferred_visual_provider,
+        "visualProvider": "openai_images" if openai_generated_frames else ("comfy_flux" if comfy_generated_frames else ("thumbnail_fallback" if thumbnail_fallback_frames else "local_fallback")),
         "thumbnailEngine": thumbnail_engine,
         "showLyricOverlay": show_lyric_overlay,
+        "openaiImages": openai_stats,
         "comfy": comfy_stats,
         "generatedFrames": generated_frames,
+        "openaiGeneratedFrames": openai_generated_frames,
+        "comfyGeneratedFrames": comfy_generated_frames,
         "fallbackFrames": fallback_frames,
         "thumbnailFallbackFrames": thumbnail_fallback_frames,
         "localFallbackFrames": local_fallback_frames,
@@ -2916,12 +3176,16 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "visualBeatCount": len(beats),
         "visualIntervalSeconds": round(visual_interval, 3),
         "visualProvider": metadata["visualProvider"],
+        "preferredVisualProvider": metadata["preferredVisualProvider"],
         "generatedFrames": generated_frames,
+        "openaiGeneratedFrames": metadata["openaiGeneratedFrames"],
+        "comfyGeneratedFrames": metadata["comfyGeneratedFrames"],
         "fallbackFrames": fallback_frames,
         "thumbnailFallbackFrames": thumbnail_fallback_frames,
         "localFallbackFrames": local_fallback_frames,
         "fallbackLyricOverlayFrames": metadata["fallbackLyricOverlayFrames"],
         "fallbackFrameMode": metadata["fallbackFrameMode"],
+        "openaiImages": openai_stats,
         "comfy": comfy_stats,
         "renderer": metadata["renderer"],
         "directorVersion": metadata["directorVersion"],

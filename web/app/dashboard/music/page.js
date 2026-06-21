@@ -491,6 +491,22 @@ function thumbnailEngineLabel(engine) {
   return "Miniatura premium";
 }
 
+function visualProviderLabel(provider) {
+  const value = safeText(provider).toLowerCase();
+  if (!value) return "";
+  if (value === "openai_images" || value.includes("openai")) return "OpenAI Images";
+  if (value === "comfy_flux" || value.includes("comfy") || value.includes("flux")) return "Flux/Comfy";
+  if (value.includes("thumbnail")) return "Fallback miniatura";
+  if (value.includes("fallback")) return "Fallback local";
+  return safeText(provider);
+}
+
+function openaiImagesLabel(render) {
+  const count = Number(render?.openaiGeneratedFrames || render?.openaiImages?.generated || 0);
+  if (count > 0) return `OpenAI Images: ${count}`;
+  return "";
+}
+
 function directorVersionLabel(version) {
   const value = safeText(version).toLowerCase();
   if (!value) return "";
@@ -651,6 +667,7 @@ function AudioVersionList({
                   <span style={pillStyle(renderStatusTone(render?.status))}>{renderStatusLabel(render?.status)}</span>
                   {directorVersionLabel(render?.directorVersion) && <span style={pillStyle("neutral")}>{directorVersionLabel(render.directorVersion)}</span>}
                   {visionQaLabel(render?.visionQa) && <span style={pillStyle(visionQaTone(render.visionQa))}>{visionQaLabel(render.visionQa)}</span>}
+                  {openaiImagesLabel(render) && <span style={pillStyle("ok")}>{openaiImagesLabel(render)}</span>}
                   {fallbackFrameLabel(render) && <span style={pillStyle("neutral")}>{fallbackFrameLabel(render)}</span>}
                   {fallbackLyricOverlayLabel(render) && <span style={pillStyle("ok")}>{fallbackLyricOverlayLabel(render)}</span>}
                   {instrumentalBeatLabel(render) && <span style={pillStyle("neutral")}>{instrumentalBeatLabel(render)}</span>}
@@ -785,6 +802,7 @@ function RenderHistoryList({ renders, versions, onPublish, onPublishShorts }) {
                   <span style={pillStyle(renderStatusTone(render.status))}>{renderStatusLabel(render.status)}</span>
                   {directorVersionLabel(render?.directorVersion) && <span style={pillStyle("neutral")}>{directorVersionLabel(render.directorVersion)}</span>}
                   {visionQaLabel(render?.visionQa) && <span style={pillStyle(visionQaTone(render.visionQa))}>{visionQaLabel(render.visionQa)}</span>}
+                  {openaiImagesLabel(render) && <span style={pillStyle("ok")}>{openaiImagesLabel(render)}</span>}
                   {fallbackFrameLabel(render) && <span style={pillStyle("neutral")}>{fallbackFrameLabel(render)}</span>}
                   {fallbackLyricOverlayLabel(render) && <span style={pillStyle("ok")}>{fallbackLyricOverlayLabel(render)}</span>}
                   {instrumentalBeatLabel(render) && <span style={pillStyle("neutral")}>{instrumentalBeatLabel(render)}</span>}
@@ -794,7 +812,7 @@ function RenderHistoryList({ renders, versions, onPublish, onPublishShorts }) {
                   {youtubeShortsUploadLabel(render) && <span style={pillStyle("ok")}>{youtubeShortsUploadLabel(render)}</span>}
                 </div>
                 <div className="cf-caption" style={{ marginTop: 6 }}>
-                  {[duration, beatCount ? `${beatCount} beats visuales` : "", render.visualProvider ? (render.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local") : "", thumbnailEngineLabel(render.thumbnailEngine), subtitleModeLabel(render.subtitleMode), formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}
+                  {[duration, beatCount ? `${beatCount} beats visuales` : "", visualProviderLabel(render.visualProvider), thumbnailEngineLabel(render.thumbnailEngine), subtitleModeLabel(render.subtitleMode), formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}
                 </div>
                 {render.error && <div className="cf-caption" style={{ color: "var(--bad)", marginTop: 6 }}>{safeText(render.error)}</div>}
               </div>
@@ -1890,7 +1908,7 @@ export default function MusicStudioPage() {
                 {renderPanel?.durationSeconds && (
                   <div className="cf-caption" style={{ marginTop: 8 }}>
                     {Math.round(Number(renderPanel.durationSeconds))}s · {renderPanel.visualBeatCount || renderPanel.sceneCount || 0} beats visuales
-                    {renderPanel.visualProvider ? ` · ${renderPanel.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local"}` : ""}
+                    {renderPanel.visualProvider ? ` · ${visualProviderLabel(renderPanel.visualProvider)}` : ""}
                     {renderPanel.visualIntervalSeconds ? ` · cada ${Math.round(Number(renderPanel.visualIntervalSeconds))}s` : ""}
                     {subtitleModeLabel(renderPanel.subtitleMode) ? ` · ${subtitleModeLabel(renderPanel.subtitleMode)}` : ""}
                   </div>

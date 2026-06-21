@@ -20,7 +20,7 @@ Power Music Studio convierte una idea de crecimiento personal en un paquete crea
 - multiples tomas/versiones de audio por una misma letra.
 - calificador de letra sin costo extra.
 - importacion de canciones ya creadas: pegar letra, crear track, subir audio de Suno y renderizar video.
-- visuales sincronizados con la letra cada ~5 segundos, usando Comfy/Flux cuando este configurado y fallback local si falla.
+- visuales sincronizados con la letra cada ~10 segundos cuando usa OpenAI Images, con Comfy/Flux como respaldo y fallback local si falla.
 - archivo `subtitles.srt` por version renderizada. Si `OPENAI_API_KEY` esta disponible usa Whisper con timestamps de palabra; si falla, cae a sincronizacion estimada por bloques de letra.
 
 La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la cancion y la sube al track en Content Factory. Desde ahi Content Factory ya puede mandar el render completo al VPS/worker para generar `FINAL_MUSIC.mp4`, miniatura y portada sin depender de que la computadora del usuario permanezca prendida.
@@ -41,7 +41,8 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - Renderiza el video en worker/Celery con fallback a background task si la cola no esta disponible.
 - No usa Luma por default.
 - Renderer v5: Music Director v4 + timeline visual por letra. Divide el audio en beats de ~5 segundos, genera prompts Flux por linea/seccion con recetas visuales bloqueadas, seed visual unico por cancion y ensambla con Ken Burns en FFmpeg.
-- Si `COMFYUI_API_KEY` esta configurado y `CONTENT_FACTORY_MUSIC_COMFY_ENABLED` no esta desactivado, intenta generar imagenes reales con Flux/Krea via Comfy.
+- Si `OPENAI_API_KEY` esta configurado y `CONTENT_FACTORY_MUSIC_VISUAL_PROVIDER=openai_images`, intenta generar los beats visuales con OpenAI Images. Si una imagen falla, Comfy/Flux puede cubrir los beats faltantes y el fallback local/miniatura cubre el resto.
+- Si `COMFYUI_API_KEY` esta configurado y `CONTENT_FACTORY_MUSIC_COMFY_ENABLED` no esta desactivado, Comfy sigue disponible como proveedor principal (`CONTENT_FACTORY_MUSIC_VISUAL_PROVIDER=comfy_flux`) o como respaldo.
 - Si Comfy falla o no esta configurado, usa fallback de miniatura raw/OpenAI con frases de impacto; si no hay miniatura util, cae al fallback local limpio.
 - Timing multi-proveedor: intenta alinear la letra con timestamps reales por palabra usando `ELEVENLABS_API_KEY` + Scribe v2, luego OpenAI Whisper, luego Deepgram. La transcripcion puede guiar visuales aunque no sea suficientemente confiable para publicar subtitulos.
 - Si el timing falla, no se cae el render: el renderer usa distribucion estimada por bloques de letra.
@@ -96,6 +97,13 @@ CONTENT_FACTORY_MUSIC_MAX_TOKENS=5200
 CONTENT_FACTORY_MUSIC_ALLOW_FALLBACK=false
 MUSIC_MAX_AUDIO_BYTES=167772160
 MUSIC_RENDER_DIR=/app/output/music_renders
+CONTENT_FACTORY_MUSIC_VISUAL_PROVIDER=openai_images
+CONTENT_FACTORY_MUSIC_OPENAI_IMAGES_ENABLED=true
+CONTENT_FACTORY_MUSIC_OPENAI_IMAGE_MODEL=gpt-image-2
+CONTENT_FACTORY_MUSIC_OPENAI_IMAGE_QUALITY=medium
+CONTENT_FACTORY_MUSIC_OPENAI_IMAGE_SIZE=1536x1024
+CONTENT_FACTORY_MUSIC_OPENAI_VISUAL_INTERVAL_SECONDS=10
+CONTENT_FACTORY_MUSIC_MAX_OPENAI_IMAGES=72
 CONTENT_FACTORY_MUSIC_COMFY_ENABLED=true
 CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS=5
 CONTENT_FACTORY_MUSIC_MAX_VISUAL_BEATS=120
@@ -135,7 +143,12 @@ DEEPGRAM_API_KEY=...
 
 Notas de costo visual:
 
+- Una cancion de 3 minutos con OpenAI Images cada 10 segundos genera aprox. 18 imagenes.
 - Una cancion de 3 minutos con intervalo de 5 segundos genera aprox. 36 imagenes.
+- Costos estimados de OpenAI Images, sujetos a pricing vigente: `medium` aprox. 0.041 USD por imagen; 18 imagenes aprox. 0.74 USD. `high` se reserva para miniatura/cover salvo que se fuerce por env.
+- Para volver a Comfy como proveedor principal: `CONTENT_FACTORY_MUSIC_VISUAL_PROVIDER=comfy_flux`.
+- Para ajustar el ritmo visual de OpenAI Images: `CONTENT_FACTORY_MUSIC_OPENAI_VISUAL_INTERVAL_SECONDS=8` o `10`.
+- Para apagar OpenAI Images sin romper el render: `CONTENT_FACTORY_MUSIC_OPENAI_IMAGES_ENABLED=false`.
 - `CONTENT_FACTORY_MUSIC_MAX_COMFY_IMAGES` limita cuantas imagenes se mandan a Comfy por render.
 - Los beats que excedan el limite o fallen entran con fallback local.
 - Para apagar Comfy sin romper el render: `CONTENT_FACTORY_MUSIC_COMFY_ENABLED=false`.
@@ -419,6 +432,10 @@ Campos principales:
 - `subtitleMode`
 - `subtitleCount`
 - `visualProvider`
+- `preferredVisualProvider`
+- `openaiImages`
+- `openaiGeneratedFrames`
+- `comfyGeneratedFrames`
 - `fallbackLyricOverlayFrames`
 - `queue`
 - `taskId`
