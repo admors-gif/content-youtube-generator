@@ -8504,6 +8504,119 @@ async def music_track_activate_audio(track_id: str, version_id: str, request: Re
         return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
 
 
+@app.delete("/music/tracks/{track_id}/audio/{version_id}")
+async def music_track_delete_audio_version(track_id: str, version_id: str, request: Request):
+    principal = _require_music_studio_admin(request)
+    clean_track_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(track_id or "")).strip()
+    clean_version_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(version_id or "")).strip()
+    if not clean_track_id or clean_track_id != track_id:
+        raise HTTPException(status_code=400, detail="invalid track id")
+    if not clean_version_id or clean_version_id != version_id:
+        raise HTTPException(status_code=400, detail="invalid audio version id")
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore
+        db = firestore.client()
+        ref = db.collection("musicTracks").document(clean_track_id)
+        snap = ref.get()
+        if not snap.exists:
+            raise HTTPException(status_code=404, detail="track not found")
+        data = snap.to_dict() or {}
+        if data.get("userId") != principal["uid"]:
+            raise HTTPException(status_code=403, detail="track owner mismatch")
+
+        render_records = _music_render_records(data)
+        for render in render_records:
+            if str(render.get("audioVersionId") or "") == clean_version_id and render.get("status") in {"queued", "running"}:
+                raise HTTPException(status_code=409, detail="no puedes borrar una toma mientras esta renderizando")
+        current_render = data.get("render") if isinstance(data.get("render"), dict) else {}
+        if str(current_render.get("audioVersionId") or "") == clean_version_id and current_render.get("status") in {"queued", "running"}:
+            raise HTTPException(status_code=409, detail="no puedes borrar una toma mientras esta renderizando")
+
+        versions = _music_audio_versions(data)
+        removed = None
+        kept_versions = []
+        for item in versions:
+            if str(item.get("versionId") or "") == clean_version_id:
+                removed = item
+            else:
+                kept_versions.append(item)
+        if not removed:
+            raise HTTPException(status_code=404, detail="audio version not found")
+
+        previous_deleted = data.get("deletedAudioVersions") if isinstance(data.get("deletedAudioVersions"), list) else []
+        deleted_record = {
+            **removed,
+            "deletedAt": datetime.now(timezone.utc).isoformat(),
+            "deletedBy": principal["uid"],
+        }
+        remaining_render_records = [
+            render
+            for render in render_records
+            if str(render.get("audioVersionId") or "") != clean_version_id
+        ]
+        active_id = str(data.get("activeAudioVersionId") or "").strip()
+        next_active = None
+        if kept_versions:
+            if active_id and active_id != clean_version_id:
+                next_active = next((item for item in kept_versions if str(item.get("versionId") or "") == active_id), None)
+            next_active = next_active or kept_versions[-1]
+            next_active_id = str(next_active.get("versionId") or "").strip()
+            kept_versions = [
+                {**item, "isActive": str(item.get("versionId") or "") == next_active_id}
+                for item in kept_versions
+            ]
+            matching_render = next(
+                (
+                    render
+                    for render in remaining_render_records
+                    if str(render.get("audioVersionId") or "") == next_active_id
+                ),
+                None,
+            )
+            next_render = matching_render or {
+                "status": "pending",
+                "stepName": "Toma activa sin render",
+                "progress": 0,
+                "audioVersionId": next_active_id,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            }
+            next_status = "video_ready" if (matching_render or {}).get("status") == "completed" else "audio_uploaded"
+            payload = {
+                "status": next_status,
+                "audio": next_active,
+                "audioVersions": kept_versions,
+                "activeAudioVersionId": next_active_id,
+                "render": next_render,
+                "renders": remaining_render_records,
+                "deletedAudioVersions": [*previous_deleted, deleted_record][-50:],
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            }
+        else:
+            payload = {
+                "status": "lyrics_ready",
+                "audio": {},
+                "audioVersions": [],
+                "activeAudioVersionId": "",
+                "render": {
+                    "status": "pending",
+                    "stepName": "Sin tomas de audio",
+                    "progress": 0,
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                },
+                "renders": [],
+                "deletedAudioVersions": [*previous_deleted, deleted_record][-50:],
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            }
+        ref.set(payload, merge=True)
+        updated = ref.get().to_dict() or {}
+        return {"ok": True, "track": _power_music_public_track(clean_track_id, updated), "deletedVersionId": clean_version_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
 def _music_queue_track_render(
     track_id: str,
     audio_version_id: str | None,

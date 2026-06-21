@@ -578,8 +578,10 @@ function AudioVersionList({
   activating,
   onProduce,
   onGenerateShorts,
+  onDeleteVersion,
   producingVersionId,
   producingShortsVersionId,
+  deletingVersionId,
   renderByVersion,
   anyRenderBusy,
   anyShortsBusy,
@@ -604,6 +606,7 @@ function AudioVersionList({
         const shortsWorking = musicShortsBusy(render);
         const producingThis = producingVersionId === versionId;
         const producingShortsThis = producingShortsVersionId === versionId;
+        const deletingThis = deletingVersionId === versionId;
         return (
           <div
             key={`${versionId}-${index}`}
@@ -662,6 +665,16 @@ function AudioVersionList({
                     {producingShortsThis || shortsWorking ? "Generando shorts..." : render?.shortsStatus === "failed" ? "Reintentar shorts" : "Generar shorts"}
                   </button>
                 )}
+                <button
+                  type="button"
+                  className="cf-button cf-button--subtle"
+                  onClick={() => onDeleteVersion(versionId)}
+                  disabled={active || anyRenderBusy || anyShortsBusy || deletingThis || renderBusy || shortsWorking}
+                  title={active ? "Marca otra toma como activa antes de borrar esta." : "Descartar esta toma de la lista."}
+                >
+                  <Icon name={deletingThis ? "refresh" : "trash"} size={16} />
+                  {deletingThis ? "Borrando..." : "Descartar"}
+                </button>
               </div>
             </div>
             {version.url && <audio className="cf-music-version-audio" controls src={version.url} />}
@@ -829,6 +842,7 @@ export default function MusicStudioPage() {
   const [producingVideo, setProducingVideo] = useState(false);
   const [producingVersionId, setProducingVersionId] = useState("");
   const [producingShortsVersionId, setProducingShortsVersionId] = useState("");
+  const [deletingVersionId, setDeletingVersionId] = useState("");
   const [activatingAudio, setActivatingAudio] = useState(false);
   const [audioFile, setAudioFile] = useState(null);
   const [audioVersionLabel, setAudioVersionLabel] = useState("");
@@ -1174,6 +1188,37 @@ export default function MusicStudioPage() {
     }
   }
 
+  async function deleteAudioVersion(versionId) {
+    if (!currentId || !versionId) return;
+    if (versionId === activeAudioVersionId) {
+      setError("Marca otra toma como activa antes de descartar esta.");
+      return;
+    }
+    const version = audioVersions.find((item) => safeText(item.versionId) === versionId);
+    const label = safeText(version?.label, "esta toma");
+    if (!window.confirm(`Descartar ${label}? Se ocultara de la lista y no se borrara el video largo de otras tomas.`)) {
+      return;
+    }
+    setError("");
+    setNotice("");
+    setDeletingVersionId(versionId);
+    try {
+      const data = await apiFetch(`/music/tracks/${encodeURIComponent(currentId)}/audio/${encodeURIComponent(versionId)}`, {
+        method: "DELETE",
+      });
+      if (data.track) {
+        setCurrent(data.track);
+        setCurrentId(data.track.trackId || currentId);
+      }
+      setNotice("Toma descartada. Los archivos quedan preservados en Storage por seguridad.");
+      await loadTracks();
+    } catch (exc) {
+      setError(exc.message);
+    } finally {
+      setDeletingVersionId("");
+    }
+  }
+
   async function activateAudioVersion(versionId) {
     if (!currentId || !versionId) return;
     setError("");
@@ -1200,6 +1245,13 @@ export default function MusicStudioPage() {
     setCurrent(track);
     setCurrentId(track.trackId || "");
     setNotice("");
+    setError("");
+  }
+
+  function closeCurrentTrack() {
+    setCurrent(null);
+    setCurrentId("");
+    setNotice("Proyecto cerrado. Puedes crear uno nuevo o importar otra letra.");
     setError("");
   }
 
@@ -1243,6 +1295,12 @@ export default function MusicStudioPage() {
               <span style={pillStyle("neutral")}>{tracks.length} tracks</span>
               <span style={pillStyle(audioVersions.length ? "ok" : "neutral")}>{audioVersions.length} toma(s)</span>
               <span style={pillStyle(completedRenderCount ? "ok" : "neutral")}>{completedRenderCount} video(s)</span>
+              {currentId && (
+                <button type="button" className="cf-button cf-button--subtle" onClick={closeCurrentTrack}>
+                  <Icon name="x" size={16} />
+                  Cerrar proyecto
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1523,8 +1581,10 @@ export default function MusicStudioPage() {
               activating={activatingAudio}
               onProduce={produceVideo}
               onGenerateShorts={generateShorts}
+              onDeleteVersion={deleteAudioVersion}
               producingVersionId={producingVersionId}
               producingShortsVersionId={producingShortsVersionId}
+              deletingVersionId={deletingVersionId}
               renderByVersion={renderByVersion}
               anyRenderBusy={anyRenderBusy}
               anyShortsBusy={anyShortsBusy}

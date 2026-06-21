@@ -47,6 +47,7 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - Si el timing falla, no se cae el render: el renderer usa distribucion estimada por bloques de letra.
 - Cada render puede entregar 2 Shorts verticales de Power Music: `energia` e `identidad`, usando frames ya aprobados, musica original y cierre de suscripcion. Si `ELEVENLABS_API_KEY` esta disponible, agrega una firma de voz breve al final sin interrumpir el climax musical.
 - Los renders antiguos tambien pueden generar shorts desde el MP4 ya completado con el boton `Generar shorts`; este flujo no re-renderiza Comfy ni reemplaza el video largo.
+- La UI permite cerrar el track activo para volver a empezar sin borrar nada, y descartar tomas no activas para mantener orden. Las tomas descartadas se ocultan de `audioVersions`/`renders`, pero quedan registradas en `deletedAudioVersions` por seguridad.
 - El score de letra es heuristico: no llama otro modelo ni consume API adicional.
 - Luma y Runway quedan excluidos por decision de producto para este motor musical.
 
@@ -260,6 +261,18 @@ Respuesta:
 
 Selecciona una toma de audio como version activa. Si el render anterior era de otra toma, queda marcado como pendiente para evitar confundir MP4 viejo con audio nuevo.
 
+### `DELETE /music/tracks/{trackId}/audio/{versionId}`
+
+Descarta una toma de audio no activa para mantener orden en la UI.
+
+Reglas:
+
+- No permite borrar la toma activa; primero hay que marcar otra toma como activa.
+- No permite borrar una toma si su render esta `queued` o `running`.
+- Quita la toma de `audioVersions` y sus renders de `renders[]`.
+- Guarda una copia del registro en `deletedAudioVersions[]`.
+- No borra fisicamente archivos de Firebase Storage en v1 para evitar perdida irreversible accidental.
+
 ### `POST /music/tracks/{trackId}/produce`
 
 Encola el render musical completo en el VPS usando la version activa.
@@ -438,11 +451,77 @@ Flujo alterno con cancion existente:
 
 ## Proximos Bloques
 
-1. Agregar waveform visual reactivo al audio.
-2. Integrar publicacion directa a YouTube reutilizando el centro de publicaciones.
-3. Agregar ZIP de material musical completo.
-4. Calificador LLM opcional para comparar letras con mayor criterio artistico.
-5. Mejorar alineacion a nivel palabra/LRC si Suno exporta letras cronometradas en el futuro.
+1. Integrar publicacion directa a YouTube reutilizando el centro de publicaciones.
+2. Crear biblioteca visual curada de Power Music como fallback premium y despues como motor mixto.
+3. Agregar waveform visual reactivo al audio.
+4. Agregar ZIP de material musical completo.
+5. Calificador LLM opcional para comparar letras con mayor criterio artistico.
+6. Mejorar alineacion a nivel palabra/LRC si Suno exporta letras cronometradas en el futuro.
+
+## Backlog: Biblioteca Visual Curada Power Music
+
+Objetivo: reducir objetos random, anatomia rota y escenas incongruentes en videos musicales, sin volver inestable el render actual.
+
+Decision recomendada:
+
+- No reemplazar el motor actual todavia.
+- Producir 5 videos mas para observar patrones reales de fallo.
+- Si Comfy sigue generando demasiadas imagenes rechazadas, crear una biblioteca curada como fallback premium.
+
+Fase 1:
+
+- Crear 120 imagenes text-free, 16:9, estilo Power Music.
+- Curarlas manualmente antes de usarlas en produccion.
+- Categorias iniciales:
+  - disciplina fisica;
+  - ascenso;
+  - poder interno;
+  - exito sobrio;
+  - evolucion mental;
+  - resistencia;
+  - victoria;
+  - opulencia elegante.
+- Metadata sugerida por imagen:
+
+```json
+{
+  "id": "power_ascent_001",
+  "tags": ["disciplina", "avance", "amanecer", "ciudad"],
+  "energy": 5,
+  "emotion": "victoria",
+  "sceneRole": ["hook", "chorus", "final"],
+  "avoidRecentVideos": 8,
+  "qualityScore": 94
+}
+```
+
+Fase 2:
+
+- Subir a 250 imagenes.
+- Usarlas como fallback cuando Comfy no pase QA visual.
+- Guardar en metadata si cada beat vino de `comfy`, `curated_library` o `thumbnail_fallback`.
+
+Fase 3:
+
+- Subir a 500 imagenes.
+- Usar motor mixto:
+  - 60-70% biblioteca curada;
+  - 30-40% Comfy nuevo;
+  - las mejores imagenes nuevas entran a biblioteca;
+  - las malas se descartan.
+
+Reglas:
+
+- No texto dentro de la imagen.
+- No marcas, logos ni pseudo-letras.
+- No pesas flotando, anatomia rara, objetos domesticos random ni escalas imposibles.
+- La imagen no tiene que ilustrar literalmente la letra; debe sostener el arco emocional del canal: avanzar, exito, disciplina, motivacion, empoderamiento, ejercicio y evolucion.
+
+Video IA generativo:
+
+- Mantener fuera de la base por ahora.
+- Considerarlo despues solo para 2 o 3 clips hero por video: intro, coro o final.
+- No generar 50 clips IA por cancion hasta tener control visual, costo y QA mas maduros.
 
 ## Handoff Para Otro Equipo
 
