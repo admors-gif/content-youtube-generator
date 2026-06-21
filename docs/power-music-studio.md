@@ -48,6 +48,7 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - Cada render puede entregar 2 Shorts verticales de Power Music: `energia` e `identidad`, usando frames ya aprobados, musica original y cierre de suscripcion. Si `ELEVENLABS_API_KEY` esta disponible, agrega una firma de voz breve al final sin interrumpir el climax musical.
 - Los renders antiguos tambien pueden generar shorts desde el MP4 ya completado con el boton `Generar shorts`; este flujo no re-renderiza Comfy ni reemplaza el video largo.
 - La UI permite cerrar el track activo para volver a empezar sin borrar nada, y descartar tomas no activas para mantener orden. Las tomas descartadas se ocultan de `audioVersions`/`renders`, pero quedan registradas en `deletedAudioVersions` por seguridad.
+- Power Music reutiliza el centro de publicacion de YouTube: se puede conectar otro canal, subir video largo o Shorts como privado/programado, revisar metadata antes de subir y guardar el link de YouTube Studio en la toma renderizada.
 - El score de letra es heuristico: no llama otro modelo ni consume API adicional.
 - Luma y Runway quedan excluidos por decision de producto para este motor musical.
 
@@ -329,6 +330,48 @@ Respuesta:
 }
 ```
 
+### `POST /music/tracks/{trackId}/audio/{versionId}/shorts`
+
+Genera 2 Shorts verticales desde un render musical ya completado. No vuelve a generar imagenes ni reemplaza el video largo.
+
+### `GET /music/youtube/preview/{trackId}?audioVersionId=...`
+
+Prepara la publicacion segura del video largo de una toma musical.
+
+Incluye:
+
+- titulo SEO editable para Power Music;
+- descripcion con CTA de suscripcion y pregunta para comentarios;
+- hashtags y tags;
+- miniatura y cover como variantes;
+- preflight de duracion para advertir si el canal requiere verificacion de videos largos.
+
+### `POST /music/youtube/publish/{trackId}`
+
+Sube el MP4 de la toma seleccionada a YouTube como privado, no listado o programado.
+
+Reglas:
+
+- Si `publishAt` existe, se fuerza `privacyStatus=private`.
+- Usa categoria `10` de YouTube Music.
+- Descarga el MP4 y miniatura desde Firebase Storage en el worker/VPS.
+- Guarda `youtube.lastVideoId`, `youtube.lastStudioUrl`, `youtube.lastPublishJobId` y programacion dentro del render de esa toma.
+- Si falla la miniatura, el video queda subido y se muestra warning para revisar en Studio.
+
+### `GET /music/youtube/shorts/preview/{trackId}?audioVersionId=...`
+
+Prepara la publicacion segura de los Shorts de Power Music generados desde una toma. Permite revisar cada titulo, descripcion, tags, privacidad y programacion antes de subir.
+
+### `POST /music/youtube/shorts/publish/{trackId}`
+
+Sube los Shorts seleccionados como privados, no listados, publicos o programados.
+
+Reglas:
+
+- Valida que cada Short exista, tenga audio, dure menos de 180 segundos y sea vertical/cuadrado.
+- Guarda `youtubeShortsUploads[]` y `youtubeShortsLastPublishJobId` dentro del render.
+- Si algun Short falla, conserva los exitos y reporta errores por item.
+
 ## Firestore
 
 Coleccion: `musicTracks`
@@ -415,6 +458,7 @@ Estados futuros:
 - `api.py`: endpoints `/music/*`.
 - `worker_tasks.py`: task Celery `content_factory.produce_music_video`.
 - `web/app/dashboard/music/page.js`: UI admin.
+- `web/components/music/MusicYouTubePublishModal.js`: modales de subida segura a YouTube para videos largos y Shorts de Power Music.
 - `web/components/Sidebar.js`: acceso en dashboard.
 - `prompts/agent_power_music.md`: prompt maestro documentado.
 
@@ -451,12 +495,11 @@ Flujo alterno con cancion existente:
 
 ## Proximos Bloques
 
-1. Integrar publicacion directa a YouTube reutilizando el centro de publicaciones.
-2. Crear biblioteca visual curada de Power Music como fallback premium y despues como motor mixto.
-3. Agregar waveform visual reactivo al audio.
-4. Agregar ZIP de material musical completo.
-5. Calificador LLM opcional para comparar letras con mayor criterio artistico.
-6. Mejorar alineacion a nivel palabra/LRC si Suno exporta letras cronometradas en el futuro.
+1. Crear biblioteca visual curada de Power Music como fallback premium y despues como motor mixto.
+2. Agregar waveform visual reactivo al audio.
+3. Agregar ZIP de material musical completo.
+4. Calificador LLM opcional para comparar letras con mayor criterio artistico.
+5. Mejorar alineacion a nivel palabra/LRC si Suno exporta letras cronometradas en el futuro.
 
 ## Backlog: Biblioteca Visual Curada Power Music
 

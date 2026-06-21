@@ -5,6 +5,10 @@ import Icon from "@/components/Icon";
 import { isAdminUser } from "@/lib/admin";
 import { authedFetch, getApiBase } from "@/lib/apiClient";
 import { useAuth } from "@/context/AuthContext";
+import {
+  MusicYouTubePublishModal,
+  MusicYouTubeShortsPublishModal,
+} from "@/components/music/MusicYouTubePublishModal";
 
 const MUSIC_STUDIO_ENABLED = process.env.NEXT_PUBLIC_CONTENT_FACTORY_MUSIC_STUDIO_ENABLED !== "false";
 
@@ -550,6 +554,19 @@ function musicShortsStatusTone(render) {
   return "neutral";
 }
 
+function youtubeStudioLabel(render) {
+  if (render?.youtube?.lastStudioUrl) return "YouTube privado";
+  return "";
+}
+
+function youtubeShortsUploadLabel(render) {
+  const count = Array.isArray(render?.youtubeShortsUploads)
+    ? render.youtubeShortsUploads.filter((item) => item?.youtubeStudioUrl).length
+    : 0;
+  if (count > 0) return `${count} Shorts subidos`;
+  return "";
+}
+
 function MusicShortLinks({ shorts }) {
   const items = Array.isArray(shorts) ? shorts.filter((short) => short?.video?.url) : [];
   if (!items.length) return null;
@@ -631,6 +648,8 @@ function AudioVersionList({
                   {instrumentalBeatLabel(render) && <span style={pillStyle("neutral")}>{instrumentalBeatLabel(render)}</span>}
                   {musicShortsLabel(render) && <span style={pillStyle("ok")}>{musicShortsLabel(render)}</span>}
                   {musicShortsStatusLabel(render) && <span style={pillStyle(musicShortsStatusTone(render))}>{musicShortsStatusLabel(render)}</span>}
+                  {youtubeStudioLabel(render) && <span style={pillStyle("ok")}>{youtubeStudioLabel(render)}</span>}
+                  {youtubeShortsUploadLabel(render) && <span style={pillStyle("ok")}>{youtubeShortsUploadLabel(render)}</span>}
                   {subtitleModeLabel(render?.subtitleMode) && <span style={pillStyle(subtitleModeTone(render?.subtitleMode))}>{subtitleModeLabel(render?.subtitleMode)}</span>}
                   {thumbnailEngineLabel(render?.thumbnailEngine) && <span style={pillStyle(render?.thumbnailEngine?.includes?.("openai") ? "ok" : "neutral")}>{thumbnailEngineLabel(render.thumbnailEngine)}</span>}
                 </div>
@@ -716,7 +735,7 @@ function AudioVersionList({
   );
 }
 
-function RenderHistoryList({ renders, versions }) {
+function RenderHistoryList({ renders, versions, onPublish, onPublishShorts }) {
   const items = Array.isArray(renders)
     ? renders.filter((item) => item && (item.audioVersionId || item.video?.url || item.status))
     : [];
@@ -762,6 +781,8 @@ function RenderHistoryList({ renders, versions }) {
                   {instrumentalBeatLabel(render) && <span style={pillStyle("neutral")}>{instrumentalBeatLabel(render)}</span>}
                   {musicShortsLabel(render) && <span style={pillStyle("ok")}>{musicShortsLabel(render)}</span>}
                   {musicShortsStatusLabel(render) && <span style={pillStyle(musicShortsStatusTone(render))}>{musicShortsStatusLabel(render)}</span>}
+                  {youtubeStudioLabel(render) && <span style={pillStyle("ok")}>{youtubeStudioLabel(render)}</span>}
+                  {youtubeShortsUploadLabel(render) && <span style={pillStyle("ok")}>{youtubeShortsUploadLabel(render)}</span>}
                 </div>
                 <div className="cf-caption" style={{ marginTop: 6 }}>
                   {[duration, beatCount ? `${beatCount} beats visuales` : "", render.visualProvider ? (render.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local") : "", thumbnailEngineLabel(render.thumbnailEngine), subtitleModeLabel(render.subtitleMode), formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}
@@ -775,6 +796,24 @@ function RenderHistoryList({ renders, versions }) {
                   <Icon name="download" size={16} />
                   MP4
                 </a>
+              )}
+              {render.status === "completed" && (render.video?.url || render.video?.storagePath) && (
+                <button type="button" className="cf-button cf-button--primary" onClick={() => onPublish(versionId)}>
+                  <Icon name="uploadCloud" size={16} />
+                  YouTube
+                </button>
+              )}
+              {render.youtube?.lastStudioUrl && (
+                <a className="cf-button cf-button--subtle" href={render.youtube.lastStudioUrl} target="_blank" rel="noreferrer">
+                  <Icon name="externalLink" size={16} />
+                  Studio
+                </a>
+              )}
+              {render.status === "completed" && musicShortsLabel(render) && (
+                <button type="button" className="cf-button cf-button--subtle" onClick={() => onPublishShorts(versionId)}>
+                  <Icon name="uploadCloud" size={16} />
+                  Shorts
+                </button>
               )}
               {render.thumbnail?.url && (
                 <a className="cf-button cf-button--subtle" href={render.thumbnail.url} target="_blank" rel="noreferrer">
@@ -843,6 +882,8 @@ export default function MusicStudioPage() {
   const [producingVersionId, setProducingVersionId] = useState("");
   const [producingShortsVersionId, setProducingShortsVersionId] = useState("");
   const [deletingVersionId, setDeletingVersionId] = useState("");
+  const [youtubePublishVersionId, setYoutubePublishVersionId] = useState("");
+  const [youtubeShortsPublishVersionId, setYoutubeShortsPublishVersionId] = useState("");
   const [activatingAudio, setActivatingAudio] = useState(false);
   const [audioFile, setAudioFile] = useState(null);
   const [audioVersionLabel, setAudioVersionLabel] = useState("");
@@ -1254,6 +1295,16 @@ export default function MusicStudioPage() {
     setNotice("Proyecto cerrado. Puedes crear uno nuevo o importar otra letra.");
     setError("");
   }
+
+  const handleYouTubeCompleted = useCallback(async () => {
+    setNotice("YouTube recibio el archivo. Revisa el video en Studio antes de hacerlo publico.");
+    try {
+      await refreshCurrentTrack();
+      await loadTracks();
+    } catch (exc) {
+      setError(exc.message);
+    }
+  }, [loadTracks, refreshCurrentTrack]);
 
   if (!MUSIC_STUDIO_ENABLED) {
     return (
@@ -1698,6 +1749,36 @@ export default function MusicStudioPage() {
                       Abrir MP4
                     </a>
                   )}
+                  {renderPanel?.status === "completed" && (renderPanel?.video?.url || renderPanel?.video?.storagePath) && (
+                    <button
+                      type="button"
+                      className="cf-button cf-button--primary"
+                      onClick={() => setYoutubePublishVersionId(activeAudioVersionId)}
+                      disabled={!currentId || !activeAudioVersionId || anyRenderBusy || anyShortsBusy}
+                      style={{ minHeight: 52 }}
+                    >
+                      <Icon name="uploadCloud" size={18} />
+                      Publicar YouTube
+                    </button>
+                  )}
+                  {renderPanel?.youtube?.lastStudioUrl && (
+                    <a className="cf-button cf-button--subtle" href={renderPanel.youtube.lastStudioUrl} target="_blank" rel="noreferrer" style={{ minHeight: 52 }}>
+                      <Icon name="externalLink" size={18} />
+                      Abrir Studio
+                    </a>
+                  )}
+                  {renderPanel?.status === "completed" && musicShortsLabel(renderPanel) && (
+                    <button
+                      type="button"
+                      className="cf-button cf-button--subtle"
+                      onClick={() => setYoutubeShortsPublishVersionId(activeAudioVersionId)}
+                      disabled={!currentId || !activeAudioVersionId || anyRenderBusy || anyShortsBusy}
+                      style={{ minHeight: 52 }}
+                    >
+                      <Icon name="uploadCloud" size={18} />
+                      Subir Shorts
+                    </button>
+                  )}
                   {renderPanel?.thumbnail?.url && (
                     <a className="cf-button cf-button--subtle" href={renderPanel.thumbnail.url} target="_blank" rel="noreferrer" style={{ minHeight: 52 }}>
                       <Icon name="image" size={18} />
@@ -1740,7 +1821,12 @@ export default function MusicStudioPage() {
             title="Historial de tomas"
             actions={<span style={pillStyle("neutral")}>{renderHistory.length} render(es)</span>}
           >
-            <RenderHistoryList renders={renderHistory} versions={audioVersions} />
+            <RenderHistoryList
+              renders={renderHistory}
+              versions={audioVersions}
+              onPublish={setYoutubePublishVersionId}
+              onPublishShorts={setYoutubeShortsPublishVersionId}
+            />
           </Section>
 
           <div
@@ -1840,6 +1926,22 @@ export default function MusicStudioPage() {
           </Section>
         </div>
       )}
+      <MusicYouTubePublishModal
+        open={Boolean(youtubePublishVersionId)}
+        onClose={() => setYoutubePublishVersionId("")}
+        trackId={currentId}
+        audioVersionId={youtubePublishVersionId}
+        user={user}
+        onCompleted={handleYouTubeCompleted}
+      />
+      <MusicYouTubeShortsPublishModal
+        open={Boolean(youtubeShortsPublishVersionId)}
+        onClose={() => setYoutubeShortsPublishVersionId("")}
+        trackId={currentId}
+        audioVersionId={youtubeShortsPublishVersionId}
+        user={user}
+        onCompleted={handleYouTubeCompleted}
+      />
     </main>
   );
 }

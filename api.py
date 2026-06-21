@@ -10814,6 +10814,289 @@ def _youtube_short_resource(project_id: str, data: dict, short: dict, payload: d
     }
 
 
+def _power_music_clean_title(value: str, fallback: str = "Power Music") -> str:
+    title = " ".join(str(value or fallback).replace("<", "").replace(">", "").split())
+    return (title or fallback)[:100].rstrip()
+
+
+def _power_music_youtube_hashtags(package: dict) -> list[str]:
+    raw = []
+    youtube = package.get("youtube") if isinstance(package.get("youtube"), dict) else {}
+    if isinstance(youtube.get("hashtags"), list):
+        raw.extend(youtube.get("hashtags") or [])
+    raw.extend([
+        "#PowerMusic",
+        "#MusicaMotivacional",
+        "#Motivacion",
+        "#Disciplina",
+        "#Entrenamiento",
+        "#MentalidadGanadora",
+    ])
+    tags = []
+    seen = set()
+    for item in raw:
+        tag = str(item or "").strip()
+        if not tag:
+            continue
+        if not tag.startswith("#"):
+            tag = "#" + tag.lstrip("#")
+        tag = re.sub(r"\s+", "", tag)[:80]
+        key = tag.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        tags.append(tag)
+        if len(tags) >= 8:
+            break
+    return tags
+
+
+def _power_music_youtube_tags(package: dict, title: str) -> list[str]:
+    youtube = package.get("youtube") if isinstance(package.get("youtube"), dict) else {}
+    raw = []
+    if isinstance(youtube.get("tags"), list):
+        raw.extend(youtube.get("tags") or [])
+    raw.extend([
+        title,
+        "Power Music",
+        "musica motivacional",
+        "musica para entrenar",
+        "musica para gym",
+        "disciplina",
+        "motivacion",
+        "mentalidad ganadora",
+        "superacion personal",
+        "enfoque",
+        "exito",
+        "cancion motivacional",
+    ])
+    return _youtube_split_tags(raw)[:30]
+
+
+def _build_power_music_youtube_pack(track_id: str, data: dict, render: dict | None = None) -> dict:
+    package = data.get("package") if isinstance(data.get("package"), dict) else {}
+    youtube = package.get("youtube") if isinstance(package.get("youtube"), dict) else {}
+    title = _power_music_clean_title(youtube.get("title") or package.get("title") or data.get("title") or "Power Music")
+    if "power music" not in title.lower() and len(title) <= 84:
+        title = f"{title} | Power Music"
+    subtitle = " ".join(str(package.get("subtitle") or package.get("mainHook") or "").split())
+    intention = " ".join(str(package.get("intention") or "disciplina").split())
+    style = " ".join(str(package.get("style") or "musica motivacional").split())
+    energy = " ".join(str(package.get("energy") or "alta energia").split())
+    hashtags = _power_music_youtube_hashtags(package)
+    tags = _power_music_youtube_tags(package, title)
+    duration = ""
+    if render and render.get("durationSeconds"):
+        duration = f"{max(1, round(float(render.get('durationSeconds') or 0) / 60))} min"
+
+    description_parts = [
+        f"{title} es una cancion de Power Music para entrenar enfoque, disciplina y energia mental.",
+    ]
+    if subtitle:
+        description_parts.append(subtitle)
+    description_parts.extend([
+        (
+            f"Usala para {intention.lower()}, entrenar con mas presencia y volver a esa version de ti "
+            "que no negocia con la excusa."
+        ),
+        (
+            f"Estilo: {style}. Energia: {energy}."
+            + (f" Duracion aproximada: {duration}." if duration else "")
+        ),
+        (
+            "Si esta cancion te movio algo, suscribete a Power Music. "
+            "Cada video esta hecho para acompanar entrenamiento, enfoque, ambicion limpia y evolucion personal."
+        ),
+        (
+            "Pregunta para comentarios: en que momento usarias esta cancion: entrenando, trabajando, manejando "
+            "o antes de tomar una decision importante?"
+        ),
+        " ".join(hashtags),
+    ])
+
+    pinned_comment = (
+        "Que frase de esta cancion te activo mas? Suscribete a Power Music y dime que energia quieres para el siguiente video."
+    )
+    return {
+        "trackId": track_id,
+        "title": title[:100].rstrip(),
+        "description": "\n\n".join(part for part in description_parts if part).strip()[:5000],
+        "hashtags": hashtags,
+        "tags": tags,
+        "tags_csv": ", ".join(tags),
+        "pinned_comment": pinned_comment,
+    }
+
+
+def _build_power_music_youtube_resource(track_id: str, data: dict, render: dict, payload: dict | None = None) -> dict:
+    payload = payload or {}
+    pack = _build_power_music_youtube_pack(track_id, data, render)
+    title = _power_music_clean_title(payload.get("title") or pack["title"])
+    description = str(payload.get("description") or pack["description"])[:5000]
+    tags = _youtube_split_tags(payload.get("tags") or pack.get("tags") or pack.get("tags_csv"))
+    privacy = str(payload.get("privacyStatus") or "private").strip().lower()
+    if privacy not in {"private", "unlisted", "public"}:
+        privacy = "private"
+    publish_at = str(payload.get("publishAt") or "").strip()
+    if publish_at:
+        privacy = "private"
+    status = {
+        "privacyStatus": privacy,
+        "selfDeclaredMadeForKids": False,
+        "containsSyntheticMedia": True,
+    }
+    if publish_at:
+        status["publishAt"] = publish_at
+    return {
+        "snippet": {
+            "title": title,
+            "description": description,
+            "tags": tags,
+            "categoryId": str(payload.get("categoryId") or "10"),
+        },
+        "status": status,
+    }
+
+
+def _power_music_render_preflight(render: dict) -> dict:
+    duration = float(render.get("durationSeconds") or 0)
+    video = render.get("video") if isinstance(render.get("video"), dict) else {}
+    return {
+        "durationSeconds": round(duration, 2) if duration else None,
+        "durationMinutes": round(duration / 60, 1) if duration else None,
+        "isLongerThanDefaultLimit": duration > 15 * 60 if duration else False,
+        "defaultLimitSeconds": 15 * 60,
+        "filename": video.get("fileName") or None,
+        "hasSubtitles": bool((render.get("subtitles") or {}).get("url") and int(render.get("subtitleCount") or 0) > 0),
+        "eligible": bool(render.get("status") == "completed" and (video.get("storagePath") or video.get("url"))),
+        "warning": "" if video.get("storagePath") or video.get("url") else "music video file not found",
+    }
+
+
+def _power_music_thumbnail_options(render: dict) -> list[dict]:
+    options = []
+    for label, key in [("Miniatura", "thumbnail"), ("Cover", "cover")]:
+        asset = render.get(key) if isinstance(render.get(key), dict) else {}
+        if asset.get("url") or asset.get("storagePath"):
+            options.append({
+                "label": label,
+                "url": asset.get("url") or "",
+                "fileName": asset.get("fileName") or "",
+                "storagePath": asset.get("storagePath") or "",
+                "kind": key,
+            })
+    return options
+
+
+def _power_music_short_label(short: dict) -> dict:
+    label = str(short.get("label") or "").strip().lower()
+    index = int(short.get("index") or 0)
+    if label == "energia" or index == 1:
+        return {
+            "name": "Energia",
+            "title": "energia para no negociar contigo",
+            "description": "Un fragmento de Power Music para entrar en modo disciplina y moverte con intencion.",
+            "offsetHours": -3,
+        }
+    if label == "identidad" or index == 2:
+        return {
+            "name": "Identidad",
+            "title": "la version de ti que no se rinde",
+            "description": "Un fragmento para recordar que la disciplina tambien es identidad.",
+            "offsetHours": 24,
+        }
+    return {
+        "name": f"Short {index or ''}".strip() or "Short",
+        "title": "un impulso de Power Music",
+        "description": "Un fragmento musical para entrenar enfoque, energia y disciplina.",
+        "offsetHours": 24,
+    }
+
+
+def _build_power_music_short_metadata(track_id: str, data: dict, render: dict, short: dict) -> dict:
+    package = data.get("package") if isinstance(data.get("package"), dict) else {}
+    base_title = _power_music_clean_title(package.get("title") or data.get("title") or "Power Music")
+    label_copy = _power_music_short_label(short)
+    title = _youtube_shorts_title(f"{base_title}: {label_copy['title']}")
+    hashtags = ["#Shorts", "#PowerMusic", "#MusicaMotivacional", "#Disciplina", "#Motivacion"]
+    tags = _power_music_youtube_tags(package, base_title)
+    for extra in ["shorts", "YouTube Shorts", "Power Music Shorts", label_copy["name"]]:
+        if extra and extra.lower() not in {tag.lower() for tag in tags}:
+            tags.append(extra)
+    description_parts = [
+        f"Short de Power Music: {base_title}.",
+        label_copy["description"],
+        "Suscribete al canal para mas musica con proposito: disciplina, enfoque, energia y evolucion mental.",
+    ]
+    video_id = (((render.get("youtube") or {}).get("lastVideoId")) or "").strip()
+    if video_id:
+        description_parts.append(f"Video completo: https://youtu.be/{video_id}")
+    description_parts.append(" ".join(hashtags))
+    return {
+        "trackId": track_id,
+        "index": int(short.get("index") or 0),
+        "label": str(short.get("label") or "").strip(),
+        "labelName": label_copy["name"],
+        "title": title,
+        "description": "\n\n".join(part for part in description_parts if part).strip()[:5000],
+        "tags": tags[:30],
+        "tagsCsv": ", ".join(tags[:30]),
+        "hashtags": hashtags,
+        "offsetHours": int(label_copy.get("offsetHours") or 24),
+    }
+
+
+def _power_music_short_resource(track_id: str, data: dict, render: dict, short: dict, payload: dict | None = None) -> dict:
+    payload = payload or {}
+    metadata = _build_power_music_short_metadata(track_id, data, render, short)
+    title = _youtube_shorts_title(payload.get("title") or metadata["title"])
+    description = str(payload.get("description") or metadata["description"])[:5000]
+    if "#shorts" not in description.lower():
+        description = (description.rstrip() + "\n\n#Shorts")[:5000]
+    tags = _youtube_split_tags(payload.get("tags") or metadata["tags"])
+    privacy = str(payload.get("privacyStatus") or "private").strip().lower()
+    if privacy not in {"private", "unlisted", "public"}:
+        privacy = "private"
+    publish_at = str(payload.get("publishAt") or "").strip()
+    if publish_at:
+        privacy = "private"
+    status = {
+        "privacyStatus": privacy,
+        "selfDeclaredMadeForKids": False,
+        "containsSyntheticMedia": True,
+    }
+    if publish_at:
+        status["publishAt"] = publish_at
+    return {
+        "snippet": {
+            "title": title,
+            "description": description,
+            "tags": tags,
+            "categoryId": str(payload.get("categoryId") or "10"),
+        },
+        "status": status,
+        "paidProductPlacementDetails": {
+            "hasPaidProductPlacement": bool(payload.get("hasPaidProductPlacement") or False),
+        },
+    }
+
+
+def _power_music_update_render_publication(ref, firestore, data: dict, audio_version_id: str, patch: dict) -> None:
+    render = _music_render_for_version(data, audio_version_id)
+    if not render:
+        return
+    updated_render = {**render, **patch, "updatedAt": _music_render_now()}
+    records = _music_upsert_render_record(_music_render_records(data), updated_render)
+    payload = {
+        "renders": records,
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    }
+    current_render = data.get("render") if isinstance(data.get("render"), dict) else {}
+    if str(current_render.get("audioVersionId") or "") == str(audio_version_id or ""):
+        payload["render"] = updated_render
+    ref.set(payload, merge=True)
+
+
 def _youtube_public_channel_doc(snapshot) -> dict:
     data = snapshot.to_dict() or {}
     return {
@@ -12140,6 +12423,443 @@ async def youtube_shorts_publish(project_id: str, request: Request, background_t
         "updatedAt": firestore.SERVER_TIMESTAMP,
     })
     background_tasks.add_task(_run_youtube_shorts_publish_job, principal["uid"], project_id, job_ref.id, payload)
+    return {"jobId": job_ref.id, "status": "queued", "metadata": {"shorts": preview_resources}}
+
+
+def _music_track_for_youtube_request(track_id: str, principal: dict):
+    clean_track_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(track_id or "")).strip()
+    if not clean_track_id or clean_track_id != track_id:
+        raise HTTPException(status_code=400, detail="invalid music track id")
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    db = firestore.client()
+    ref = db.collection("musicTracks").document(clean_track_id)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="music track not found")
+    data = snap.to_dict() or {}
+    if data.get("userId") != principal["uid"]:
+        raise HTTPException(status_code=403, detail="track owner mismatch")
+    return db, firestore, ref, data
+
+
+def _music_render_for_request(data: dict, audio_version_id: str | None = None) -> tuple[str, dict]:
+    clean_version_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(audio_version_id or "")).strip()
+    if audio_version_id and clean_version_id != str(audio_version_id):
+        raise HTTPException(status_code=400, detail="invalid audio version id")
+    selected_id = clean_version_id or str(data.get("activeAudioVersionId") or "").strip()
+    if not selected_id:
+        audio = _music_active_audio(data)
+        selected_id = str(audio.get("versionId") or "").strip()
+    render = _music_render_for_version(data, selected_id)
+    if not selected_id or not render:
+        raise HTTPException(status_code=400, detail="music render not found for selected take")
+    video = render.get("video") if isinstance(render.get("video"), dict) else {}
+    if render.get("status") != "completed" or not (video.get("storagePath") or video.get("url")):
+        raise HTTPException(status_code=400, detail="music video is not ready")
+    return selected_id, render
+
+
+def _music_youtube_access_for_channel(db, uid: str, channel_id: str) -> str:
+    if not channel_id:
+        raise RuntimeError("missing channelId")
+    channel_ref = db.collection("users").document(uid).collection("youtubeChannels").document(channel_id)
+    channel_snap = channel_ref.get()
+    if not channel_snap.exists:
+        raise RuntimeError("YouTube channel is not connected")
+    channel = channel_snap.to_dict() or {}
+    refresh_token = _youtube_decrypt_token(channel.get("refreshTokenEncrypted") or "")
+    access = _youtube_refresh_access_token(refresh_token).get("access_token")
+    if not access:
+        raise RuntimeError("youtube refresh did not return access token")
+    return access
+
+
+def _run_music_youtube_publish_job(uid: str, track_id: str, audio_version_id: str, job_id: str, payload: dict):
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore, storage
+        db = firestore.client()
+        job_ref = db.collection("youtubePublishJobs").document(job_id)
+        job_ref.update({
+            "status": "running",
+            "step": "Preparando video musical y metadata",
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+
+        ref = db.collection("musicTracks").document(track_id)
+        snap = ref.get()
+        if not snap.exists:
+            raise RuntimeError("music track not found")
+        data = snap.to_dict() or {}
+        if data.get("userId") != uid:
+            raise RuntimeError("track access denied")
+        selected_id, render = _music_render_for_request(data, audio_version_id)
+
+        access = _music_youtube_access_for_channel(db, uid, str(payload.get("channelId") or "").strip())
+        bucket = storage.bucket()
+        work_dir = MUSIC_RENDER_DIR / uid / track_id / "youtube_publish" / selected_id / job_id
+        video_file = _music_download_render_asset_to_dir(render.get("video") or {}, bucket, work_dir, "FINAL_POWER_MUSIC.mp4")
+        ok, duration, err = _validate_media_file(video_file, min_duration_seconds=1, require_audio=True)
+        if not ok:
+            raise RuntimeError(err or "music video is not readable")
+
+        thumbnail_warning = ""
+        thumbnails = _power_music_thumbnail_options(render)
+        thumb_index = max(0, min(int(payload.get("thumbnailIndex") or 0), max(0, len(thumbnails) - 1)))
+        thumb_file = None
+        if thumbnails:
+            thumb_asset = thumbnails[thumb_index]
+            try:
+                thumb_file = _music_download_render_asset_to_dir(thumb_asset, bucket, work_dir / "thumbnail", "thumbnail.jpg")
+                if thumb_file.stat().st_size > 2 * 1024 * 1024:
+                    raise ValueError("thumbnail exceeds YouTube 2MB limit")
+            except Exception as thumb_prepare_exc:
+                thumb_file = None
+                thumbnail_warning = _youtube_thumbnail_warning(thumb_prepare_exc)[:500]
+                job_ref.update({"warning": thumbnail_warning, "updatedAt": firestore.SERVER_TIMESTAMP})
+
+        resource = _build_power_music_youtube_resource(track_id, data, render, payload)
+        job_ref.update({
+            "step": "Subiendo video musical a YouTube",
+            "metadata": resource,
+            "video": {
+                "filename": video_file.name,
+                "durationSeconds": round(duration or 0, 2),
+                "sizeBytes": video_file.stat().st_size,
+            },
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        video_id = _youtube_upload_video(access, video_file, resource)
+        if not video_id:
+            raise RuntimeError("YouTube did not return video id")
+
+        thumbnail_uploaded = False
+        if thumb_file:
+            job_ref.update({
+                "step": "Subiendo miniatura",
+                "youtubeVideoId": video_id,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            })
+            try:
+                thumbnail_uploaded = _youtube_upload_thumbnail(access, video_id, thumb_file)
+            except Exception as thumb_exc:
+                thumbnail_warning = _youtube_thumbnail_warning(thumb_exc)[:500]
+
+        youtube_url = f"https://studio.youtube.com/video/{video_id}/edit"
+        job_ref.update({
+            "status": "completed",
+            "step": "Video musical listo para revision en YouTube Studio" if not thumbnail_warning else "Video subido; revisa la miniatura en YouTube Studio",
+            "youtubeVideoId": video_id,
+            "youtubeStudioUrl": youtube_url,
+            "thumbnailUploaded": thumbnail_uploaded,
+            "warning": thumbnail_warning,
+            "completedAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        publish_info = {
+            **(render.get("youtube") if isinstance(render.get("youtube"), dict) else {}),
+            "lastPublishJobId": job_id,
+            "lastVideoId": video_id,
+            "lastStudioUrl": youtube_url,
+            "lastPublishedAt": _music_render_now(),
+            "lastPrivacyStatus": resource["status"].get("privacyStatus") or "private",
+            "lastScheduledPublishAt": payload.get("publishAt") or "",
+            "title": resource["snippet"].get("title") or "",
+        }
+        _power_music_update_render_publication(ref, firestore, data, selected_id, {"youtube": publish_info})
+    except Exception as exc:
+        try:
+            _ensure_firebase_initialized()
+            from firebase_admin import firestore
+            firestore.client().collection("youtubePublishJobs").document(job_id).update({
+                "status": "error",
+                "step": "Error al publicar video musical",
+                "error": str(exc)[:500],
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            })
+        except Exception:
+            pass
+
+
+def _run_music_youtube_shorts_publish_job(uid: str, track_id: str, audio_version_id: str, job_id: str, payload: dict):
+    try:
+        _ensure_firebase_initialized()
+        from firebase_admin import firestore, storage
+        db = firestore.client()
+        job_ref = db.collection("youtubePublishJobs").document(job_id)
+        job_ref.update({
+            "status": "running",
+            "step": "Preparando Shorts musicales",
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+
+        ref = db.collection("musicTracks").document(track_id)
+        snap = ref.get()
+        if not snap.exists:
+            raise RuntimeError("music track not found")
+        data = snap.to_dict() or {}
+        if data.get("userId") != uid:
+            raise RuntimeError("track access denied")
+        selected_id, render = _music_render_for_request(data, audio_version_id)
+
+        access = _music_youtube_access_for_channel(db, uid, str(payload.get("channelId") or "").strip())
+        bucket = storage.bucket()
+        source_shorts = render.get("musicShorts") if isinstance(render.get("musicShorts"), list) else []
+        by_index = {
+            int(short.get("index") or 0): short
+            for short in source_shorts
+            if isinstance(short, dict)
+        }
+        selected = payload.get("shorts") if isinstance(payload.get("shorts"), list) else []
+        if not selected:
+            raise RuntimeError("select at least one Short")
+
+        successes = []
+        errors = []
+        total = len(selected)
+        work_dir = MUSIC_RENDER_DIR / uid / track_id / "youtube_shorts_publish" / selected_id / job_id
+        for position, short_payload in enumerate(selected, 1):
+            try:
+                index = int(short_payload.get("index") or 0)
+                source_short = by_index.get(index)
+                if not source_short:
+                    raise RuntimeError(f"music short {index} not found")
+                short_asset = source_short.get("video") if isinstance(source_short.get("video"), dict) else {}
+                short_file = _music_download_render_asset_to_dir(short_asset, bucket, work_dir, f"SHORT_{index:02d}.mp4")
+                ok, duration, err = _validate_media_file(short_file, min_duration_seconds=1, require_audio=True)
+                width, height = _youtube_video_dimensions(short_file)
+                if not ok:
+                    raise RuntimeError(err or f"music short {index} is not readable")
+                if duration > 180:
+                    raise RuntimeError(f"music short {index} exceeds 180 seconds")
+                if height < width:
+                    raise RuntimeError(f"music short {index} must be vertical or square")
+
+                resource = _power_music_short_resource(track_id, data, render, source_short, short_payload)
+                job_ref.update({
+                    "step": f"Subiendo Short musical {position}/{total}",
+                    "currentShortIndex": index,
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                })
+                video_id = _youtube_upload_video(access, short_file, resource)
+                if not video_id:
+                    raise RuntimeError("YouTube did not return video id")
+                item = {
+                    "index": index,
+                    "label": source_short.get("label") or "",
+                    "youtubeVideoId": video_id,
+                    "youtubeStudioUrl": f"https://studio.youtube.com/video/{video_id}/edit",
+                    "title": resource["snippet"]["title"],
+                    "privacyStatus": resource["status"]["privacyStatus"],
+                    "publishAt": resource["status"].get("publishAt") or "",
+                    "uploadedAt": datetime.now(timezone.utc).isoformat(),
+                }
+                successes.append(item)
+                job_ref.update({
+                    "items": successes + errors,
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                })
+            except Exception as item_exc:
+                error_item = {
+                    "index": int(short_payload.get("index") or 0) if isinstance(short_payload, dict) else 0,
+                    "status": "error",
+                    "error": str(item_exc)[:300],
+                }
+                errors.append(error_item)
+                job_ref.update({
+                    "items": successes + errors,
+                    "warning": f"{len(errors)} Short(s) con error",
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                })
+
+        if not successes:
+            detail = "; ".join(item.get("error", "") for item in errors) or "no music Shorts uploaded"
+            raise RuntimeError(detail[:500])
+
+        warning = ""
+        if errors:
+            warning = f"Se subieron {len(successes)} de {total} Shorts. Revisa los errores antes de reintentar."
+        job_ref.update({
+            "status": "completed",
+            "step": "Shorts musicales listos para revision en YouTube Studio",
+            "items": successes + errors,
+            "warning": warning,
+            "completedAt": firestore.SERVER_TIMESTAMP,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        })
+        previous = render.get("youtubeShortsUploads") if isinstance(render.get("youtubeShortsUploads"), list) else []
+        _power_music_update_render_publication(
+            ref,
+            firestore,
+            data,
+            selected_id,
+            {
+                "youtubeShortsLastPublishJobId": job_id,
+                "youtubeShortsLastPublishedAt": _music_render_now(),
+                "youtubeShortsUploads": [*previous, *successes][-20:],
+            },
+        )
+    except Exception as exc:
+        try:
+            _ensure_firebase_initialized()
+            from firebase_admin import firestore
+            firestore.client().collection("youtubePublishJobs").document(job_id).update({
+                "status": "error",
+                "step": "Error al publicar Shorts musicales",
+                "error": str(exc)[:500],
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            })
+        except Exception:
+            pass
+
+
+@app.get("/music/youtube/preview/{track_id}")
+def music_youtube_preview(track_id: str, request: Request, audioVersionId: str = ""):
+    principal = _require_music_studio_admin(request)
+    _db, _firestore, _ref, data = _music_track_for_youtube_request(track_id, principal)
+    selected_id, render = _music_render_for_request(data, audioVersionId)
+    pack = _build_power_music_youtube_pack(track_id, data, render)
+    return {
+        "trackId": track_id,
+        "audioVersionId": selected_id,
+        "configured": _youtube_config_status()["configured"],
+        "metadata": {
+            "title": pack["title"],
+            "description": pack["description"],
+            "tags": pack["tags"],
+            "tagsCsv": pack["tags_csv"],
+            "hashtags": pack["hashtags"],
+            "pinnedComment": pack["pinned_comment"],
+        },
+        "video": _power_music_render_preflight(render),
+        "thumbnails": _power_music_thumbnail_options(render),
+        "defaults": {"privacyStatus": "private", "categoryId": "10"},
+    }
+
+
+@app.get("/music/youtube/shorts/preview/{track_id}")
+def music_youtube_shorts_preview(track_id: str, request: Request, audioVersionId: str = ""):
+    principal = _require_music_studio_admin(request)
+    _db, _firestore, _ref, data = _music_track_for_youtube_request(track_id, principal)
+    selected_id, render = _music_render_for_request(data, audioVersionId)
+    shorts = []
+    for short in render.get("musicShorts") or []:
+        if not isinstance(short, dict):
+            continue
+        video = short.get("video") if isinstance(short.get("video"), dict) else {}
+        duration = float(short.get("durationSeconds") or short.get("duration") or 0)
+        eligible = bool(video.get("url") or video.get("storagePath"))
+        error = "" if eligible else "music short file not found"
+        if duration and duration > 180:
+            eligible = False
+            error = "music short exceeds 180 seconds"
+        shorts.append({
+            "index": int(short.get("index") or len(shorts) + 1),
+            "label": short.get("label") or "",
+            "duration": round(duration, 2) if duration else None,
+            "signedUrl": video.get("url") or "",
+            "metadata": _build_power_music_short_metadata(track_id, data, render, short),
+            "preflight": {
+                "index": int(short.get("index") or len(shorts) + 1),
+                "label": short.get("label") or "",
+                "filename": video.get("fileName") or None,
+                "durationSeconds": round(duration, 2) if duration else None,
+                "eligible": eligible,
+                "error": error,
+            },
+        })
+    return {
+        "trackId": track_id,
+        "audioVersionId": selected_id,
+        "configured": _youtube_config_status()["configured"],
+        "shorts": shorts,
+        "defaults": {
+            "privacyStatus": "private",
+            "categoryId": "10",
+            "scheduleOffsetsHours": [-3, 24],
+            "basePublishAt": (((render.get("youtube") or {}).get("lastScheduledPublishAt")) or ""),
+        },
+    }
+
+
+@app.post("/music/youtube/publish/{track_id}")
+async def music_youtube_publish(track_id: str, request: Request, background_tasks: BackgroundTasks):
+    principal = _require_music_studio_admin(request)
+    status = _youtube_config_status()
+    if not status["configured"]:
+        return JSONResponse(status_code=503, content={"error": "youtube_oauth_not_configured", **status})
+    payload = await request.json()
+    db, firestore, _ref, data = _music_track_for_youtube_request(track_id, principal)
+    selected_id, render = _music_render_for_request(data, payload.get("audioVersionId"))
+    if not payload.get("channelId"):
+        return JSONResponse(status_code=400, content={"error": "select a YouTube channel"})
+    resource_preview = _build_power_music_youtube_resource(track_id, data, render, payload)
+    job_ref = db.collection("youtubePublishJobs").document()
+    job_ref.set({
+        "uid": principal["uid"],
+        "trackId": track_id,
+        "audioVersionId": selected_id,
+        "channelId": payload.get("channelId"),
+        "type": "music_video",
+        "source": "power_music",
+        "status": "queued",
+        "step": "En cola para subir video musical a YouTube",
+        "metadata": resource_preview,
+        "createdAt": firestore.SERVER_TIMESTAMP,
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    })
+    background_tasks.add_task(_run_music_youtube_publish_job, principal["uid"], track_id, selected_id, job_ref.id, payload)
+    return {"jobId": job_ref.id, "status": "queued", "metadata": resource_preview}
+
+
+@app.post("/music/youtube/shorts/publish/{track_id}")
+async def music_youtube_shorts_publish(track_id: str, request: Request, background_tasks: BackgroundTasks):
+    principal = _require_music_studio_admin(request)
+    status = _youtube_config_status()
+    if not status["configured"]:
+        return JSONResponse(status_code=503, content={"error": "youtube_oauth_not_configured", **status})
+    payload = await request.json()
+    selected = payload.get("shorts") if isinstance(payload.get("shorts"), list) else []
+    if not selected:
+        return JSONResponse(status_code=400, content={"error": "select at least one Short"})
+    db, firestore, _ref, data = _music_track_for_youtube_request(track_id, principal)
+    selected_id, render = _music_render_for_request(data, payload.get("audioVersionId"))
+    if not payload.get("channelId"):
+        return JSONResponse(status_code=400, content={"error": "select a YouTube channel"})
+    by_index = {
+        int(short.get("index") or 0): short
+        for short in (render.get("musicShorts") or [])
+        if isinstance(short, dict)
+    }
+    preview_resources = []
+    for item in selected:
+        if not isinstance(item, dict):
+            continue
+        source = by_index.get(int(item.get("index") or 0))
+        if source:
+            preview_resources.append({
+                "index": int(item.get("index") or 0),
+                "resource": _power_music_short_resource(track_id, data, render, source, item),
+            })
+    if not preview_resources:
+        return JSONResponse(status_code=400, content={"error": "selected Shorts are not available"})
+    job_ref = db.collection("youtubePublishJobs").document()
+    job_ref.set({
+        "uid": principal["uid"],
+        "trackId": track_id,
+        "audioVersionId": selected_id,
+        "channelId": payload.get("channelId"),
+        "type": "music_shorts",
+        "source": "power_music",
+        "status": "queued",
+        "step": "En cola para subir Shorts musicales",
+        "items": [],
+        "metadata": {"shorts": preview_resources},
+        "createdAt": firestore.SERVER_TIMESTAMP,
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    })
+    background_tasks.add_task(_run_music_youtube_shorts_publish_job, principal["uid"], track_id, selected_id, job_ref.id, payload)
     return {"jobId": job_ref.id, "status": "queued", "metadata": {"shorts": preview_resources}}
 
 
