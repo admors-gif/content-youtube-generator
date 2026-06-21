@@ -497,7 +497,7 @@ def fallback_package(payload: dict | None = None) -> dict:
             "scenes": [
                 {"section": "Intro", "visualPrompt": "cinematic black marble room before sunrise, one decisive silhouette, gold light line entering, premium motivational mood, 16:9, no text", "textOverlay": ""},
                 {"section": "Verse 1", "visualPrompt": "wide city street at blue hour, focused figure in distance, gold highlights, disciplined solitude, 16:9, no text", "textOverlay": ""},
-                {"section": "Chorus", "visualPrompt": "steel dumbbells, chalk dust, ember light, black gold crimson, premium anthem energy, 16:9, no text, no logos", "textOverlay": ""},
+                {"section": "Chorus", "visualPrompt": "dark stadium tunnel, chalk dust, ember light, black gold crimson, grounded athletic silhouette, premium anthem energy, 16:9, no text, no logos", "textOverlay": ""},
                 {"section": "Bridge", "visualPrompt": "mirror-like glass wall with powerful silhouette and future-self reflection, cinematic shadows, gold rim light, 16:9, no text", "textOverlay": ""},
                 {"section": "Final", "visualPrompt": "sunrise rooftop over a city, triumphant lone figure, cinematic golden sky, premium victory mood, 16:9, no text", "textOverlay": ""},
             ],
@@ -570,8 +570,8 @@ def _import_scene_prompt(section: str, sample_lines: list[str], visual_identity:
             f"Section: {section}. "
             f"Visual identity: {visual_identity}. Musical energy: {style_label}. "
             "Translate the emotion into a symbolic aspirational scene, not a literal object-by-object illustration. "
-            "Use premium power motifs: confident silhouettes, luxury architecture, black marble, city lights, steel dumbbells or barbells, wet roads, sunrise rooftops, gold reflections, controlled movement. "
-            "Vary subject, setting, action and camera distance. Do not repeat a runner unless the lyric explicitly says running. "
+            "Use premium power motifs: confident silhouettes, luxury architecture, black marble, city lights, wet roads, sunrise rooftops, gold reflections, stadium tunnels, steel corridors, controlled movement. "
+            "Use gym equipment only when the lyric explicitly references gym, weights, lifting, iron or training equipment. Vary subject, setting, action and camera distance. Do not repeat a runner unless the lyric explicitly says running. "
             "No readable text, no logos, no signs, no typography, no pseudo-letters, no posters, no screens with writing, no household appliances, no clothes iron, no ironing board."
         ),
         900,

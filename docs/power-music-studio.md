@@ -20,7 +20,7 @@ Power Music Studio convierte una idea de crecimiento personal en un paquete crea
 - multiples tomas/versiones de audio por una misma letra.
 - calificador de letra sin costo extra.
 - importacion de canciones ya creadas: pegar letra, crear track, subir audio de Suno y renderizar video.
-- visuales sincronizados con la letra cada ~10 segundos cuando usa OpenAI Images, con Comfy/Flux como respaldo y fallback local si falla.
+- visuales sincronizados con la letra cada ~5 segundos cuando usa OpenAI Images, con Comfy/Flux como respaldo y fallback local si falla.
 - archivo `subtitles.srt` por version renderizada. Si `OPENAI_API_KEY` esta disponible usa Whisper con timestamps de palabra; si falla, cae a sincronizacion estimada por bloques de letra.
 
 La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la cancion y la sube al track en Content Factory. Desde ahi Content Factory ya puede mandar el render completo al VPS/worker para generar `FINAL_MUSIC.mp4`, miniatura y portada sin depender de que la computadora del usuario permanezca prendida.
@@ -102,7 +102,7 @@ CONTENT_FACTORY_MUSIC_OPENAI_IMAGES_ENABLED=true
 CONTENT_FACTORY_MUSIC_OPENAI_IMAGE_MODEL=gpt-image-2
 CONTENT_FACTORY_MUSIC_OPENAI_IMAGE_QUALITY=medium
 CONTENT_FACTORY_MUSIC_OPENAI_IMAGE_SIZE=1536x1024
-CONTENT_FACTORY_MUSIC_OPENAI_VISUAL_INTERVAL_SECONDS=10
+CONTENT_FACTORY_MUSIC_OPENAI_VISUAL_INTERVAL_SECONDS=5
 CONTENT_FACTORY_MUSIC_MAX_OPENAI_IMAGES=72
 CONTENT_FACTORY_MUSIC_COMFY_ENABLED=true
 CONTENT_FACTORY_MUSIC_VISUAL_INTERVAL_SECONDS=5
@@ -143,14 +143,15 @@ DEEPGRAM_API_KEY=...
 
 Notas de costo visual:
 
-- Una cancion de 3 minutos con OpenAI Images cada 10 segundos genera aprox. 18 imagenes.
-- Una cancion de 3 minutos con intervalo de 5 segundos genera aprox. 36 imagenes.
-- Costos estimados de OpenAI Images, sujetos a pricing vigente: `medium` aprox. 0.041 USD por imagen; 18 imagenes aprox. 0.74 USD. `high` se reserva para miniatura/cover salvo que se fuerce por env.
+- Una cancion de 3 minutos con OpenAI Images cada 5 segundos genera aprox. 36 imagenes.
+- Una cancion de 3:20 min con intervalo de 5 segundos genera aprox. 40 imagenes.
+- Costos estimados de OpenAI Images, sujetos a pricing vigente: `medium` aprox. 0.041 USD por imagen; 36 imagenes aprox. 1.48 USD y 40 imagenes aprox. 1.64 USD. `high` se reserva para miniatura/cover salvo que se fuerce por env.
 - Para volver a Comfy como proveedor principal: `CONTENT_FACTORY_MUSIC_VISUAL_PROVIDER=comfy_flux`.
-- Para ajustar el ritmo visual de OpenAI Images: `CONTENT_FACTORY_MUSIC_OPENAI_VISUAL_INTERVAL_SECONDS=8` o `10`.
+- Para ahorrar costo sin cambiar proveedor: `CONTENT_FACTORY_MUSIC_OPENAI_VISUAL_INTERVAL_SECONDS=8` o `10`.
 - Para apagar OpenAI Images sin romper el render: `CONTENT_FACTORY_MUSIC_OPENAI_IMAGES_ENABLED=false`.
 - `CONTENT_FACTORY_MUSIC_MAX_COMFY_IMAGES` limita cuantas imagenes se mandan a Comfy por render.
 - Los beats que excedan el limite o fallen entran con fallback local.
+- Los prompts musicales deben variar entre arquitectura, ciudad, carretera, rooftop, siluetas, fuego, sombra y entrenamiento. El equipo de gimnasio solo debe aparecer cuando la letra mencione de forma explicita gym, pesas, levantar, hierro o entrenamiento.
 - Para apagar Comfy sin romper el render: `CONTENT_FACTORY_MUSIC_COMFY_ENABLED=false`.
 - Para apagar QA visual sin romper el render: `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED=false`.
 - Para volver al fallback abstracto anterior: `CONTENT_FACTORY_MUSIC_FALLBACK_FRAME_MODE=local`.

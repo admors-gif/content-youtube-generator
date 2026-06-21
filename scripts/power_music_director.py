@@ -79,7 +79,7 @@ VISUAL_WORLDS = {
     },
     "athletic_power": {
         "label": "Athletic Power",
-        "description": "physical discipline, steel, breath, speed, early morning effort, premium training energy",
+        "description": "physical discipline, breath, speed, early morning effort, premium training energy",
         "palette": ["deep black", "steel gray", "ember red", "sunrise gold"],
         "locations": [
             "industrial training space with dramatic light",
@@ -89,8 +89,8 @@ VISUAL_WORLDS = {
             "cold air rooftop training scene",
         ],
         "motifs": [
-            "steel dumbbells",
-            "barbell plates without brand marks",
+            "grounded training stance",
+            "empty stadium tunnel",
             "chalk dust",
             "breath in cold air",
             "single decisive movement",
@@ -217,10 +217,10 @@ SHOT_ARCHETYPES = {
     "grounded_training_still": {
         "category": "object_still_life",
         "humanPolicy": "no visible full human body; optional blurred silhouette only in background",
-        "subject": "steel barbell plates or dumbbells resting on rubber gym floor or mounted on a rack",
+        "subject": "disciplined training detail with optional equipment secondary, grounded on floor or rack",
         "wardrobe": "none; if a person is barely visible, technical athletic wear only",
         "action": "static grounded object with contact shadows",
-        "propRules": "weights must touch floor, rack or bench; never floating; never between legs; one prop cluster only",
+        "propRules": "equipment is optional and secondary; if weights appear they must touch floor, rack or bench; never floating; never between legs; one prop cluster only",
         "composition": "low 35mm close-up, object in lower third, clean negative space, realistic gravity",
         "camera": "low-angle close detail, shallow depth of field, cinematic side light",
         "controlNet": {"recommended": "depth_or_canny", "reason": "locks object grounding and perspective"},
@@ -371,8 +371,11 @@ def choose_visual_world(package, payload=None):
 
 def choose_shot_archetype(section, line, index, world_key=None, seed=0):
     tokens = _tokens(f"{section} {line}")
-    if tokens & {"pesa", "pesas", "hierro", "dumbbell", "barbell", "gym", "entreno", "levanto", "fuerza", "sudor"}:
+    if tokens & {"pesa", "pesas", "dumbbell", "barbell", "gym", "gimnasio", "levanto", "levantando"}:
         return "grounded_training_still"
+    if tokens & {"hierro", "entreno", "fuerza", "sudor", "golpe"}:
+        seeded_index = int(index or 0) + int(seed or 0)
+        return ["athletic_motion_wide", "victory_rooftop", "shadow_symbol", "status_architecture"][seeded_index % 4]
     if tokens & {"corro", "correr", "running", "ruta", "calle", "camino", "cima", "paso", "cardio"}:
         return "athletic_motion_wide"
     if tokens & {"mujer", "reina", "diosa", "presencia", "mirada", "magnetismo", "ella"}:
@@ -384,7 +387,7 @@ def choose_shot_archetype(section, line, index, world_key=None, seed=0):
     if tokens & {"final", "victoria", "cumplo", "promesa", "subo", "cima"}:
         return "victory_rooftop"
     seeded_index = int(index or 0) + int(seed or 0)
-    if world_key == "athletic_power" and seeded_index % 4 == 1:
+    if world_key == "athletic_power" and seeded_index % 7 == 1:
         return "grounded_training_still"
     if world_key == "feminine_power" and seeded_index % 3 == 1:
         return "controlled_portrait"
@@ -412,11 +415,17 @@ def lyric_visual_metaphor(section, line, index, plan=None):
             "a single silhouette at the center of a clean arena floor, decision and self-command",
             "a precise vertical light beam over a strong posture, promise turned into structure",
         ]
-    elif tokens & {"fuego", "hierro", "sudor", "fuerza", "levanto", "entreno", "golpe"}:
+    elif tokens & {"pesa", "pesas", "dumbbell", "barbell", "gym", "gimnasio", "levanto"}:
         options = [
-            "steel equipment under dramatic light with chalk dust and real contact shadows",
-            "a controlled training still life: grounded iron, heat, breath, effort, no floating props",
-            "an athlete silhouette beside grounded equipment, power restrained and believable",
+            "grounded training equipment under dramatic light with chalk dust and real contact shadows",
+            "a controlled training still life: grounded equipment, heat, breath, effort, no floating props",
+            "an athlete silhouette beside secondary equipment, power restrained and believable",
+        ]
+    elif tokens & {"fuego", "hierro", "sudor", "fuerza", "entreno", "golpe"}:
+        options = [
+            "a sunrise rooftop stance with heat, breath and disciplined pressure, no obvious gym props",
+            "a dark stadium tunnel with chalk dust in the air and one grounded silhouette moving forward",
+            "black marble, ember light and a controlled posture, strength shown through scale and shadow",
         ]
     elif tokens & {"corro", "ruta", "camino", "cima", "paso", "subo", "avanzar"}:
         options = [

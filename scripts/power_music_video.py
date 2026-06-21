@@ -45,7 +45,7 @@ THUMB_SIZE = (1280, 720)
 COVER_SIZE = (1080, 1080)
 FPS = 30
 DEFAULT_VISUAL_INTERVAL_SECONDS = 5.0
-DEFAULT_OPENAI_VISUAL_INTERVAL_SECONDS = 10.0
+DEFAULT_OPENAI_VISUAL_INTERVAL_SECONDS = 5.0
 DEFAULT_MAX_VISUAL_BEATS = 120
 DEFAULT_MAX_COMFY_IMAGES = 120
 DEFAULT_MAX_OPENAI_IMAGES = 72
@@ -2174,7 +2174,7 @@ def _scene_list(package):
     if not clean:
         clean = [
             {"section": "Intro", "visualPrompt": "premium dark cinematic visualizer opening, black marble, gold rim light, strong silhouette, no text", "textOverlay": ""},
-            {"section": "Hook", "visualPrompt": "symbolic power visualizer, steel weights, luxury city lights, ember glow, disciplined silhouette, no text", "textOverlay": ""},
+            {"section": "Hook", "visualPrompt": "symbolic power visualizer, luxury city lights, ember glow, disciplined silhouette, black marble, sunrise rooftop, no text", "textOverlay": ""},
             {"section": "Final", "visualPrompt": "sunrise rooftop over a city, triumphant cinematic calm, gold reflections, no text", "textOverlay": ""},
         ]
     return clean
@@ -2313,7 +2313,7 @@ def _visual_story_moment(line, index, section):
         "black marble penthouse at night, city skyline, one strong silhouette, gold rim light",
         "symmetrical luxury hallway with deep shadows, cinematic red and gold accents",
         "confident woman or man in tailored dark clothing, partial silhouette, no readable details",
-        "steel dumbbells and chalk dust under dramatic light, no brand marks, no labels",
+        "disciplined training atmosphere with chalk dust, breath, shadow, and a grounded athletic silhouette",
         "wet black car at night outside a glass tower, headlights cutting through fog",
         "wide staircase in an opulent building, one figure ascending with controlled power",
         "close-up of breath in cold air, face partly shadowed, controlled emotion",
@@ -2323,8 +2323,10 @@ def _visual_story_moment(line, index, section):
     ]
     if tokens & {"cama", "despierto", "manana", "amanece", "dia"}:
         return "early morning transition from shadow to sunrise, leaving comfort behind, cinematic first action"
-    if tokens & {"fuego", "hierro", "sudor", "entreno", "levanto"}:
-        return "physical power still life: steel dumbbells or barbell plates, chalk dust, breath, focused movement, no logos"
+    if tokens & {"pesa", "pesas", "dumbbell", "barbell", "gym", "gimnasio", "levanto"}:
+        return "grounded training detail: equipment secondary, chalk dust, breath, focused movement, realistic contact shadows, no logos"
+    if tokens & {"fuego", "hierro", "sudor", "entreno", "fuerza", "golpe"}:
+        return "physical power without obvious props: breath, heat, shadow, grounded stance, sunrise pressure, controlled intensity"
     if tokens & {"miedo", "duda", "caer", "excusa"}:
         return "internal resistance visualized as shadow and controlled posture, tension without melodrama"
     if tokens & {"promesa", "palabra", "cumplo", "contrato"}:
@@ -2392,7 +2394,8 @@ def _build_music_visual_prompt(package, beat, scene, palette):
             f"Lyric-derived visual metaphor for this beat, highest priority after shot recipe: {story_moment}. Optional safe base scene direction: {scene_prompt}. "
             f"Allowed visual objects and motifs: {allowed_objects}. Camera language: {camera_language}. "
             f"Banned objects and failure modes: {banned_objects}. "
-            "Prefer premium power motifs: confident silhouettes, luxury architecture, black marble, city lights, steel dumbbells or barbells, wet roads, sunrise rooftops, gold reflections, controlled movement. "
+            "Vary the visual language across beats: confident silhouettes, luxury architecture, black marble, city lights, wet roads, sunrise rooftops, gold reflections, steel corridors, stadium tunnels, shadows, breath, firelight, controlled movement. "
+            "Use gym equipment only when the lyric explicitly references gym, weights, lifting, iron or training equipment; otherwise show strength through posture, architecture, road, light, heat and scale. "
             "Use elegant status symbols sparingly; no cash rain, no tacky flexing, no random props. "
             "Vary subject, camera distance, setting, and action from beat to beat. "
             "Avoid generic waveform backgrounds, empty graphic templates, random neon circles, stock-photo smiles, repetitive runner shots, and literal household objects."
@@ -2524,7 +2527,7 @@ def _build_openai_music_visual_prompt(beat):
             f"{TEXT_FREE_NEGATIVE_PROMPT} "
             "Use a grounded, physically believable scene with one clear subject or symbolic focus. "
             "Avoid random objects, floating props, deformed anatomy, mismatched scale, fake letters, posters, screens, signage, and PowerPoint-style graphics. "
-            "Prefer expensive, polished music-video imagery: disciplined motion, controlled power, luxury architecture, sunrise city, steel, black marble, gold reflections, shadow-to-victory energy. "
+            "Prefer expensive, polished music-video imagery: disciplined motion, controlled power, luxury architecture, sunrise city, steel corridors or textures, black marble, gold reflections, shadow-to-victory energy. "
             "Make it emotionally connected to the song but not a literal illustration of every lyric. "
             f"Song section metadata: {section}. Lyric metadata, do not render as text: {lyric}. "
             f"Visual metaphor for this beat: {story_moment}. "
