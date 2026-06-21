@@ -533,6 +533,23 @@ function musicShortsLabel(render) {
   return "";
 }
 
+function musicShortsBusy(render) {
+  return render?.shortsStatus === "queued" || render?.shortsStatus === "running";
+}
+
+function musicShortsStatusLabel(render) {
+  if (render?.shortsStatus === "queued") return "shorts en cola";
+  if (render?.shortsStatus === "running") return "shorts";
+  if (render?.shortsStatus === "failed") return "shorts fallaron";
+  return "";
+}
+
+function musicShortsStatusTone(render) {
+  if (render?.shortsStatus === "failed") return "bad";
+  if (musicShortsBusy(render)) return "ember";
+  return "neutral";
+}
+
 function MusicShortLinks({ shorts }) {
   const items = Array.isArray(shorts) ? shorts.filter((short) => short?.video?.url) : [];
   if (!items.length) return null;
@@ -560,9 +577,12 @@ function AudioVersionList({
   onActivate,
   activating,
   onProduce,
+  onGenerateShorts,
   producingVersionId,
+  producingShortsVersionId,
   renderByVersion,
   anyRenderBusy,
+  anyShortsBusy,
 }) {
   const items = Array.isArray(versions) ? versions : [];
   if (!items.length) {
@@ -580,7 +600,10 @@ function AudioVersionList({
         const render = renderByVersion?.[versionId] || null;
         const renderBusy = render?.status === "queued" || render?.status === "running";
         const renderDone = render?.status === "completed" && render?.video?.url;
+        const shortsReady = Boolean(musicShortsLabel(render));
+        const shortsWorking = musicShortsBusy(render);
         const producingThis = producingVersionId === versionId;
+        const producingShortsThis = producingShortsVersionId === versionId;
         return (
           <div
             key={`${versionId}-${index}`}
@@ -604,6 +627,7 @@ function AudioVersionList({
                   {fallbackFrameLabel(render) && <span style={pillStyle("neutral")}>{fallbackFrameLabel(render)}</span>}
                   {instrumentalBeatLabel(render) && <span style={pillStyle("neutral")}>{instrumentalBeatLabel(render)}</span>}
                   {musicShortsLabel(render) && <span style={pillStyle("ok")}>{musicShortsLabel(render)}</span>}
+                  {musicShortsStatusLabel(render) && <span style={pillStyle(musicShortsStatusTone(render))}>{musicShortsStatusLabel(render)}</span>}
                   {subtitleModeLabel(render?.subtitleMode) && <span style={pillStyle(subtitleModeTone(render?.subtitleMode))}>{subtitleModeLabel(render?.subtitleMode)}</span>}
                   {thumbnailEngineLabel(render?.thumbnailEngine) && <span style={pillStyle(render?.thumbnailEngine?.includes?.("openai") ? "ok" : "neutral")}>{thumbnailEngineLabel(render.thumbnailEngine)}</span>}
                 </div>
@@ -627,12 +651,28 @@ function AudioVersionList({
                   <Icon name={producingThis || renderBusy ? "refresh" : "clapperboard"} size={16} />
                   {renderDone ? "Video listo" : producingThis || renderBusy ? "Renderizando..." : "Renderizar"}
                 </button>
+                {renderDone && !shortsReady && (
+                  <button
+                    type="button"
+                    className="cf-button cf-button--subtle"
+                    onClick={() => onGenerateShorts(versionId)}
+                    disabled={anyRenderBusy || anyShortsBusy || producingShortsThis || shortsWorking}
+                  >
+                    <Icon name={producingShortsThis || shortsWorking ? "refresh" : "clapperboard"} size={16} />
+                    {producingShortsThis || shortsWorking ? "Generando shorts..." : render?.shortsStatus === "failed" ? "Reintentar shorts" : "Generar shorts"}
+                  </button>
+                )}
               </div>
             </div>
             {version.url && <audio className="cf-music-version-audio" controls src={version.url} />}
             {render?.error && (
               <div className="cf-caption" style={{ color: "var(--bad)", marginTop: 10 }}>
                 {safeText(render.error, "El render de esta toma fallo.")}
+              </div>
+            )}
+            {render?.shortsStatus === "failed" && (
+              <div className="cf-caption" style={{ color: "var(--bad)", marginTop: 10 }}>
+                {safeText(render.shortsError, "La generacion de shorts fallo.")}
               </div>
             )}
             <div className="cf-music-actions" style={{ marginTop: 12 }}>
@@ -708,6 +748,7 @@ function RenderHistoryList({ renders, versions }) {
                   {fallbackFrameLabel(render) && <span style={pillStyle("neutral")}>{fallbackFrameLabel(render)}</span>}
                   {instrumentalBeatLabel(render) && <span style={pillStyle("neutral")}>{instrumentalBeatLabel(render)}</span>}
                   {musicShortsLabel(render) && <span style={pillStyle("ok")}>{musicShortsLabel(render)}</span>}
+                  {musicShortsStatusLabel(render) && <span style={pillStyle(musicShortsStatusTone(render))}>{musicShortsStatusLabel(render)}</span>}
                 </div>
                 <div className="cf-caption" style={{ marginTop: 6 }}>
                   {[duration, beatCount ? `${beatCount} beats visuales` : "", render.visualProvider ? (render.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local") : "", thumbnailEngineLabel(render.thumbnailEngine), subtitleModeLabel(render.subtitleMode), formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}
@@ -787,6 +828,7 @@ export default function MusicStudioPage() {
   const [uploadingAudio, setUploadingAudio] = useState(false);
   const [producingVideo, setProducingVideo] = useState(false);
   const [producingVersionId, setProducingVersionId] = useState("");
+  const [producingShortsVersionId, setProducingShortsVersionId] = useState("");
   const [activatingAudio, setActivatingAudio] = useState(false);
   const [audioFile, setAudioFile] = useState(null);
   const [audioVersionLabel, setAudioVersionLabel] = useState("");
@@ -821,13 +863,17 @@ export default function MusicStudioPage() {
     () => renderHistory.some((item) => item?.status === "queued" || item?.status === "running"),
     [renderHistory]
   );
+  const anyShortsBusy = useMemo(
+    () => renderHistory.some((item) => musicShortsBusy(item)),
+    [renderHistory]
+  );
   const completedRenderCount = useMemo(
     () => renderHistory.filter((item) => item?.status === "completed" && item?.video?.url).length,
     [renderHistory]
   );
   const activeRender = renderByVersion[activeAudioVersionId] || (safeText(renderData?.audioVersionId) === activeAudioVersionId ? renderData : null);
   const renderPanel = activeRender || (!activeAudioVersionId ? renderData : null);
-  const renderBusy = anyRenderBusy || renderPanel?.status === "queued" || renderPanel?.status === "running";
+  const renderBusy = anyRenderBusy || anyShortsBusy || renderPanel?.status === "queued" || renderPanel?.status === "running" || musicShortsBusy(renderPanel);
   const lyricScore = packageData?.lyricScore || null;
 
   const intentionMeta = useMemo(
@@ -903,23 +949,32 @@ export default function MusicStudioPage() {
 
   useEffect(() => {
     const status = renderData?.status;
-    if (!currentId || !["queued", "running"].includes(status)) return undefined;
+    const hasRenderWork = ["queued", "running"].includes(status) || anyShortsBusy;
+    if (!currentId || !hasRenderWork) return undefined;
     const timer = setInterval(() => {
       refreshCurrentTrack()
         .then((track) => {
-          if (track?.render?.status === "completed") {
+          if (["queued", "running"].includes(status) && track?.render?.status === "completed") {
             setNotice("Video musical finalizado en el VPS.");
+            loadTracks();
+          }
+          if (track?.render?.shortsStatus === "completed") {
+            setNotice("Shorts de Power Music listos.");
             loadTracks();
           }
           if (track?.render?.status === "failed") {
             setError(track.render.error || "El render musical fallo.");
             loadTracks();
           }
+          if (track?.render?.shortsStatus === "failed") {
+            setError(track.render.shortsError || "La generacion de shorts fallo.");
+            loadTracks();
+          }
         })
         .catch((exc) => setError(exc.message));
     }, 7000);
     return () => clearInterval(timer);
-  }, [currentId, loadTracks, refreshCurrentTrack, renderData?.status]);
+  }, [anyShortsBusy, currentId, loadTracks, refreshCurrentTrack, renderData?.status]);
 
   async function generatePackage() {
     setError("");
@@ -1075,6 +1130,47 @@ export default function MusicStudioPage() {
     } finally {
       setProducingVideo(false);
       setProducingVersionId("");
+    }
+  }
+
+  async function generateShorts(versionId = "") {
+    if (!currentId) {
+      setError("Primero selecciona un track.");
+      return;
+    }
+    const selectedVersionId = versionId || activeAudioVersionId;
+    if (!selectedVersionId) {
+      setError("Selecciona una toma con video terminado.");
+      return;
+    }
+    const render = renderByVersion[selectedVersionId] || null;
+    if (render?.status !== "completed" || !render?.video?.url) {
+      setError("Primero necesitas un video largo completado para esta toma.");
+      return;
+    }
+    setError("");
+    setNotice("");
+    setProducingShortsVersionId(selectedVersionId);
+    try {
+      const data = await apiFetch(`/music/tracks/${encodeURIComponent(currentId)}/audio/${encodeURIComponent(selectedVersionId)}/shorts`, {
+        method: "POST",
+      });
+      if (data.track) {
+        setCurrent(data.track);
+        setCurrentId(data.track.trackId || currentId);
+      }
+      if (data.alreadyReady) {
+        setNotice("Esta toma ya tiene shorts listos.");
+      } else if (data.duplicateBlocked) {
+        setNotice("Los shorts ya estan en proceso. Espera a que termine el worker.");
+      } else {
+        setNotice("Shorts enviados al VPS. Puedes seguir trabajando mientras se generan.");
+      }
+      await loadTracks();
+    } catch (exc) {
+      setError(exc.message);
+    } finally {
+      setProducingShortsVersionId("");
     }
   }
 
@@ -1426,9 +1522,12 @@ export default function MusicStudioPage() {
               onActivate={activateAudioVersion}
               activating={activatingAudio}
               onProduce={produceVideo}
+              onGenerateShorts={generateShorts}
               producingVersionId={producingVersionId}
+              producingShortsVersionId={producingShortsVersionId}
               renderByVersion={renderByVersion}
               anyRenderBusy={anyRenderBusy}
+              anyShortsBusy={anyShortsBusy}
             />
           </Section>
 
@@ -1475,9 +1574,28 @@ export default function MusicStudioPage() {
                     </div>
                   </div>
                 )}
+                {musicShortsBusy(renderPanel) && (
+                  <div style={{ margin: "var(--s-4) 0" }}>
+                    <div className="cf-music-progress">
+                      <span
+                        style={{
+                          width: `${Math.max(2, Math.min(100, Number(renderPanel.shortsProgress || 2)))}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="cf-caption" style={{ marginTop: 8 }}>
+                      {renderPanel.shortsProgress || 2}% Â· {renderPanel.shortsStepName || "Generando shorts"}
+                    </div>
+                  </div>
+                )}
                 {renderPanel?.status === "failed" && (
                   <div className="cf-card" style={{ padding: "var(--s-4)", borderColor: "var(--bad)", color: "var(--bad)", marginBottom: "var(--s-4)" }}>
                     {renderPanel.error || "El render fallo. Puedes reintentar sin volver a crear la letra."}
+                  </div>
+                )}
+                {renderPanel?.shortsStatus === "failed" && (
+                  <div className="cf-card" style={{ padding: "var(--s-4)", borderColor: "var(--bad)", color: "var(--bad)", marginBottom: "var(--s-4)" }}>
+                    {renderPanel.shortsError || "La generacion de shorts fallo. Puedes reintentar sin rehacer el video largo."}
                   </div>
                 )}
                 <div className="cf-music-actions">
@@ -1490,13 +1608,30 @@ export default function MusicStudioPage() {
                       !currentId ||
                       (!audioData?.url && !audioData?.storagePath) ||
                       renderPanel?.status === "completed" ||
-                      anyRenderBusy
+                      anyRenderBusy ||
+                      anyShortsBusy
                     }
                     style={{ minHeight: 52 }}
                   >
                     <Icon name={producingVideo || renderPanel?.status === "running" ? "refresh" : "clapperboard"} size={18} />
                     {renderPanel?.status === "completed" ? "Video de toma activa listo" : producingVideo ? "Enviando al VPS..." : "Producir toma activa"}
                   </button>
+                  {renderPanel?.status === "completed" && renderPanel?.video?.url && !musicShortsLabel(renderPanel) && (
+                    <button
+                      type="button"
+                      className="cf-button cf-button--subtle"
+                      onClick={() => generateShorts(activeAudioVersionId)}
+                      disabled={anyRenderBusy || anyShortsBusy || producingShortsVersionId === activeAudioVersionId || musicShortsBusy(renderPanel)}
+                      style={{ minHeight: 52 }}
+                    >
+                      <Icon name={producingShortsVersionId === activeAudioVersionId || musicShortsBusy(renderPanel) ? "refresh" : "clapperboard"} size={18} />
+                      {producingShortsVersionId === activeAudioVersionId || musicShortsBusy(renderPanel)
+                        ? "Generando shorts..."
+                        : renderPanel?.shortsStatus === "failed"
+                          ? "Reintentar shorts"
+                          : "Generar shorts"}
+                    </button>
+                  )}
                   {renderPanel?.video?.url && (
                     <a className="cf-button cf-button--success" href={renderPanel.video.url} target="_blank" rel="noreferrer" style={{ minHeight: 52 }}>
                       <Icon name="download" size={18} />

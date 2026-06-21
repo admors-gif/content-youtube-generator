@@ -169,3 +169,41 @@ def produce_music_video(self, track_id: str, audio_version_id: str | None = None
     result = api_module._run_music_video_job(track_id, audio_version_id)
     print(f"[WORKER] produce_music_video finished | track_id={track_id} | audio_version_id={audio_version_id or ''}", flush=True)
     return result
+
+
+@celery_app.task(
+    bind=True,
+    name="content_factory.produce_music_shorts",
+    autoretry_for=(ConnectionError, TimeoutError),
+    max_retries=1,
+    retry_backoff=45,
+    retry_jitter=True,
+)
+def produce_music_shorts(self, track_id: str, audio_version_id: str | None = None):
+    """Genera solo shorts verticales desde un render musical existente."""
+    try:
+        import sentry_sdk
+        sentry_sdk.set_tag("music_track_id", track_id)
+        if audio_version_id:
+            sentry_sdk.set_tag("music_audio_version_id", audio_version_id)
+        sentry_sdk.set_tag("celery_task_id", self.request.id)
+        sentry_sdk.set_context(
+            "music_shorts_task",
+            {
+                "task_name": self.name,
+                "task_id": self.request.id,
+                "track_id": track_id,
+                "audio_version_id": audio_version_id or "",
+                "retry_count": self.request.retries,
+            },
+        )
+    except Exception:
+        pass
+
+    print(
+        f"[WORKER] produce_music_shorts starting | track_id={track_id} | audio_version_id={audio_version_id or ''} | task_id={self.request.id}",
+        flush=True,
+    )
+    result = api_module._run_music_shorts_job(track_id, audio_version_id)
+    print(f"[WORKER] produce_music_shorts finished | track_id={track_id} | audio_version_id={audio_version_id or ''}", flush=True)
+    return result

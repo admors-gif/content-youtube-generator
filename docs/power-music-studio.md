@@ -46,6 +46,7 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - Timing multi-proveedor: intenta alinear la letra con timestamps reales por palabra usando `ELEVENLABS_API_KEY` + Scribe v2, luego OpenAI Whisper, luego Deepgram. La transcripcion puede guiar visuales aunque no sea suficientemente confiable para publicar subtitulos.
 - Si el timing falla, no se cae el render: el renderer usa distribucion estimada por bloques de letra.
 - Cada render puede entregar 2 Shorts verticales de Power Music: `energia` e `identidad`, usando frames ya aprobados, musica original y cierre de suscripcion. Si `ELEVENLABS_API_KEY` esta disponible, agrega una firma de voz breve al final sin interrumpir el climax musical.
+- Los renders antiguos tambien pueden generar shorts desde el MP4 ya completado con el boton `Generar shorts`; este flujo no re-renderiza Comfy ni reemplaza el video largo.
 - El score de letra es heuristico: no llama otro modelo ni consume API adicional.
 - Luma y Runway quedan excluidos por decision de producto para este motor musical.
 
@@ -138,6 +139,7 @@ Notas de costo visual:
 - Si solo quieres usar ElevenLabs Scribe para timing: `CONTENT_FACTORY_MUSIC_TRANSCRIPTION_PROVIDERS=elevenlabs`.
 - Para apagar los Shorts automaticos sin afectar el video largo: `CONTENT_FACTORY_MUSIC_SHORTS_ENABLED=false`.
 - Para dejar Shorts sin voz final pero con CTA visual: `CONTENT_FACTORY_MUSIC_SHORTS_ELEVENLABS_CTA_ENABLED=false`.
+- Para rescatar renders previos: abre la toma terminada y usa `Generar shorts`. La VPS recorta el MP4 existente, crea composicion vertical con branding Power Music y sube los nuevos MP4 al mismo render.
 - Los nodos `CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_NODE` y `CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_INPUT` solo se llenan cuando haya un workflow custom de Comfy con entrada ControlNet/pose/depth/canny.
 
 Frontend:

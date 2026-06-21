@@ -122,7 +122,10 @@ from scripts.power_music import (
     public_track_doc as _power_music_public_track,
     stable_track_id as _power_music_track_id,
 )
-from scripts.power_music_video import render_power_music_video as _render_power_music_video
+from scripts.power_music_video import (
+    render_power_music_shorts_from_existing_video as _render_power_music_shorts_from_existing_video,
+    render_power_music_video as _render_power_music_video,
+)
 
 FIREBASE_STORAGE_BUCKET = os.environ.get(
     "FIREBASE_STORAGE_BUCKET",
@@ -5694,6 +5697,40 @@ def _music_download_audio_to_render_dir(track_id: str, uid: str, audio: dict, bu
     raise RuntimeError("music audio source not available")
 
 
+def _music_download_render_asset_to_dir(asset: dict, bucket, target_dir: Path, fallback_name: str) -> Path:
+    if not isinstance(asset, dict):
+        raise RuntimeError("music render asset not available")
+    file_name = Path(str(asset.get("fileName") or fallback_name)).name
+    local_path = target_dir / file_name
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    blob_name = _music_storage_blob_name(asset.get("storagePath"))
+    if blob_name:
+        blob = bucket.blob(blob_name)
+        blob.download_to_filename(str(local_path))
+        return local_path
+    url = str(asset.get("url") or "").strip()
+    if url:
+        import urllib.request
+        with urllib.request.urlopen(url, timeout=90) as response:
+            local_path.write_bytes(response.read())
+        if local_path.exists() and local_path.stat().st_size > 1000:
+            return local_path
+    raise RuntimeError("music render asset storage path not available")
+
+
+def _music_download_render_metadata(render: dict, bucket, target_dir: Path) -> dict:
+    metadata_asset = render.get("metadata") if isinstance(render.get("metadata"), dict) else {}
+    if not metadata_asset.get("storagePath"):
+        return {}
+    try:
+        metadata_path = _music_download_render_asset_to_dir(metadata_asset, bucket, target_dir, "metadata.json")
+        data = json.loads(metadata_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception as exc:
+        print(f"[music-shorts] metadata download unavailable: {exc}", flush=True)
+        return {}
+
+
 def _music_track_ref_for_job(track_id: str):
     _ensure_firebase_initialized()
     from firebase_admin import firestore
@@ -5876,6 +5913,141 @@ def _run_music_video_job(track_id: str, audio_version_id: str | None = None) -> 
         raise
 
 
+def _run_music_shorts_job(track_id: str, audio_version_id: str | None = None) -> dict:
+    """
+    Genera solo shorts verticales desde un render musical existente.
+    No re-renderiza Comfy ni reemplaza el MP4 largo.
+    """
+    raw_track_id = str(track_id or "").strip()
+    clean_track_id = re.sub(r"[^a-zA-Z0-9_-]", "", raw_track_id).strip()
+    if not clean_track_id or clean_track_id != raw_track_id:
+        raise RuntimeError("invalid music track id")
+    requested_audio_version_id = str(audio_version_id or "").strip()
+    if requested_audio_version_id and re.sub(r"[^a-zA-Z0-9_-]", "", requested_audio_version_id) != requested_audio_version_id:
+        raise RuntimeError("invalid music audio version id")
+
+    from firebase_admin import storage
+
+    db, firestore, ref, data = _music_track_ref_for_job(clean_track_id)
+    uid = str(data.get("userId") or "").strip()
+    if not uid:
+        raise RuntimeError("music track missing owner")
+    package = data.get("package") if isinstance(data.get("package"), dict) else {}
+    audio = _music_audio_for_version(data, requested_audio_version_id)
+    if requested_audio_version_id and not audio:
+        raise RuntimeError("music audio version not found")
+    selected_audio_version_id = str(audio.get("versionId") or requested_audio_version_id or data.get("activeAudioVersionId") or "active").strip() or "active"
+    safe_audio_version = re.sub(r"[^a-zA-Z0-9_-]", "", selected_audio_version_id) or "active"
+    render_record = _music_render_for_version(data, selected_audio_version_id)
+    render_records = _music_render_records(data)
+
+    def _set_shorts_state(record: dict) -> None:
+        nonlocal render_records, render_record
+        now = _music_render_now()
+        base_record = {
+            **render_record,
+            "audioVersionId": selected_audio_version_id,
+            "audioLabel": render_record.get("audioLabel") or audio.get("label") or "",
+            "updatedAt": now,
+            **record,
+        }
+        render_record = base_record
+        render_records = _music_upsert_render_record(render_records, base_record)
+        ref.set(
+            {
+                "render": {
+                    **base_record,
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                },
+                "renders": render_records,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+
+    video_asset = render_record.get("video") if isinstance(render_record.get("video"), dict) else {}
+    if render_record.get("status") != "completed" or not video_asset:
+        raise RuntimeError("completed music render with video required before generating shorts")
+
+    _set_shorts_state(
+        {
+            "shortsStatus": "running",
+            "shortsStepName": "Preparando shorts desde video existente",
+            "shortsProgress": 8,
+            "shortsError": "",
+            "shortsStartedAt": _music_render_now(),
+        }
+    )
+
+    try:
+        bucket = storage.bucket(FIREBASE_STORAGE_BUCKET)
+        render_dir = MUSIC_RENDER_DIR / uid / clean_track_id / "shorts_from_render" / safe_audio_version
+        render_dir.mkdir(parents=True, exist_ok=True)
+        source_video = _music_download_render_asset_to_dir(video_asset, bucket, render_dir / "source", "FINAL_MUSIC.mp4")
+        metadata = _music_download_render_metadata(render_record, bucket, render_dir / "source")
+
+        _set_shorts_state(
+            {
+                "shortsStatus": "running",
+                "shortsStepName": "Renderizando shorts verticales",
+                "shortsProgress": 46,
+            }
+        )
+
+        outputs = _render_power_music_shorts_from_existing_video(clean_track_id, package, source_video, render_dir, metadata)
+        generated = [
+            short
+            for short in (outputs.get("musicShorts") or [])
+            if isinstance(short, dict) and short.get("path") and Path(short["path"]).exists()
+        ]
+        if not generated:
+            raise RuntimeError("no music shorts were generated")
+
+        _set_shorts_state(
+            {
+                "shortsStatus": "running",
+                "shortsStepName": "Subiendo shorts",
+                "shortsProgress": 82,
+            }
+        )
+
+        shorts_payload = [
+            {
+                **{key: value for key, value in short.items() if key != "path"},
+                "video": _music_upload_asset(short["path"], uid, clean_track_id, bucket, f"shorts/{safe_audio_version}"),
+            }
+            for short in generated
+        ]
+        metadata_asset = (
+            _music_upload_asset(outputs["metadata"], uid, clean_track_id, bucket, f"metadata/{safe_audio_version}")
+            if outputs.get("metadata")
+            else {}
+        )
+        _set_shorts_state(
+            {
+                "shortsStatus": "completed",
+                "shortsStepName": "Shorts listos",
+                "shortsProgress": 100,
+                "shortsCompletedAt": _music_render_now(),
+                "musicShorts": shorts_payload,
+                "shortsMetadata": metadata_asset,
+                "shortsRenderer": outputs.get("renderer") or "power_music_shorts_from_existing_video_v1",
+            }
+        )
+        updated = ref.get().to_dict() or {}
+        return {"ok": True, "track": _power_music_public_track(clean_track_id, updated)}
+    except Exception as exc:
+        _set_shorts_state(
+            {
+                "shortsStatus": "failed",
+                "shortsStepName": "Shorts fallidos",
+                "shortsProgress": 0,
+                "shortsError": str(exc)[:500],
+            }
+        )
+        raise
+
+
 def _enqueue_music_video_job(track_id: str, background_tasks: BackgroundTasks, audio_version_id: str | None = None) -> dict:
     try:
         from worker_tasks import produce_music_video
@@ -5884,6 +6056,17 @@ def _enqueue_music_video_job(track_id: str, background_tasks: BackgroundTasks, a
     except Exception as queue_err:
         print(f"[music] queue unavailable, using api background: {queue_err}", flush=True)
         background_tasks.add_task(_run_music_video_job, track_id, audio_version_id)
+        return {"queue": "api_background", "error": str(queue_err)[:200]}
+
+
+def _enqueue_music_shorts_job(track_id: str, background_tasks: BackgroundTasks, audio_version_id: str | None = None) -> dict:
+    try:
+        from worker_tasks import produce_music_shorts
+        task = produce_music_shorts.delay(track_id, audio_version_id)
+        return {"queue": "celery", "taskId": task.id}
+    except Exception as queue_err:
+        print(f"[music-shorts] queue unavailable, using api background: {queue_err}", flush=True)
+        background_tasks.add_task(_run_music_shorts_job, track_id, audio_version_id)
         return {"queue": "api_background", "error": str(queue_err)[:200]}
 
 
@@ -8425,6 +8608,106 @@ def _music_queue_track_render(
     }
 
 
+def _music_queue_track_shorts(
+    track_id: str,
+    audio_version_id: str | None,
+    principal: dict,
+    background_tasks: BackgroundTasks,
+) -> dict:
+    clean_track_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(track_id or "")).strip()
+    if not clean_track_id or clean_track_id != track_id:
+        raise HTTPException(status_code=400, detail="invalid track id")
+    clean_audio_version_id = str(audio_version_id or "").strip()
+    if clean_audio_version_id and re.sub(r"[^a-zA-Z0-9_-]", "", clean_audio_version_id) != clean_audio_version_id:
+        raise HTTPException(status_code=400, detail="invalid audio version id")
+
+    _ensure_firebase_initialized()
+    from firebase_admin import firestore
+    db = firestore.client()
+    ref = db.collection("musicTracks").document(clean_track_id)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="track not found")
+    data = snap.to_dict() or {}
+    if data.get("userId") != principal["uid"]:
+        raise HTTPException(status_code=403, detail="track owner mismatch")
+    audio = _music_audio_for_version(data, clean_audio_version_id)
+    if clean_audio_version_id and not audio:
+        raise HTTPException(status_code=404, detail="audio version not found")
+    selected_audio_version_id = str(audio.get("versionId") or data.get("activeAudioVersionId") or "active").strip() or "active"
+    render_record = _music_render_for_version(data, selected_audio_version_id)
+    video_asset = render_record.get("video") if isinstance(render_record.get("video"), dict) else {}
+    if render_record.get("status") != "completed" or not video_asset:
+        raise HTTPException(status_code=400, detail="primero necesitas un video largo completado")
+    if render_record.get("shortsStatus") in {"queued", "running"}:
+        return {
+            "ok": True,
+            "status": render_record.get("shortsStatus"),
+            "duplicateBlocked": True,
+            "track": _power_music_public_track(clean_track_id, data),
+        }
+    existing_shorts = render_record.get("musicShorts") if isinstance(render_record.get("musicShorts"), list) else []
+    if any(isinstance(short, dict) and isinstance(short.get("video"), dict) and short["video"].get("url") for short in existing_shorts):
+        return {
+            "ok": True,
+            "status": "completed",
+            "alreadyReady": True,
+            "track": _power_music_public_track(clean_track_id, data),
+        }
+
+    now = _music_render_now()
+    queued_record = {
+        **render_record,
+        "audioVersionId": selected_audio_version_id,
+        "audioLabel": render_record.get("audioLabel") or audio.get("label") or "",
+        "shortsStatus": "queued",
+        "shortsStepName": "Esperando worker de shorts",
+        "shortsProgress": 2,
+        "shortsQueuedAt": now,
+        "updatedAt": now,
+    }
+    render_records = _music_upsert_render_record(_music_render_records(data), queued_record)
+    ref.set(
+        {
+            "render": {
+                **queued_record,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            },
+            "renders": render_records,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+    dispatch = _enqueue_music_shorts_job(clean_track_id, background_tasks, selected_audio_version_id)
+    dispatch_record = {
+        "audioVersionId": selected_audio_version_id,
+        "audioLabel": render_record.get("audioLabel") or audio.get("label") or "",
+        "shortsQueue": dispatch.get("queue"),
+        "shortsTaskId": dispatch.get("taskId") or "",
+        "updatedAt": _music_render_now(),
+    }
+    render_records = _music_upsert_render_record(render_records, dispatch_record)
+    ref.set(
+        {
+            "render": {
+                "shortsQueue": dispatch.get("queue"),
+                "shortsTaskId": dispatch.get("taskId") or "",
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            },
+            "renders": render_records,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+    updated = ref.get().to_dict() or {}
+    return {
+        "ok": True,
+        "status": "queued",
+        "dispatch": dispatch,
+        "track": _power_music_public_track(clean_track_id, updated),
+    }
+
+
 @app.post("/music/tracks/{track_id}/produce")
 async def music_track_produce_video(track_id: str, request: Request, background_tasks: BackgroundTasks):
     principal = _require_music_studio_admin(request)
@@ -8441,6 +8724,17 @@ async def music_track_produce_audio_version(track_id: str, version_id: str, requ
     principal = _require_music_studio_admin(request)
     try:
         return _music_queue_track_render(track_id, version_id, principal, background_tasks)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
+
+
+@app.post("/music/tracks/{track_id}/audio/{version_id}/shorts")
+async def music_track_generate_audio_version_shorts(track_id: str, version_id: str, request: Request, background_tasks: BackgroundTasks):
+    principal = _require_music_studio_admin(request)
+    try:
+        return _music_queue_track_shorts(track_id, version_id, principal, background_tasks)
     except HTTPException:
         raise
     except Exception as exc:

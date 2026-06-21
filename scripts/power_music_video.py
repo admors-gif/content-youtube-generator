@@ -1265,6 +1265,260 @@ def _build_power_music_shorts(beats, assets_dir, audio_path, output_dir, palette
     return shorts
 
 
+def _normalize_existing_short_beats(metadata, package, duration):
+    raw_beats = []
+    if isinstance(metadata, dict):
+        raw_beats = metadata.get("visualBeats") if isinstance(metadata.get("visualBeats"), list) else []
+    beats = []
+    for index, item in enumerate(raw_beats or [], start=1):
+        if not isinstance(item, dict):
+            continue
+        start = max(0.0, float(item.get("start") or 0))
+        end = float(item.get("end") or 0)
+        if end <= start:
+            end = min(float(duration), start + max(1.0, float(item.get("duration") or 6.0)))
+        beats.append(
+            {
+                **item,
+                "scene_number": int(item.get("scene_number") or item.get("index") or index),
+                "start": round(start, 3),
+                "end": round(min(float(duration), end), 3),
+                "duration": round(max(0.5, min(float(duration), end) - start), 3),
+            }
+        )
+    if beats:
+        return beats
+    fallback_beats, _ = _build_visual_beats(
+        package if isinstance(package, dict) else {},
+        duration,
+        max(8.0, min(16.0, float(duration) / 8.0)),
+        18,
+        timed_segments=None,
+        show_lyric_overlay=False,
+    )
+    return fallback_beats
+
+
+def _short_window_hero_beat(beats, start, end):
+    window = _beats_for_short_window(beats, start, end)
+    if window:
+        return max(window, key=lambda item: item[3])[0]
+    if beats:
+        return min(beats, key=lambda beat: abs(float(beat.get("start") or 0) - start))
+    return {"scene_number": 1, "start": start, "end": end, "lyric": "", "fallbackQuote": ""}
+
+
+def _make_music_short_overlay(output_path, palette, title, beat, spec, *, cta=False):
+    img = Image.new("RGBA", SHORT_SIZE, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img, "RGBA")
+    _draw_power_music_brand(draw, palette, top=62)
+    paper = (246, 242, 232, 250)
+    gold = (*palette[1], 238)
+    ember = (*palette[2], 235)
+    label_font = load_font(28, bold=True)
+    title_font = load_font(54, bold=True)
+    caption_font = load_font(36, bold=True)
+    draw.text((64, 1010), compact_text(spec.get("title") or "Short", 40).upper(), font=label_font, fill=ember)
+    hook = compact_text(beat.get("fallbackQuote") or beat.get("lyric") or title, 78)
+    for i, line in enumerate(_wrap_text(draw, hook, title_font, SHORT_SIZE[0] - 128)[:2]):
+        draw.text((64, 1062 + i * 66), line, font=title_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 220))
+    note = compact_text(spec.get("caption") or "Guarda esta energia.", 90)
+    for i, line in enumerate(_wrap_text(draw, note, caption_font, SHORT_SIZE[0] - 128)[:2]):
+        draw.text((64, 1228 + i * 48), line, font=caption_font, fill=gold, stroke_width=2, stroke_fill=(0, 0, 0, 180))
+    if cta:
+        cta_font = load_font(66, bold=True)
+        sub_font = load_font(36, bold=True)
+        box = (54, SHORT_SIZE[1] - 352, SHORT_SIZE[0] - 54, SHORT_SIZE[1] - 94)
+        draw.rounded_rectangle(box, radius=34, fill=(0, 0, 0, 178), outline=ember, width=3)
+        cta_lines = _short_cta_lines()
+        draw.text((86, SHORT_SIZE[1] - 310), cta_lines[0].upper(), font=cta_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 230))
+        draw.text((90, SHORT_SIZE[1] - 220), cta_lines[1], font=sub_font, fill=gold, stroke_width=2, stroke_fill=(0, 0, 0, 180))
+        draw.text((90, SHORT_SIZE[1] - 162), _music_shorts_channel_name(), font=sub_font, fill=paper, stroke_width=2, stroke_fill=(0, 0, 0, 180))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(output_path)
+    return output_path
+
+
+def _render_power_music_short_from_video(spec, beats, video_path, output_dir, palette, title):
+    label = safe_slug(spec.get("label") or f"short_{spec.get('index') or 1}", "short")
+    short_dir = output_dir / "shorts" / label
+    short_dir.mkdir(parents=True, exist_ok=True)
+    start = float(spec.get("start") or 0)
+    end = float(spec.get("end") or start + float(spec.get("duration") or 30))
+    duration = max(1.0, end - start)
+    cta_seconds = min(_music_shorts_cta_seconds(), max(3.0, duration * 0.18))
+    hero = _short_window_hero_beat(beats, start, end)
+    overlay_path = _make_music_short_overlay(short_dir / "overlay.png", palette, title, hero, spec, cta=False)
+    cta_overlay_path = _make_music_short_overlay(short_dir / "overlay_cta.png", palette, title, hero, spec, cta=True)
+    cta_audio = _generate_music_short_cta_audio(short_dir, label)
+    output_path = output_dir / "shorts" / f"POWER_MUSIC_SHORT_{int(spec.get('index') or 1):02d}_{label}.mp4"
+    video_filter = (
+        f"[0:v]scale={SHORT_SIZE[0]}:{SHORT_SIZE[1]}:force_original_aspect_ratio=increase,"
+        f"crop={SHORT_SIZE[0]}:{SHORT_SIZE[1]},boxblur=18:1,eq=brightness=-0.08:saturation=0.82[bg];"
+        f"[0:v]scale=980:-2:force_original_aspect_ratio=decrease[fg];"
+        f"[bg][fg]overlay=(W-w)/2:392[base];"
+        f"[base][1:v]overlay=0:0[brand];"
+        f"[brand][2:v]overlay=0:0:enable='gte(t,{max(0.0, duration - cta_seconds):.3f})'[v]"
+    )
+    if cta_audio:
+        cta_duration = min(probe_audio_duration(cta_audio), duration)
+        delay_ms = int(max(0.0, duration - cta_duration - 0.25) * 1000)
+        fade_start = max(0.0, duration - cta_duration - 0.4)
+        filter_complex = (
+            f"{video_filter};"
+            f"[0:a]afade=t=out:st={fade_start:.3f}:d=0.9[music];"
+            f"[3:a]adelay={delay_ms}|{delay_ms},apad,atrim=0:{duration:.3f}[voice];"
+            "[music][voice]amix=inputs=2:duration=first:dropout_transition=0[a]"
+        )
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            f"{start:.3f}",
+            "-t",
+            f"{duration:.3f}",
+            "-i",
+            str(video_path),
+            "-loop",
+            "1",
+            "-i",
+            str(overlay_path),
+            "-loop",
+            "1",
+            "-i",
+            str(cta_overlay_path),
+            "-i",
+            str(cta_audio),
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[v]",
+            "-map",
+            "[a]",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-t",
+            f"{duration:.3f}",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+    else:
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            f"{start:.3f}",
+            "-t",
+            f"{duration:.3f}",
+            "-i",
+            str(video_path),
+            "-loop",
+            "1",
+            "-i",
+            str(overlay_path),
+            "-loop",
+            "1",
+            "-i",
+            str(cta_overlay_path),
+            "-filter_complex",
+            video_filter,
+            "-map",
+            "[v]",
+            "-map",
+            "0:a:0?",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-t",
+            f"{duration:.3f}",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+    _run(cmd, timeout=max(300, int(duration * 12)))
+    return {
+        "index": int(spec.get("index") or 0),
+        "label": spec.get("label") or label,
+        "title": spec.get("title") or label.title(),
+        "caption": spec.get("caption") or "",
+        "start": round(start, 3),
+        "end": round(end, 3),
+        "duration": round(duration, 3),
+        "fileName": output_path.name,
+        "path": output_path,
+        "ctaVoice": bool(cta_audio),
+        "ctaText": _music_shorts_cta_text(),
+        "channel": _music_shorts_channel_name(),
+        "format": "youtube_short_vertical_1080x1920",
+        "source": "existing_render_video",
+    }
+
+
+def render_power_music_shorts_from_existing_video(track_id, package, video_path, output_dir, metadata=None):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    package = enrich_package_with_director_plan(package if isinstance(package, dict) else {})
+    title = compact_text(package.get("title"), 100) or "Power Music"
+    palette = _palette(package)
+    duration = probe_media_duration(video_path)
+    beats = _normalize_existing_short_beats(metadata if isinstance(metadata, dict) else {}, package, duration)
+    shorts = []
+    for spec in _select_music_short_specs(beats, duration)[:2]:
+        try:
+            short = _render_power_music_short_from_video(spec, beats, Path(video_path), output_dir, palette, title)
+            if Path(short["path"]).exists() and Path(short["path"]).stat().st_size > 5000:
+                shorts.append(short)
+        except Exception as exc:
+            shorts.append(
+                {
+                    "index": int(spec.get("index") or 0),
+                    "label": spec.get("label") or "",
+                    "status": "failed",
+                    "error": str(exc)[:300],
+                    "start": spec.get("start"),
+                    "end": spec.get("end"),
+                    "duration": spec.get("duration"),
+                    "source": "existing_render_video",
+                }
+            )
+    metadata_path = output_dir / "music_shorts_metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "trackId": track_id,
+                "title": title,
+                "durationSeconds": duration,
+                "sourceVideo": Path(video_path).name,
+                "musicShorts": [{key: value for key, value in short.items() if key != "path"} for short in shorts],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return {"musicShorts": shorts, "metadata": metadata_path, "durationSeconds": duration, "renderer": "power_music_shorts_from_existing_video_v1"}
+
+
 def _run(cmd, timeout=900):
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if result.returncode != 0:
@@ -1290,6 +1544,26 @@ def probe_audio_duration(audio_path):
         return max(1.0, float(str(result.stdout).strip()))
     except Exception:
         return 180.0
+
+
+def probe_media_duration(media_path):
+    try:
+        result = _run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(media_path),
+            ],
+            timeout=60,
+        )
+        return max(1.0, float(str(result.stdout).strip()))
+    except Exception:
+        return probe_audio_duration(media_path)
 
 
 def _srt_timestamp(seconds):
