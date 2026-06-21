@@ -79,6 +79,7 @@ Contratos preparados:
 - OpenAI Vision QA: disponible via `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED`; por default se activa si existe `OPENAI_API_KEY`. Revisa hasta `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_MAX_FRAMES` frames, intenta reparar con Comfy y reemplaza con fallback local si la imagen tiene texto, objetos domesticos, pesas flotando, anatomia rota, ropa incongruente o escala imposible.
 - Fallback visual: si Comfy no entrega imagen para un beat, el renderer usa la miniatura raw de OpenAI como base visual; si no existe raw pero la miniatura final viene de OpenAI, usa un recorte hacia la zona visual; si solo existe miniatura local con texto, cae al fallback local abstracto para no repetir letras gigantes dentro del video.
 - Fallback con frases: cuando una escena cae a fallback, el renderer puede colocar una frase breve de la cancion o una frase motivacional generada de forma deterministica por backend. No modifica la letra original.
+- Fallback con letra sincronizada: si los timestamps son suficientemente confiables para publicar subtitulos, los frames de fallback pueden mostrar la linea de letra alineada a ese beat. Esto no quema letras sobre las imagenes normales de Comfy y no se usa en huecos instrumentales.
 - Huecos instrumentales: si el proveedor de timestamps detecta largos espacios sin voz, esos beats se tratan como pasajes instrumentales y no fuerzan prompts literales de la linea anterior.
 - Remotion: marcado como ready si despues queremos plantillas animadas reutilizables; el render actual sigue en FFmpeg porque ya es estable.
 - Qdrant/PostHog/Langfuse: se guardan campos listos en metadata para memoria visual, medicion y trazabilidad futura.
@@ -114,6 +115,7 @@ CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_SOFT_MIN_SCORE=70
 CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_REGEN_ATTEMPTS=2
 CONTENT_FACTORY_MUSIC_FALLBACK_FRAME_MODE=thumbnail
 CONTENT_FACTORY_MUSIC_FALLBACK_QUOTES_ENABLED=true
+CONTENT_FACTORY_MUSIC_FALLBACK_LYRICS_ENABLED=true
 CONTENT_FACTORY_MUSIC_CHANNEL_NAME=Power Music
 CONTENT_FACTORY_MUSIC_SHORTS_ENABLED=true
 CONTENT_FACTORY_MUSIC_SHORTS_DURATION_SECONDS=72
@@ -140,6 +142,7 @@ Notas de costo visual:
 - Para apagar QA visual sin romper el render: `CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED=false`.
 - Para volver al fallback abstracto anterior: `CONTENT_FACTORY_MUSIC_FALLBACK_FRAME_MODE=local`.
 - Para apagar frases sobre fallback: `CONTENT_FACTORY_MUSIC_FALLBACK_QUOTES_ENABLED=false`.
+- Para apagar letras sincronizadas solo en frames de fallback: `CONTENT_FACTORY_MUSIC_FALLBACK_LYRICS_ENABLED=false`.
 - Si solo quieres usar ElevenLabs Scribe para timing: `CONTENT_FACTORY_MUSIC_TRANSCRIPTION_PROVIDERS=elevenlabs`.
 - Para apagar los Shorts automaticos sin afectar el video largo: `CONTENT_FACTORY_MUSIC_SHORTS_ENABLED=false`.
 - Para dejar Shorts sin voz final pero con CTA visual: `CONTENT_FACTORY_MUSIC_SHORTS_ELEVENLABS_CTA_ENABLED=false`.
@@ -416,6 +419,7 @@ Campos principales:
 - `subtitleMode`
 - `subtitleCount`
 - `visualProvider`
+- `fallbackLyricOverlayFrames`
 - `queue`
 - `taskId`
 - `error`

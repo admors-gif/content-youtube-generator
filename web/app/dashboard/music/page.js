@@ -524,6 +524,12 @@ function fallbackFrameLabel(render) {
   return "";
 }
 
+function fallbackLyricOverlayLabel(render) {
+  const count = Number(render?.fallbackLyricOverlayFrames || 0);
+  if (count > 0) return `Letras fallback: ${count}`;
+  return "";
+}
+
 function instrumentalBeatLabel(render) {
   const count = Number(render?.instrumentalBeatCount || 0);
   if (count > 0) return `Instrumental: ${count}`;
@@ -646,6 +652,7 @@ function AudioVersionList({
                   {directorVersionLabel(render?.directorVersion) && <span style={pillStyle("neutral")}>{directorVersionLabel(render.directorVersion)}</span>}
                   {visionQaLabel(render?.visionQa) && <span style={pillStyle(visionQaTone(render.visionQa))}>{visionQaLabel(render.visionQa)}</span>}
                   {fallbackFrameLabel(render) && <span style={pillStyle("neutral")}>{fallbackFrameLabel(render)}</span>}
+                  {fallbackLyricOverlayLabel(render) && <span style={pillStyle("ok")}>{fallbackLyricOverlayLabel(render)}</span>}
                   {instrumentalBeatLabel(render) && <span style={pillStyle("neutral")}>{instrumentalBeatLabel(render)}</span>}
                   {musicShortsLabel(render) && <span style={pillStyle("ok")}>{musicShortsLabel(render)}</span>}
                   {musicShortsStatusLabel(render) && <span style={pillStyle(musicShortsStatusTone(render))}>{musicShortsStatusLabel(render)}</span>}
@@ -779,6 +786,7 @@ function RenderHistoryList({ renders, versions, onPublish, onPublishShorts }) {
                   {directorVersionLabel(render?.directorVersion) && <span style={pillStyle("neutral")}>{directorVersionLabel(render.directorVersion)}</span>}
                   {visionQaLabel(render?.visionQa) && <span style={pillStyle(visionQaTone(render.visionQa))}>{visionQaLabel(render.visionQa)}</span>}
                   {fallbackFrameLabel(render) && <span style={pillStyle("neutral")}>{fallbackFrameLabel(render)}</span>}
+                  {fallbackLyricOverlayLabel(render) && <span style={pillStyle("ok")}>{fallbackLyricOverlayLabel(render)}</span>}
                   {instrumentalBeatLabel(render) && <span style={pillStyle("neutral")}>{instrumentalBeatLabel(render)}</span>}
                   {musicShortsLabel(render) && <span style={pillStyle("ok")}>{musicShortsLabel(render)}</span>}
                   {musicShortsStatusLabel(render) && <span style={pillStyle(musicShortsStatusTone(render))}>{musicShortsStatusLabel(render)}</span>}
@@ -918,6 +926,7 @@ function RenderPromptSamples({ render }) {
                 )}
                 {safeText(beat?.location) && <span style={pillStyle("neutral")}>{safeText(beat.location)}</span>}
                 {safeText(beat?.motif) && <span style={pillStyle("neutral")}>{safeText(beat.motif)}</span>}
+                {beat?.showFallbackLyricOverlay && <span style={pillStyle("ok")}>Letra en fallback</span>}
               </div>
               {safeText(beat?.lyric) && (
                 <p style={{ color: "var(--paper)", lineHeight: 1.55, margin: "0 0 10px" }}>

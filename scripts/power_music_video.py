@@ -340,6 +340,10 @@ def _music_fallback_quotes_enabled():
     return _env_bool("CONTENT_FACTORY_MUSIC_FALLBACK_QUOTES_ENABLED", default=True)
 
 
+def _music_fallback_lyrics_enabled():
+    return _env_bool("CONTENT_FACTORY_MUSIC_FALLBACK_LYRICS_ENABLED", default=True)
+
+
 def _music_shorts_enabled():
     return _env_bool("CONTENT_FACTORY_MUSIC_SHORTS_ENABLED", default=True)
 
@@ -795,6 +799,22 @@ def _draw_fallback_quote(draw, quote, box, palette):
     return True
 
 
+def _fallback_overlay_text(beat):
+    if (beat.get("showLyricOverlay") or beat.get("showFallbackLyricOverlay")) and not beat.get("isInstrumentalGap"):
+        lyric = compact_text(beat.get("lyric") or beat.get("overlay"), 92)
+        if lyric:
+            return lyric
+    return compact_text(beat.get("fallbackQuote"), 92)
+
+
+def _beat_uses_fallback_lyric_overlay(beat):
+    return bool(
+        beat.get("showFallbackLyricOverlay")
+        and not beat.get("isInstrumentalGap")
+        and compact_text(beat.get("lyric") or beat.get("overlay"), 92)
+    )
+
+
 def _draw_music_visual_fallback_frame(size, palette, title, beat, seed):
     """Text-free fallback frame used only when generated images are missing."""
     img = _background(size, palette, seed=seed)
@@ -821,15 +841,15 @@ def _draw_music_visual_fallback_frame(size, palette, title, beat, seed):
     draw.line((margin, int(h * 0.72), w - margin, int(h * 0.72)), fill=gold, width=3)
     draw.ellipse((int(w * 0.62), int(h * 0.23), int(w * 0.84), int(h * 0.62)), outline=ember, width=5)
 
-    if beat.get("showLyricOverlay"):
-        lyric = compact_text(beat.get("lyric") or beat.get("overlay"), 92)
+    fallback_text = _fallback_overlay_text(beat)
+    if fallback_text and (beat.get("showLyricOverlay") or beat.get("showFallbackLyricOverlay")) and not beat.get("isInstrumentalGap"):
         y = int(h * 0.68)
-        for line in _wrap_text(draw, lyric, lyric_font, w - margin * 2)[:2]:
+        for line in _wrap_text(draw, fallback_text, lyric_font, w - margin * 2)[:2]:
             paper = (246, 242, 232, 245)
             draw.text((margin, y), line, font=lyric_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 190))
             y += lyric_font.size + 8
     else:
-        _draw_fallback_quote(draw, beat.get("fallbackQuote"), (margin, int(h * 0.58), int(w * 0.72), h - margin - 34), palette)
+        _draw_fallback_quote(draw, fallback_text, (margin, int(h * 0.58), int(w * 0.72), h - margin - 34), palette)
     return img.convert("RGB")
 
 
@@ -886,16 +906,16 @@ def _compose_thumbnail_fallback_frame(thumbnail_path, output_path, palette, beat
     draw.line((90 + offset, h - 96, w - 120, h - 96), fill=gold, width=3)
     draw.rounded_rectangle((74, 64, w - 74, h - 64), radius=34, outline=ember, width=2)
 
-    if beat.get("showLyricOverlay"):
+    fallback_text = _fallback_overlay_text(beat)
+    if fallback_text and (beat.get("showLyricOverlay") or beat.get("showFallbackLyricOverlay")) and not beat.get("isInstrumentalGap"):
         paper = (246, 242, 232, 245)
         lyric_font = load_font(44, bold=True)
-        lyric = compact_text(beat.get("lyric") or beat.get("overlay"), 96)
         y = h - 168
-        for line in _wrap_text(draw, lyric, lyric_font, w - 170)[:2]:
+        for line in _wrap_text(draw, fallback_text, lyric_font, w - 170)[:2]:
             draw.text((84, y), line, font=lyric_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 190))
             y += 52
     else:
-        _draw_fallback_quote(draw, beat.get("fallbackQuote"), (96, int(h * 0.61), int(w * 0.66), h - 112), palette)
+        _draw_fallback_quote(draw, fallback_text, (96, int(h * 0.61), int(w * 0.66), h - 112), palette)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.convert("RGB").save(output_path, quality=93)
@@ -2327,7 +2347,7 @@ def _timed_segment_for_window(segments, start, end):
     return best_index, segments[best_index], best_overlap, best_distance
 
 
-def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_segments=None, show_lyric_overlay=False):
+def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_segments=None, show_lyric_overlay=False, show_fallback_lyric_overlay=False):
     scenes = _scene_list(package)
     units = _lyric_units(package.get("lyrics"))
     if not units:
@@ -2400,6 +2420,7 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_se
                 "shotRecipe": shot_recipe,
                 "fallbackQuote": _fallback_quote_for_index(fallback_quotes, index),
                 "showLyricOverlay": bool(show_lyric_overlay),
+                "showFallbackLyricOverlay": bool(show_fallback_lyric_overlay and not is_instrumental_gap and unit.get("line")),
                 "prompt": prompt,
                 "promptGate": prompt_quality,
                 "start": round(start, 3),
@@ -2576,6 +2597,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "CONTENT_FACTORY_MUSIC_LYRIC_OVERLAY_ENABLED",
         default=False,
     ) and subtitle_publishable
+    show_fallback_lyric_overlay = _music_fallback_lyrics_enabled() and subtitle_publishable
     beats, visual_interval = _build_visual_beats(
         package,
         duration,
@@ -2583,6 +2605,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         max_visual_beats,
         timed_segments=subtitle_segments,
         show_lyric_overlay=show_lyric_overlay,
+        show_fallback_lyric_overlay=show_fallback_lyric_overlay,
     )
 
     cover_path = output_dir / "cover.jpg"
@@ -2604,6 +2627,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     fallback_frames = 0
     thumbnail_fallback_frames = 0
     local_fallback_frames = 0
+    fallback_lyric_overlay_frames = 0
     vision_qa_results = []
     qa_regenerated_frames = 0
     qa_replaced_frames = 0
@@ -2618,6 +2642,8 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         else:
             frame_source = _write_music_fallback_frame(thumbnail_path, image_path, palette, title, beat, 100 + index, thumbnail_engine=thumbnail_engine)
             fallback_frames += 1
+            if _beat_uses_fallback_lyric_overlay(beat):
+                fallback_lyric_overlay_frames += 1
             if frame_source.startswith("thumbnail"):
                 thumbnail_fallback_frames += 1
             else:
@@ -2664,6 +2690,8 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
                     qa_replaced_frames += 1
                     if frame_source not in {"local_fallback", "thumbnail_raw", "thumbnail_cropped"}:
                         fallback_frames += 1
+                        if _beat_uses_fallback_lyric_overlay(beat):
+                            fallback_lyric_overlay_frames += 1
                         if replacement_source.startswith("thumbnail"):
                             thumbnail_fallback_frames += 1
                         else:
@@ -2775,6 +2803,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
             "end": beat.get("end"),
             "sourceScene": beat.get("sourceScene"),
             "storyMoment": compact_text(beat.get("storyMoment"), 260),
+            "showFallbackLyricOverlay": bool(beat.get("showFallbackLyricOverlay")),
             "shotRecipeId": ((beat.get("shotRecipe") or {}).get("id") if isinstance(beat.get("shotRecipe"), dict) else ""),
             "location": ((beat.get("shotRecipe") or {}).get("location") if isinstance(beat.get("shotRecipe"), dict) else ""),
             "motif": ((beat.get("shotRecipe") or {}).get("motif") if isinstance(beat.get("shotRecipe"), dict) else ""),
@@ -2813,6 +2842,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "fallbackFrames": fallback_frames,
         "thumbnailFallbackFrames": thumbnail_fallback_frames,
         "localFallbackFrames": local_fallback_frames,
+        "fallbackLyricOverlayFrames": fallback_lyric_overlay_frames,
         "fallbackFrameMode": _music_fallback_frame_mode(),
         "renderer": "power_music_video_v5_shot_controlled_vision_qa",
         "visualizerMode": "symbolic_premium_text_free_director_v4",
@@ -2852,6 +2882,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
                 "storyMoment": beat.get("storyMoment"),
                 "fallbackQuote": beat.get("fallbackQuote"),
                 "showLyricOverlay": beat.get("showLyricOverlay"),
+                "showFallbackLyricOverlay": beat.get("showFallbackLyricOverlay"),
                 "shotRecipe": beat.get("shotRecipe"),
                 "promptGate": beat.get("promptGate"),
                 "prompt": beat.get("prompt"),
@@ -2889,6 +2920,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "fallbackFrames": fallback_frames,
         "thumbnailFallbackFrames": thumbnail_fallback_frames,
         "localFallbackFrames": local_fallback_frames,
+        "fallbackLyricOverlayFrames": metadata["fallbackLyricOverlayFrames"],
         "fallbackFrameMode": metadata["fallbackFrameMode"],
         "comfy": comfy_stats,
         "renderer": metadata["renderer"],

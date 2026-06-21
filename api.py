@@ -5875,6 +5875,7 @@ def _run_music_video_job(track_id: str, audio_version_id: str | None = None) -> 
             "fallbackFrames": outputs.get("fallbackFrames"),
             "thumbnailFallbackFrames": outputs.get("thumbnailFallbackFrames"),
             "localFallbackFrames": outputs.get("localFallbackFrames"),
+            "fallbackLyricOverlayFrames": outputs.get("fallbackLyricOverlayFrames"),
             "fallbackFrameMode": outputs.get("fallbackFrameMode"),
             "fallbackQuotePack": outputs.get("fallbackQuotePack") or [],
             "instrumentalBeatCount": outputs.get("instrumentalBeatCount") or 0,
