@@ -1954,7 +1954,8 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
             qa_result["index"] = index
             qa_result["source"] = frame_source
             if _vision_qa_failed(qa_result):
-                qa_result["repairAttempts"] = []
+                repair_attempts = []
+                qa_result["repairAttempts"] = repair_attempts
                 for attempt in range(1, _music_vision_qa_regen_attempts() + 1):
                     if frame_source != "comfy":
                         break
@@ -1962,18 +1963,20 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
                     beat["prompt"] = _qa_repair_prompt(original_prompt, qa_result, beat, attempt)
                     beat["promptGate"] = prompt_gate_for_recipe(beat["prompt"], beat.get("shotRecipe") or {})
                     repair_stats = _regenerate_comfy_beat_image(beat, comfy_dir)
-                    qa_result["repairAttempts"].append(repair_stats)
+                    repair_attempts.append(repair_stats)
                     if repair_stats.get("success") and _compose_generated_frame(comfy_path, image_path, palette, beat):
                         qa_regenerated_frames += 1
                         repaired_qa = _evaluate_music_frame_with_openai_vision(image_path, beat)
                         repaired_qa["index"] = index
                         repaired_qa["source"] = "comfy_repaired"
+                        repaired_qa["repairAttempts"] = repair_attempts
                         repaired_qa["repairedFrom"] = qa_result
                         qa_result = repaired_qa
                         if not _vision_qa_failed(qa_result):
                             break
                     else:
                         beat["prompt"] = original_prompt
+                qa_result["repairAttempts"] = repair_attempts
                 if _vision_qa_failed(qa_result):
                     replacement_source = _write_music_fallback_frame(
                         thumbnail_path,
