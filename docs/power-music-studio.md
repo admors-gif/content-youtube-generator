@@ -45,6 +45,7 @@ La v1 no usa una API de Suno. El usuario copia el paquete a Suno, descarga la ca
 - Si Comfy falla o no esta configurado, usa fallback de miniatura raw/OpenAI con frases de impacto; si no hay miniatura util, cae al fallback local limpio.
 - Timing multi-proveedor: intenta alinear la letra con timestamps reales por palabra usando `ELEVENLABS_API_KEY` + Scribe v2, luego OpenAI Whisper, luego Deepgram. La transcripcion puede guiar visuales aunque no sea suficientemente confiable para publicar subtitulos.
 - Si el timing falla, no se cae el render: el renderer usa distribucion estimada por bloques de letra.
+- Cada render puede entregar 2 Shorts verticales de Power Music: `energia` e `identidad`, usando frames ya aprobados, musica original y cierre de suscripcion. Si `ELEVENLABS_API_KEY` esta disponible, agrega una firma de voz breve al final sin interrumpir el climax musical.
 - El score de letra es heuristico: no llama otro modelo ni consume API adicional.
 - Luma y Runway quedan excluidos por decision de producto para este motor musical.
 
@@ -108,6 +109,14 @@ CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_SOFT_MIN_SCORE=70
 CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_REGEN_ATTEMPTS=2
 CONTENT_FACTORY_MUSIC_FALLBACK_FRAME_MODE=thumbnail
 CONTENT_FACTORY_MUSIC_FALLBACK_QUOTES_ENABLED=true
+CONTENT_FACTORY_MUSIC_CHANNEL_NAME=Power Music
+CONTENT_FACTORY_MUSIC_SHORTS_ENABLED=true
+CONTENT_FACTORY_MUSIC_SHORTS_DURATION_SECONDS=72
+CONTENT_FACTORY_MUSIC_SHORTS_CTA_SECONDS=5
+CONTENT_FACTORY_MUSIC_SHORTS_ELEVENLABS_CTA_ENABLED=true
+CONTENT_FACTORY_MUSIC_SHORTS_CTA_VOICE=Diego
+CONTENT_FACTORY_MUSIC_SHORTS_CTA_MODEL=eleven_multilingual_v2
+CONTENT_FACTORY_MUSIC_SHORTS_CTA_TEXT=Si esta energia te movio, suscribete a Power Music. Musica con proposito para evolucionar la mente.
 CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_NODE=
 CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_INPUT=
 ANTHROPIC_API_KEY=...
@@ -127,6 +136,8 @@ Notas de costo visual:
 - Para volver al fallback abstracto anterior: `CONTENT_FACTORY_MUSIC_FALLBACK_FRAME_MODE=local`.
 - Para apagar frases sobre fallback: `CONTENT_FACTORY_MUSIC_FALLBACK_QUOTES_ENABLED=false`.
 - Si solo quieres usar ElevenLabs Scribe para timing: `CONTENT_FACTORY_MUSIC_TRANSCRIPTION_PROVIDERS=elevenlabs`.
+- Para apagar los Shorts automaticos sin afectar el video largo: `CONTENT_FACTORY_MUSIC_SHORTS_ENABLED=false`.
+- Para dejar Shorts sin voz final pero con CTA visual: `CONTENT_FACTORY_MUSIC_SHORTS_ELEVENLABS_CTA_ENABLED=false`.
 - Los nodos `CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_NODE` y `CONTENT_FACTORY_MUSIC_COMFY_CONTROL_IMAGE_INPUT` solo se llenan cuando haya un workflow custom de Comfy con entrada ControlNet/pose/depth/canny.
 
 Frontend:

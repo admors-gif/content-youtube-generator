@@ -5809,6 +5809,20 @@ def _run_music_video_job(track_id: str, audio_version_id: str | None = None) -> 
             "subtitles": _music_upload_asset(outputs["subtitles"], uid, clean_track_id, bucket, f"metadata/{safe_audio_version}")
             if outputs.get("subtitles")
             else {},
+            "musicShorts": [
+                {
+                    **{
+                        key: value
+                        for key, value in short.items()
+                        if key != "path"
+                    },
+                    "video": _music_upload_asset(short["path"], uid, clean_track_id, bucket, f"shorts/{safe_audio_version}")
+                    if short.get("path")
+                    else {},
+                }
+                for short in (outputs.get("musicShorts") or [])
+                if isinstance(short, dict)
+            ],
             "durationSeconds": outputs.get("durationSeconds"),
             "sceneCount": outputs.get("sceneCount"),
             "visualBeatCount": outputs.get("visualBeatCount"),

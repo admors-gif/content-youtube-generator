@@ -525,6 +525,35 @@ function instrumentalBeatLabel(render) {
   return "";
 }
 
+function musicShortsLabel(render) {
+  const count = Array.isArray(render?.musicShorts)
+    ? render.musicShorts.filter((short) => short?.video?.url).length
+    : 0;
+  if (count > 0) return `${count} Shorts`;
+  return "";
+}
+
+function MusicShortLinks({ shorts }) {
+  const items = Array.isArray(shorts) ? shorts.filter((short) => short?.video?.url) : [];
+  if (!items.length) return null;
+  return (
+    <>
+      {items.map((short, index) => (
+        <a
+          key={`${short.label || "short"}-${short.index || index}`}
+          className="cf-button cf-button--subtle"
+          href={short.video.url}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <Icon name="clapperboard" size={16} />
+          {short.index ? `Short ${short.index}` : `Short ${index + 1}`}
+        </a>
+      ))}
+    </>
+  );
+}
+
 function AudioVersionList({
   versions,
   activeId,
@@ -574,6 +603,7 @@ function AudioVersionList({
                   {visionQaLabel(render?.visionQa) && <span style={pillStyle(visionQaTone(render.visionQa))}>{visionQaLabel(render.visionQa)}</span>}
                   {fallbackFrameLabel(render) && <span style={pillStyle("neutral")}>{fallbackFrameLabel(render)}</span>}
                   {instrumentalBeatLabel(render) && <span style={pillStyle("neutral")}>{instrumentalBeatLabel(render)}</span>}
+                  {musicShortsLabel(render) && <span style={pillStyle("ok")}>{musicShortsLabel(render)}</span>}
                   {subtitleModeLabel(render?.subtitleMode) && <span style={pillStyle(subtitleModeTone(render?.subtitleMode))}>{subtitleModeLabel(render?.subtitleMode)}</span>}
                   {thumbnailEngineLabel(render?.thumbnailEngine) && <span style={pillStyle(render?.thumbnailEngine?.includes?.("openai") ? "ok" : "neutral")}>{thumbnailEngineLabel(render.thumbnailEngine)}</span>}
                 </div>
@@ -624,6 +654,7 @@ function AudioVersionList({
                   SRT
                 </a>
               )}
+              <MusicShortLinks shorts={render?.musicShorts} />
             </div>
           </div>
         );
@@ -676,6 +707,7 @@ function RenderHistoryList({ renders, versions }) {
                   {visionQaLabel(render?.visionQa) && <span style={pillStyle(visionQaTone(render.visionQa))}>{visionQaLabel(render.visionQa)}</span>}
                   {fallbackFrameLabel(render) && <span style={pillStyle("neutral")}>{fallbackFrameLabel(render)}</span>}
                   {instrumentalBeatLabel(render) && <span style={pillStyle("neutral")}>{instrumentalBeatLabel(render)}</span>}
+                  {musicShortsLabel(render) && <span style={pillStyle("ok")}>{musicShortsLabel(render)}</span>}
                 </div>
                 <div className="cf-caption" style={{ marginTop: 6 }}>
                   {[duration, beatCount ? `${beatCount} beats visuales` : "", render.visualProvider ? (render.visualProvider === "comfy_flux" ? "Flux/Comfy" : "fallback local") : "", thumbnailEngineLabel(render.thumbnailEngine), subtitleModeLabel(render.subtitleMode), formatDate(render.completedAt || render.updatedAt || render.queuedAt)].filter(Boolean).join(" · ")}
@@ -702,6 +734,7 @@ function RenderHistoryList({ renders, versions }) {
                   SRT
                 </a>
               )}
+              <MusicShortLinks shorts={render?.musicShorts} />
             </div>
           </div>
         );
@@ -1482,6 +1515,7 @@ export default function MusicStudioPage() {
                       Subtitulos SRT
                     </a>
                   )}
+                  <MusicShortLinks shorts={renderPanel?.musicShorts} />
                 </div>
               </div>
               <div>

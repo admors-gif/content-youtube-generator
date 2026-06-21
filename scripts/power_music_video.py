@@ -36,6 +36,7 @@ except Exception:  # pragma: no cover - keeps standalone script execution safe
 
 
 VIDEO_SIZE = (1920, 1080)
+SHORT_SIZE = (1080, 1920)
 THUMB_SIZE = (1280, 720)
 COVER_SIZE = (1080, 1080)
 FPS = 30
@@ -49,6 +50,8 @@ DEFAULT_MUSIC_VISION_QA_MIN_SCORE = 82
 DEFAULT_MUSIC_VISION_QA_SOFT_MIN_SCORE = 70
 DEFAULT_MUSIC_VISION_QA_REGEN_ATTEMPTS = 2
 DEFAULT_MUSIC_INSTRUMENTAL_GAP_SECONDS = 2.8
+DEFAULT_MUSIC_SHORTS_DURATION_SECONDS = 72.0
+DEFAULT_MUSIC_SHORTS_CTA_SECONDS = 5.0
 TEXT_FREE_NEGATIVE_PROMPT = (
     "No readable text, no letters, no typography, no captions, no lyrics, "
     "no logo, no watermark, no UI, no signs, no book pages, no posters, "
@@ -331,6 +334,36 @@ def _music_instrumental_gap_seconds():
 
 def _music_fallback_quotes_enabled():
     return _env_bool("CONTENT_FACTORY_MUSIC_FALLBACK_QUOTES_ENABLED", default=True)
+
+
+def _music_shorts_enabled():
+    return _env_bool("CONTENT_FACTORY_MUSIC_SHORTS_ENABLED", default=True)
+
+
+def _music_shorts_duration_seconds():
+    return _env_float("CONTENT_FACTORY_MUSIC_SHORTS_DURATION_SECONDS", DEFAULT_MUSIC_SHORTS_DURATION_SECONDS)
+
+
+def _music_shorts_cta_seconds():
+    return _env_float("CONTENT_FACTORY_MUSIC_SHORTS_CTA_SECONDS", DEFAULT_MUSIC_SHORTS_CTA_SECONDS)
+
+
+def _music_shorts_elevenlabs_cta_enabled():
+    return _env_bool("CONTENT_FACTORY_MUSIC_SHORTS_ELEVENLABS_CTA_ENABLED", default=True) and bool(_provider_api_key("elevenlabs"))
+
+
+def _music_shorts_channel_name():
+    return os.getenv("CONTENT_FACTORY_MUSIC_CHANNEL_NAME", "Power Music").strip() or "Power Music"
+
+
+def _music_shorts_cta_text():
+    return compact_text(
+        os.getenv(
+            "CONTENT_FACTORY_MUSIC_SHORTS_CTA_TEXT",
+            "Si esta energia te movio, suscribete a Power Music. Musica con proposito para evolucionar la mente.",
+        ),
+        220,
+    )
 
 
 def _music_fallback_frame_mode():
@@ -873,6 +906,363 @@ def _write_music_fallback_frame(thumbnail_path, image_path, palette, title, beat
     frame = _draw_music_visual_fallback_frame(VIDEO_SIZE, palette, title, beat, seed)
     frame.save(image_path, quality=92)
     return "local_fallback"
+
+
+def _draw_power_music_brand(draw, palette, top=66):
+    channel = _music_shorts_channel_name().upper()
+    font = load_font(42, bold=True)
+    small = load_font(22, bold=True)
+    x = 64
+    draw.text((x, top), channel, font=font, fill=(246, 242, 232, 246), stroke_width=2, stroke_fill=(0, 0, 0, 190))
+    line_y = top + font.size + 14
+    draw.line((x, line_y, x + 260, line_y), fill=(*palette[2], 235), width=6)
+    draw.text((x, line_y + 16), "MUSICA CON PROPOSITO", font=small, fill=(*palette[1], 220))
+
+
+def _short_cta_lines():
+    return [
+        "Suscribete",
+        "para mas musica con proposito",
+    ]
+
+
+def _compose_music_short_frame(source_path, output_path, palette, title, beat, spec, show_cta=False):
+    try:
+        source = Image.open(source_path).convert("RGB")
+    except Exception:
+        source = _background(VIDEO_SIZE, palette, seed=int(beat.get("scene_number") or 1)).convert("RGB")
+    bg = _resize_cover(source, SHORT_SIZE).convert("RGBA").filter(ImageFilter.GaussianBlur(9))
+    shade = Image.new("RGBA", SHORT_SIZE, (0, 0, 0, 0))
+    px = shade.load()
+    w, h = SHORT_SIZE
+    for y in range(h):
+        for x in range(w):
+            vertical = y / max(1, h - 1)
+            edge = max(abs((x / max(1, w - 1)) - 0.5) * 2, abs(vertical - 0.5) * 1.4)
+            alpha = int(58 + max(0.0, edge - 0.3) * 116)
+            px[x, y] = (0, 0, 0, min(176, alpha))
+    img = Image.alpha_composite(bg, shade)
+
+    # Preserve the approved landscape frame as a premium poster inside the vertical canvas.
+    fg_w = 980
+    fg_h = int(fg_w * 9 / 16)
+    fg = source.resize((fg_w, fg_h), Image.LANCZOS).convert("RGBA")
+    fg = _add_vignette(fg, palette)
+    draw = ImageDraw.Draw(img, "RGBA")
+    x = (w - fg_w) // 2
+    y = 392
+    draw.rounded_rectangle((x - 10, y - 10, x + fg_w + 10, y + fg_h + 10), radius=32, fill=(0, 0, 0, 130))
+    img.alpha_composite(fg, (x, y))
+
+    _draw_power_music_brand(draw, palette)
+    label_font = load_font(28, bold=True)
+    title_font = load_font(54, bold=True)
+    caption_font = load_font(36, bold=True)
+    paper = (246, 242, 232, 248)
+    gold = (*palette[1], 238)
+    ember = (*palette[2], 235)
+    label = compact_text(spec.get("title") or "Short", 40).upper()
+    draw.text((64, 1010), label, font=label_font, fill=ember)
+    hook = compact_text(beat.get("fallbackQuote") or beat.get("lyric") or title, 74)
+    for i, line in enumerate(_wrap_text(draw, hook, title_font, w - 128)[:2]):
+        draw.text((64, 1062 + i * 66), line, font=title_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 210))
+    note = compact_text(spec.get("caption") or "Guarda esta energia.", 90)
+    for i, line in enumerate(_wrap_text(draw, note, caption_font, w - 128)[:2]):
+        draw.text((64, 1228 + i * 48), line, font=caption_font, fill=gold, stroke_width=2, stroke_fill=(0, 0, 0, 160))
+
+    if show_cta:
+        cta_font = load_font(66, bold=True)
+        sub_font = load_font(36, bold=True)
+        box = (54, h - 352, w - 54, h - 94)
+        draw.rounded_rectangle(box, radius=34, fill=(0, 0, 0, 170), outline=ember, width=3)
+        cta_lines = _short_cta_lines()
+        draw.text((86, h - 310), cta_lines[0].upper(), font=cta_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 230))
+        draw.text((90, h - 220), cta_lines[1], font=sub_font, fill=gold, stroke_width=2, stroke_fill=(0, 0, 0, 180))
+        draw.text((90, h - 162), _music_shorts_channel_name(), font=sub_font, fill=paper, stroke_width=2, stroke_fill=(0, 0, 0, 180))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    img.convert("RGB").save(output_path, quality=93)
+    return output_path.exists() and output_path.stat().st_size > 5000
+
+
+def _score_short_beat(beat, profile):
+    text = " ".join(
+        compact_text(value, 160).lower()
+        for value in [beat.get("section"), beat.get("lyric"), beat.get("storyMoment"), beat.get("fallbackQuote")]
+    )
+    tokens = set(_normalize_token_text(text))
+    if profile == "energia":
+        keywords = {"fuego", "rapido", "fuerte", "poder", "fuerza", "entreno", "hierro", "gano", "subo", "meta", "disciplina"}
+    else:
+        keywords = {"proposito", "mente", "evolucionar", "promesa", "version", "futuro", "elijo", "identidad", "silencio", "cambio"}
+    score = len(tokens & keywords) * 4
+    if beat.get("isInstrumentalGap"):
+        score -= 2
+    score += float(beat.get("alignmentScore") or 0)
+    return score
+
+
+def _select_music_short_specs(beats, duration):
+    target_duration = min(max(24.0, _music_shorts_duration_seconds()), max(24.0, min(90.0, duration)))
+    usable = [beat for beat in beats if isinstance(beat, dict)]
+
+    def choose_start(profile, fallback_ratio):
+        min_start = 0.0 if profile == "energia" else duration * 0.38
+        max_start = max(0.0, duration - target_duration)
+        candidates = [
+            beat for beat in usable
+            if min_start <= float(beat.get("start") or 0) <= max_start + 1
+        ]
+        if not candidates:
+            return min(max_start, max(0.0, duration * fallback_ratio))
+        best = max(candidates, key=lambda beat: (_score_short_beat(beat, profile), -abs(float(beat.get("start") or 0) - duration * fallback_ratio)))
+        return min(max_start, max(0.0, float(best.get("start") or 0) - 1.0))
+
+    first_start = choose_start("energia", 0.08)
+    second_start = choose_start("identidad", 0.55)
+    if abs(second_start - first_start) < target_duration * 0.6:
+        second_start = min(max(0.0, duration - target_duration), max(second_start, duration * 0.52))
+    return [
+        {
+            "index": 1,
+            "label": "energia",
+            "title": "Energia",
+            "caption": "Guarda esta energia para cuando falte fuerza.",
+            "start": round(first_start, 3),
+            "end": round(min(duration, first_start + target_duration), 3),
+            "duration": round(min(duration, first_start + target_duration) - first_start, 3),
+        },
+        {
+            "index": 2,
+            "label": "identidad",
+            "title": "Identidad",
+            "caption": "No es solo musica. Es una decision interna.",
+            "start": round(second_start, 3),
+            "end": round(min(duration, second_start + target_duration), 3),
+            "duration": round(min(duration, second_start + target_duration) - second_start, 3),
+        },
+    ]
+
+
+def _generate_music_short_cta_audio(output_dir, label):
+    if not _music_shorts_elevenlabs_cta_enabled():
+        return None
+    try:
+        from scripts.elevenlabs_tts import generate_narration, get_voice_settings
+    except Exception:
+        try:
+            from elevenlabs_tts import generate_narration, get_voice_settings
+        except Exception:
+            return None
+    voice = os.getenv("CONTENT_FACTORY_MUSIC_SHORTS_CTA_VOICE", "Diego").strip() or "Diego"
+    model = os.getenv("CONTENT_FACTORY_MUSIC_SHORTS_CTA_MODEL", "eleven_multilingual_v2").strip() or "eleven_multilingual_v2"
+    settings = get_voice_settings(voice)
+    cta_path = output_dir / f"cta_{safe_slug(label)}.mp3"
+    ok = generate_narration(
+        _music_shorts_cta_text(),
+        cta_path,
+        voice=voice,
+        model=model,
+        stability=float(settings.get("stability", 0.5)),
+        similarity_boost=float(settings.get("similarity_boost", 0.8)),
+        speed=float(os.getenv("CONTENT_FACTORY_MUSIC_SHORTS_CTA_SPEED", "1.04")),
+        style=float(settings.get("style", 0.1)),
+    )
+    if ok and cta_path.exists() and cta_path.stat().st_size > 1000:
+        return cta_path
+    return None
+
+
+def _beats_for_short_window(beats, start, end):
+    selected = []
+    for beat in beats:
+        beat_start = float(beat.get("start") or 0)
+        beat_end = float(beat.get("end") or beat_start)
+        overlap = max(0.0, min(end, beat_end) - max(start, beat_start))
+        if overlap >= 0.25:
+            selected.append((beat, max(start, beat_start), min(end, beat_end), overlap))
+    if not selected and beats:
+        closest = min(beats, key=lambda beat: abs(float(beat.get("start") or 0) - start))
+        selected.append((closest, start, end, max(0.5, end - start)))
+    return selected
+
+
+def _render_power_music_short(spec, beats, assets_dir, audio_path, output_dir, palette, title):
+    label = safe_slug(spec.get("label") or f"short_{spec.get('index') or 1}", "short")
+    short_dir = output_dir / "shorts" / label
+    frames_dir = short_dir / "frames"
+    segments_dir = short_dir / "segments"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    segments_dir.mkdir(parents=True, exist_ok=True)
+    start = float(spec.get("start") or 0)
+    end = float(spec.get("end") or start + float(spec.get("duration") or 30))
+    duration = max(1.0, end - start)
+    cta_seconds = min(_music_shorts_cta_seconds(), max(3.0, duration * 0.18))
+    selected = _beats_for_short_window(beats, start, end)
+    segment_paths = []
+    for local_index, (beat, seg_start, seg_end, overlap) in enumerate(selected, start=1):
+        image_path = assets_dir / f"beat_{int(beat.get('scene_number') or local_index):03d}.jpg"
+        frame_path = frames_dir / f"frame_{local_index:03d}.jpg"
+        segment_path = segments_dir / f"segment_{local_index:03d}.mp4"
+        rel_end = seg_end - start
+        show_cta = rel_end >= max(0.0, duration - cta_seconds)
+        _compose_music_short_frame(image_path, frame_path, palette, title, beat, spec, show_cta=show_cta)
+        segment_duration = max(0.5, overlap)
+        frames = max(1, int(math.ceil(segment_duration * FPS)))
+        zoom = "zoompan=z='min(zoom+0.0012,1.11)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+        vf = f"scale={SHORT_SIZE[0]}:{SHORT_SIZE[1]},{zoom}:d={frames}:s={SHORT_SIZE[0]}x{SHORT_SIZE[1]}:fps={FPS},format=yuv420p"
+        _run(
+            [
+                "ffmpeg",
+                "-y",
+                "-loop",
+                "1",
+                "-i",
+                str(frame_path),
+                "-vf",
+                vf,
+                "-t",
+                f"{segment_duration:.3f}",
+                "-an",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "19",
+                "-pix_fmt",
+                "yuv420p",
+                str(segment_path),
+            ],
+            timeout=max(120, int(segment_duration * 18)),
+        )
+        segment_paths.append(segment_path)
+    concat_path = short_dir / "concat.txt"
+    concat_path.write_text("".join(f"file '{path.resolve().as_posix()}'\n" for path in segment_paths), encoding="utf-8")
+    silent_path = short_dir / "silent.mp4"
+    _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_path), "-c", "copy", str(silent_path)], timeout=600)
+
+    cta_audio = _generate_music_short_cta_audio(short_dir, label)
+    output_path = output_dir / "shorts" / f"POWER_MUSIC_SHORT_{int(spec.get('index') or 1):02d}_{label}.mp4"
+    if cta_audio:
+        cta_duration = min(probe_audio_duration(cta_audio), duration)
+        delay_ms = int(max(0.0, duration - cta_duration - 0.25) * 1000)
+        fade_start = max(0.0, duration - cta_duration - 0.4)
+        _run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(silent_path),
+                "-ss",
+                f"{start:.3f}",
+                "-t",
+                f"{duration:.3f}",
+                "-i",
+                str(audio_path),
+                "-i",
+                str(cta_audio),
+                "-filter_complex",
+                f"[1:a]atrim=0:{duration:.3f},asetpts=PTS-STARTPTS,afade=t=out:st={fade_start:.3f}:d=0.9[music];"
+                f"[2:a]adelay={delay_ms}|{delay_ms},apad,atrim=0:{duration:.3f}[voice];"
+                "[music][voice]amix=inputs=2:duration=first:dropout_transition=0[a]",
+                "-map",
+                "0:v:0",
+                "-map",
+                "[a]",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                "18",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-t",
+                f"{duration:.3f}",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ],
+            timeout=max(300, int(duration * 12)),
+        )
+    else:
+        _run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(silent_path),
+                "-ss",
+                f"{start:.3f}",
+                "-t",
+                f"{duration:.3f}",
+                "-i",
+                str(audio_path),
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                "18",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-shortest",
+                "-t",
+                f"{duration:.3f}",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ],
+            timeout=max(300, int(duration * 12)),
+        )
+    return {
+        "index": int(spec.get("index") or 0),
+        "label": spec.get("label") or label,
+        "title": spec.get("title") or label.title(),
+        "caption": spec.get("caption") or "",
+        "start": round(start, 3),
+        "end": round(end, 3),
+        "duration": round(duration, 3),
+        "fileName": output_path.name,
+        "path": output_path,
+        "ctaVoice": bool(cta_audio),
+        "ctaText": _music_shorts_cta_text(),
+        "channel": _music_shorts_channel_name(),
+        "format": "youtube_short_vertical_1080x1920",
+    }
+
+
+def _build_power_music_shorts(beats, assets_dir, audio_path, output_dir, palette, title, duration):
+    if not _music_shorts_enabled() or duration < 12:
+        return []
+    shorts = []
+    for spec in _select_music_short_specs(beats, duration)[:2]:
+        try:
+            short = _render_power_music_short(spec, beats, assets_dir, audio_path, output_dir, palette, title)
+            if Path(short["path"]).exists() and Path(short["path"]).stat().st_size > 5000:
+                shorts.append(short)
+        except Exception as exc:
+            shorts.append(
+                {
+                    "index": int(spec.get("index") or 0),
+                    "label": spec.get("label") or "",
+                    "status": "failed",
+                    "error": str(exc)[:300],
+                    "start": spec.get("start"),
+                    "end": spec.get("end"),
+                    "duration": spec.get("duration"),
+                }
+            )
+    return shorts
 
 
 def _run(cmd, timeout=900):
@@ -2071,6 +2461,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
     else:
         subtitles_path.write_text("", encoding="utf-8")
         subtitle_count = 0
+    music_shorts = _build_power_music_shorts(beats, assets_dir, audio_path, output_dir, palette, title, duration)
     director_plan = package.get("musicVideoDirector")
     if not isinstance(director_plan, dict):
         director_plan = (_video_concept(package).get("directorPlan") if isinstance(_video_concept(package), dict) else {}) or {}
@@ -2135,6 +2526,14 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "transcriptionProvider": subtitle_diagnostics.get("provider") or "",
         "fallbackQuotePack": _fallback_quote_pack(package),
         "instrumentalBeatCount": sum(1 for beat in beats if beat.get("isInstrumentalGap")),
+        "musicShorts": [
+            {
+                key: value
+                for key, value in short.items()
+                if key != "path"
+            }
+            for short in music_shorts
+        ],
         "visualBeats": [
             {
                 "index": beat["scene_number"],
@@ -2164,6 +2563,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
             "lyrics": lyrics_path.name,
             "sunoPrompt": suno_path.name,
             "subtitles": subtitles_path.name if subtitle_count else "",
+            "musicShorts": [short.get("fileName") for short in music_shorts if short.get("path")],
         },
         "youtube": package.get("youtube") or {},
         "safetyNotes": package.get("safetyNotes") or [],
@@ -2200,6 +2600,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir):
         "transcriptionProvider": metadata["transcriptionProvider"],
         "fallbackQuotePack": metadata["fallbackQuotePack"],
         "instrumentalBeatCount": metadata["instrumentalBeatCount"],
+        "musicShorts": music_shorts,
         "thumbnailEngine": metadata["thumbnailEngine"],
         "showLyricOverlay": metadata["showLyricOverlay"],
         "visualizerMode": metadata["visualizerMode"],
