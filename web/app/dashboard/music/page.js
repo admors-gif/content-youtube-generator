@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Icon from "@/components/Icon";
 import { isAdminUser } from "@/lib/admin";
 import { authedFetch, getApiBase } from "@/lib/apiClient";
@@ -979,6 +979,8 @@ export default function MusicStudioPage() {
   const [loading, setLoading] = useState(false);
   const [importingSong, setImportingSong] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [uploadStartedAt, setUploadStartedAt] = useState(0);
+  const [uploadElapsedSeconds, setUploadElapsedSeconds] = useState(0);
   const [producingVideo, setProducingVideo] = useState(false);
   const [producingVersionId, setProducingVersionId] = useState("");
   const [producingShortsVersionId, setProducingShortsVersionId] = useState("");
@@ -992,6 +994,7 @@ export default function MusicStudioPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [copied, setCopied] = useState("");
+  const uploadAbortRef = useRef(null);
 
   const packageData = current?.package || null;
   const audioData = current?.audio || null;
@@ -1047,6 +1050,25 @@ export default function MusicStudioPage() {
 
   const updateImportForm = useCallback((key, value) => {
     setImportForm((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  useEffect(() => {
+    if (!uploadingAudio || !uploadStartedAt) {
+      setUploadElapsedSeconds(0);
+      return undefined;
+    }
+    const updateElapsed = () => {
+      setUploadElapsedSeconds(Math.max(0, Math.floor((Date.now() - uploadStartedAt) / 1000)));
+    };
+    updateElapsed();
+    const timer = setInterval(updateElapsed, 1000);
+    return () => clearInterval(timer);
+  }, [uploadingAudio, uploadStartedAt]);
+
+  useEffect(() => {
+    return () => {
+      uploadAbortRef.current?.abort();
+    };
   }, []);
 
   const apiFetch = useCallback(
@@ -1212,7 +1234,20 @@ export default function MusicStudioPage() {
     }
   }
 
+  function cancelAudioUpload() {
+    uploadAbortRef.current?.abort();
+    uploadAbortRef.current = null;
+    setUploadingAudio(false);
+    setUploadStartedAt(0);
+    setUploadElapsedSeconds(0);
+    setNotice("Subida cancelada. Puedes intentar subir el audio otra vez.");
+  }
+
   async function uploadAudio() {
+    if (uploadingAudio) {
+      cancelAudioUpload();
+      return;
+    }
     if (!currentId) {
       setError("Primero genera o selecciona un track.");
       return;
@@ -1224,6 +1259,10 @@ export default function MusicStudioPage() {
     setError("");
     setNotice("");
     setUploadingAudio(true);
+    setUploadStartedAt(Date.now());
+    setUploadElapsedSeconds(0);
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
     try {
       const body = new FormData();
       body.append("file", audioFile);
@@ -1232,6 +1271,7 @@ export default function MusicStudioPage() {
       const data = await apiFetch(`/music/tracks/${encodeURIComponent(currentId)}/audio`, {
         method: "POST",
         body,
+        signal: controller.signal,
       });
       setCurrent(data.track);
       setCurrentId(data.track?.trackId || currentId);
@@ -1240,9 +1280,18 @@ export default function MusicStudioPage() {
       setNotice("Version de audio subida y seleccionada. Ya puedes producir el video musical completo en el VPS.");
       await loadTracks();
     } catch (exc) {
-      setError(exc.message);
+      if (controller.signal.aborted || exc?.name === "AbortError") {
+        setNotice("Subida cancelada. Puedes intentar subir el audio otra vez.");
+      } else {
+        setError(exc.message);
+      }
     } finally {
+      if (uploadAbortRef.current === controller) {
+        uploadAbortRef.current = null;
+      }
       setUploadingAudio(false);
+      setUploadStartedAt(0);
+      setUploadElapsedSeconds(0);
     }
   }
 
@@ -1718,13 +1767,20 @@ export default function MusicStudioPage() {
                 type="button"
                 className="cf-button cf-button--primary"
                 onClick={uploadAudio}
-                disabled={uploadingAudio || !currentId || !audioFile}
+                disabled={!uploadingAudio && (!currentId || !audioFile)}
                 style={{ minHeight: 54, justifyContent: "center" }}
               >
-                <Icon name={uploadingAudio ? "refresh" : "uploadCloud"} size={18} />
-                {uploadingAudio ? "Subiendo audio..." : "Subir como nueva version"}
+                <Icon name={uploadingAudio ? "x" : "uploadCloud"} size={18} />
+                {uploadingAudio
+                  ? `Cancelar subida${uploadElapsedSeconds ? ` (${uploadElapsedSeconds}s)` : ""}`
+                  : "Subir como nueva version"}
               </button>
             </div>
+            {uploadingAudio && (
+              <p className="cf-music-helper" style={{ marginTop: "var(--s-3)" }}>
+                El audio se esta enviando al VPS. Si se queda atorado, cancela y vuelve a intentar; con WAV puede tardar mas que con MP3/M4A.
+              </p>
+            )}
 
             <AudioVersionList
               versions={audioVersions}

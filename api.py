@@ -8290,12 +8290,33 @@ def music_tracks(request: Request, limit: int = 40):
         db = firestore.client()
         safe_limit = max(1, min(int(limit or 40), 100))
         fetch_limit = max(safe_limit, min(250, safe_limit * 3))
-        docs = (
-            db.collection("musicTracks")
-            .where("userId", "==", principal["uid"])
-            .limit(fetch_limit)
-            .stream()
-        )
+        used_ordered_query = True
+        try:
+            docs = (
+                db.collection("musicTracks")
+                .where("userId", "==", principal["uid"])
+                .order_by("updatedAt", direction=firestore.Query.DESCENDING)
+                .limit(safe_limit)
+                .stream()
+            )
+            docs = list(docs)
+        except Exception as ordered_exc:
+            used_ordered_query = False
+            try:
+                log.warning(
+                    "music_tracks_ordered_query_failed_fallback",
+                    uid=principal.get("uid"),
+                    error=str(ordered_exc)[:220],
+                )
+            except Exception:
+                pass
+            docs = (
+                db.collection("musicTracks")
+                .where("userId", "==", principal["uid"])
+                .limit(fetch_limit)
+                .stream()
+            )
+            docs = list(docs)
         items = [_power_music_public_track(doc.id, doc.to_dict() or {}) for doc in docs]
 
         def _sort_value(item):
@@ -8312,7 +8333,8 @@ def music_tracks(request: Request, limit: int = 40):
                     return 0.0
             return 0.0
 
-        items.sort(key=_sort_value, reverse=True)
+        if not used_ordered_query:
+            items.sort(key=_sort_value, reverse=True)
         return {"ok": True, "items": items[:safe_limit]}
     except Exception as exc:
         return JSONResponse(status_code=500, content={"error": str(exc)[:220], "items": []})
@@ -8375,6 +8397,17 @@ async def music_track_upload_audio(
         if data.get("userId") != principal["uid"]:
             raise HTTPException(status_code=403, detail="track owner mismatch")
 
+        try:
+            log.info(
+                "music_audio_upload_started",
+                uid=principal.get("uid"),
+                track_id=clean_track_id,
+                filename=filename,
+                content_type=content_type,
+            )
+        except Exception:
+            pass
+
         folder = MUSIC_UPLOAD_DIR / principal["uid"] / clean_track_id
         folder.mkdir(parents=True, exist_ok=True)
         local_path = folder / safe_name_base
@@ -8396,11 +8429,32 @@ async def music_track_upload_audio(
         if total <= 0:
             raise HTTPException(status_code=400, detail="audio vacio")
 
+        try:
+            log.info(
+                "music_audio_upload_received",
+                uid=principal.get("uid"),
+                track_id=clean_track_id,
+                filename=safe_name_base,
+                size_bytes=total,
+            )
+        except Exception:
+            pass
+
         bucket = storage.bucket(FIREBASE_STORAGE_BUCKET)
         blob_name = f"music/{principal['uid']}/{clean_track_id}/audio/{safe_name_base}"
         blob = bucket.blob(blob_name)
         blob.upload_from_filename(str(local_path), content_type=content_type)
         signed_url = blob.generate_signed_url(version="v4", expiration=timedelta(days=7), method="GET")
+        try:
+            log.info(
+                "music_audio_storage_uploaded",
+                uid=principal.get("uid"),
+                track_id=clean_track_id,
+                storage_path=f"gs://{bucket.name}/{blob_name}",
+                size_bytes=total,
+            )
+        except Exception:
+            pass
 
         version_id = _music_audio_version_id(safe_name_base, total)
         clean_label = re.sub(r"\s+", " ", str(label or "")).strip()[:80]
@@ -8443,10 +8497,30 @@ async def music_track_upload_audio(
             merge=True,
         )
         updated = ref.get().to_dict() or {}
+        try:
+            log.info(
+                "music_audio_upload_completed",
+                uid=principal.get("uid"),
+                track_id=clean_track_id,
+                version_id=version_id,
+                size_bytes=total,
+            )
+        except Exception:
+            pass
         return {"ok": True, "track": _power_music_public_track(clean_track_id, updated)}
     except HTTPException:
         raise
     except Exception as exc:
+        try:
+            log.warning(
+                "music_audio_upload_failed",
+                uid=principal.get("uid"),
+                track_id=clean_track_id,
+                filename=filename,
+                error=str(exc)[:220],
+            )
+        except Exception:
+            pass
         return JSONResponse(status_code=500, content={"error": str(exc)[:220]})
 
 
