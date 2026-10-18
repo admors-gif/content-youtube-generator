@@ -1,0 +1,16 @@
+name: Music diagnostics (read only)
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, linux, vps, docker]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect existing Music work without changing it
+        run: python3 .github/diagnostics/music_status.py
