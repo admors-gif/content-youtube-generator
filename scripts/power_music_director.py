@@ -5,8 +5,10 @@ import unicodedata
 from datetime import datetime, timezone
 
 
-DIRECTOR_VERSION = "power_music_director_v6_narrative_storyboard"
+DIRECTOR_VERSION = "power_music_director_v7_visual_treatments"
 STORYBOARD_CONTENT_VERSION = "music_storyboard_v1"
+VISUAL_TREATMENTS = {"narrative", "hybrid", "abstract"}
+SHOT_TYPES = {"character", "environment", "detail", "abstract"}
 
 EXCLUDED_VIDEO_TOOLS = {
     "luma": "disabled_by_request",
@@ -363,6 +365,37 @@ def _tokens(value):
     return set(re.findall(r"[a-z0-9_]+", _ascii_text(value)))
 
 
+def resolve_visual_treatment(package=None, payload=None, *, default="narrative"):
+    """Keep old packages narrative; creators explicitly default new songs to hybrid."""
+    package = package if isinstance(package, dict) else {}
+    payload = payload if isinstance(payload, dict) else {}
+    video = package.get("videoConcept") if isinstance(package.get("videoConcept"), dict) else {}
+    requested = payload.get("visualTreatment") or payload.get("visual_treatment") or video.get("visualTreatment")
+    value = str(requested or default).strip().lower()
+    return value if value in VISUAL_TREATMENTS else default
+
+
+def _section_key(value):
+    """Compare song sections across languages and ignore performance directions."""
+    text = _ascii_text(value).strip().strip("[]")
+    tokens = _tokens(text)
+    if tokens & {"final", "outro", "ending", "cierre"}:
+        return "final"
+    number = re.search(r"\b([1-9])\b", text)
+    suffix = f"_{number.group(1)}" if number else ""
+    if re.search(r"\bpre[\s-]*(?:coro|chorus)\b", text):
+        return "prechorus" + suffix
+    if tokens & {"coro", "chorus", "hook", "estribillo"}:
+        return "chorus" + suffix
+    if tokens & {"verso", "verse", "estrofa"}:
+        return "verse" + suffix
+    if tokens & {"puente", "bridge"}:
+        return "bridge"
+    if tokens & {"intro", "introduccion", "opening"}:
+        return "intro"
+    return text.split(" - ")[0].strip()
+
+
 def normalize_storyboard(value):
     """Accept versioned authored stories, never infer provenance from old scenes."""
     if not isinstance(value, dict) or value.get("contentVersion") != STORYBOARD_CONTENT_VERSION:
@@ -395,6 +428,11 @@ def normalize_storyboard(value):
         ]}
         if not all(clean.values()) or clean["location"] not in locations:
             return {}
+        for key, limit in [("subject", 600), ("function", 300)]:
+            if isinstance(beat.get(key), str) and beat[key].strip():
+                clean[key] = compact_text(beat[key], limit)
+        if beat.get("shotType") in SHOT_TYPES:
+            clean["shotType"] = beat["shotType"]
         clean_beats.append(clean)
     result = {"contentVersion": STORYBOARD_CONTENT_VERSION, "source": source, **text_fields, "locations": locations, "beats": clean_beats}
     if isinstance(value.get("inputSignature"), str) and value["inputSignature"].strip():
@@ -402,19 +440,31 @@ def normalize_storyboard(value):
     return result
 
 
-def _storyboard_beat(section, index, plan):
+def _storyboard_beat(section, index, plan, *, progress=None):
     storyboard = normalize_storyboard(plan.get("storyboard"))
     if not storyboard:
         return {}, {}
-    section_key = _ascii_text(section).strip().strip("[]")
+    section_key = _section_key(section)
     exact_index = int(index or 0)
-    if 0 <= exact_index < len(storyboard["beats"]):
+    if progress is None and 0 <= exact_index < len(storyboard["beats"]):
         indexed = storyboard["beats"][exact_index]
-        if _ascii_text(indexed["section"]).strip().strip("[]") == section_key:
+        if _section_key(indexed["section"]) == section_key:
             return storyboard, copy.deepcopy(indexed)
-    matches = [beat for beat in storyboard["beats"] if _ascii_text(beat["section"]).strip().strip("[]") == section_key]
-    beats = matches or storyboard["beats"]
-    return storyboard, copy.deepcopy(beats[int(index or 0) % len(beats)])
+    matches = [(i, beat) for i, beat in enumerate(storyboard["beats"]) if _section_key(beat["section"]) == section_key]
+    if not matches:
+        family = section_key.split("_")[0]
+        matches = [(i, beat) for i, beat in enumerate(storyboard["beats"]) if _section_key(beat["section"]).split("_")[0] == family]
+    if progress is not None:
+        position = min(1.0, max(0.0, float(progress)))
+        candidates = matches or list(enumerate(storyboard["beats"]))
+        _, selected = min(candidates, key=lambda item: abs(item[0] / max(1, len(storyboard["beats"]) - 1) - position))
+    elif matches:
+        # A sequence can have several authored choruses; never cycle backward.
+        _, selected = matches[min(len(matches) - 1, max(0, exact_index))]
+    else:
+        # Unknown/suffixed sections follow the emotional stage, not index modulo.
+        selected = storyboard["beats"][round(_story_stage(section) * (len(storyboard["beats"]) - 1) / 2)]
+    return storyboard, copy.deepcopy(selected)
 
 
 def storyboard_sports(storyboard):
@@ -425,7 +475,7 @@ def storyboard_sports(storyboard):
     evidence.extend(storyboard.get("locations") or [])
     for beat in storyboard.get("beats") or []:
         if isinstance(beat, dict):
-            evidence.extend(beat.get(key) for key in ["action", "emotion", "location"])
+            evidence.extend(beat.get(key) for key in ["action", "emotion", "location", "subject", "function"])
     # Newlines keep negations scoped to their own field, while a "boxing
     # gym" and subsequent "same gym" share the story's sport context.
     return sports_in_text("\n".join(str(part) for part in evidence if part))
@@ -662,7 +712,78 @@ def lyric_visual_metaphor(section, line, index, plan=None):
     return compact_text(f"{progression}; {emotion}; recurring environmental cue: {detail}", 480)
 
 
-def build_shot_recipe(section, sample_line, index, plan):
+def _apply_visual_treatment(archetype, treatment, index, location, motif, story_beat):
+    """Cut between different visual subjects while keeping the authored world."""
+    explicit_type = story_beat.get("shotType")
+    if treatment == "abstract":
+        shot_type = "abstract"
+    elif explicit_type in SHOT_TYPES and not (treatment == "hybrid" and explicit_type == "character" and int(index or 0) % 6):
+        shot_type = explicit_type
+    elif treatment == "hybrid":
+        shot_type = ["character", "environment", "detail", "abstract", "environment", "detail"][int(index or 0) % 6]
+    else:
+        shot_type = "character" if archetype["wardrobe"] != "none" else "detail"
+    if treatment == "narrative" and not explicit_type:
+        return shot_type, "advance the authored narrative"
+    # Both full runs of one explicit shot type and interleaved hybrid inserts
+    # vary their focus; a plain index%3 would repeat every environment insert.
+    variant = int(index or 0) // 3 + int(index or 0) % 3
+    if shot_type == "character":
+        visual_function = "show the meaningful human decision or relationship in the story"
+    elif shot_type == "environment":
+        focus = ["spatial scale and layers", "the path of light and negative space", "weather, atmosphere and depth"][variant % 3]
+        archetype.update({
+            "category": "environment_wide", "subject": f"{focus} within {location}",
+            "humanPolicy": "no visible people; this is an environment insert in the established story world",
+            "wardrobe": "none", "action": f"show {focus} carrying the emotional change; no human pose or walking",
+            "composition": "environment-led cinematic wide frame; the place is the subject, no centered human figure",
+            "propRules": "use the established architecture, terrain, weather and light; add no new location or narrative props",
+            "camera": "wide architectural or environmental frame, strong depth and deliberate negative space",
+        })
+        visual_function = "open visual space and communicate the story's emotional scale"
+    elif shot_type == "detail":
+        focus = ["tactile surface texture", "light reflected on an existing surface", "the boundary between shadow and light"][variant % 3]
+        archetype.update({
+            "category": "environment_detail", "subject": f"{focus} belonging to {location}",
+            "humanPolicy": "no visible people or body parts; frame only a detail of the established environment",
+            "wardrobe": "none", "action": f"isolate {focus}, with emotion conveyed through contrast and color",
+            "composition": "tight macro or detail frame with tactile scale, no portrait or distant walking figure",
+            "propRules": "crop an existing environmental material or lighting detail; do not invent objects from lyric words",
+            "camera": "close tactile detail frame, deliberate focus plane and controlled depth of field",
+        })
+        visual_function = "provide a tactile counterpoint to the human and wide shots"
+    else:
+        focus = ["layered bands of light emerging from darkness", "reflections separating into open flowing forms", "a concentrated glow expanding through textured shadow"][variant % 3]
+        archetype.update({
+            "category": "abstract_motif", "subject": f"{focus}, using the colors and material character of {location}",
+            "humanPolicy": "no visible people, faces or bodies; an intentional nonfigurative musical image",
+            "wardrobe": "none", "action": f"express {motif} through {focus}; no literal objects or characters",
+            "composition": "full-frame abstract cinematic composition, a clear visual focal point, rich light and texture; no UI or decorative border",
+            "propRules": "use only light, shadow, color, reflections and texture derived from the story world; no new props, places or lyric pictograms",
+            "camera": "immersive abstract composition with depth and contrasting visual scale",
+        })
+        visual_function = "translate the story's emotion into a rhythmic symbolic image"
+    if story_beat.get("subject") and shot_type == explicit_type:
+        archetype["subject"] = story_beat["subject"]
+        if shot_type == "detail":
+            # An authored insert can show a meaningful task, not just a wall.
+            # Preserve its action and permit exactly the cropped cast parts it
+            # needs, without turning the insert back into a full-body portrait.
+            archetype.update({
+                "category": "narrative_detail",
+                "action": story_beat["action"],
+                "humanPolicy": "show only the cropped hands or other body parts of the established cast explicitly required by this detail subject and action; no full person, portrait or unrelated body parts",
+                "propRules": "preserve the objects and interaction explicitly established in this authored detail; add no unrelated props",
+                "composition": [
+                    "tight narrative detail of the specified task, showing only its relevant contact and interaction",
+                    "close tactile view of the specified task and its result, with only the relevant cropped cast parts",
+                    "precise close insert of the specified subject in action, preserving its materials and physical contact",
+                ][variant % 3],
+            })
+    return shot_type, (story_beat.get("function") if shot_type == explicit_type else "") or visual_function
+
+
+def build_shot_recipe(section, sample_line, index, plan, *, progress=None):
     plan = plan if isinstance(plan, dict) else {}
     world = plan.get("visualWorld") if isinstance(plan.get("visualWorld"), dict) else {}
     world_key = world.get("key") or "everyday_resolve"
@@ -672,6 +793,7 @@ def build_shot_recipe(section, sample_line, index, plan):
         world_key = "everyday_resolve"
         world = VISUAL_WORLDS[world_key]
     seed = int(plan.get("songVisualSeed") or 0)
+    treatment = plan.get("visualTreatment") if plan.get("visualTreatment") in VISUAL_TREATMENTS else "narrative"
     archetype_id = choose_shot_archetype(section, sample_line, index, world_key, seed=seed)
     archetype = copy.deepcopy(SHOT_ARCHETYPES.get(archetype_id) or SHOT_ARCHETYPES["shadow_symbol"])
     locations = world.get("locations") or VISUAL_WORLDS.get(world_key, VISUAL_WORLDS["shadow_to_power"])["locations"]
@@ -689,7 +811,7 @@ def build_shot_recipe(section, sample_line, index, plan):
     if archetype_id == "environment_detail":
         archetype["subject"] = f"an environmental detail already in the established location: {motif}"
     metaphor = lyric_visual_metaphor(section, sample_line, index, plan)
-    storyboard, story_beat = _storyboard_beat(section, index, plan)
+    storyboard, story_beat = _storyboard_beat(section, index, plan, progress=progress)
     direction = brief.get("explicitVisualDirection") or ""
     if storyboard:
         location = story_beat["location"]
@@ -704,6 +826,7 @@ def build_shot_recipe(section, sample_line, index, plan):
             "composition": "clear cinematic framing suited to the authored cast and action, keeping the specified setting recognizable",
             "camera": ["35mm medium-wide story frame", "50mm medium story frame", "28mm wide story frame"][int(index or 0) % 3],
         })
+        metaphor = f"{story_beat['emotion']}. {story_beat['action']}"
     elif direction:
         # A provisional human brief still outranks every inferred apartment,
         # street or training-room recipe. The semantic planner can replace
@@ -721,6 +844,17 @@ def build_shot_recipe(section, sample_line, index, plan):
             "camera": ["35mm medium-wide story frame", "50mm medium story frame", "28mm wide story frame"][int(index or 0) % 3],
         })
         metaphor = f"Develop the human-directed event within its specified setting: {direction}"
+    authored_action = story_beat.get("action") or archetype["action"]
+    shot_type, visual_function = _apply_visual_treatment(archetype, treatment, index, location, motif, story_beat)
+    if shot_type != "character":
+        # Keep the authored event in audit metadata, not as a competing command
+        # to put the entire cast back into a nonfigurative or environmental shot.
+        metaphor = compact_text(
+            f"{story_beat.get('emotion') or motif}. {archetype['subject']}. {archetype['action']}",
+            1100,
+        )
+    if treatment != "narrative" or story_beat.get("shotType"):
+        archetype_id = {"character": "character_moment", "environment": "setting_establishing", "detail": "environment_detail", "abstract": "abstract_motif"}[shot_type]
     continuity_key = f"{world_key}:{seed % 997}:same_protagonist"
     strict_physics = [
         "all visible objects obey gravity",
@@ -734,6 +868,11 @@ def build_shot_recipe(section, sample_line, index, plan):
         "category": archetype["category"],
         "index": index,
         "athleticStory": athletic_story,
+        "visualTreatment": treatment,
+        "shotType": shot_type,
+        "visualFunction": visual_function,
+        "authoredAction": authored_action,
+        "storyBeatId": f"beat_{storyboard['beats'].index(story_beat):02d}" if storyboard else "provisional",
         "storyStage": _story_stage(section),
         "storyEmotion": story_beat.get("emotion") or "",
         "storyPremise": storyboard.get("premise") or direction,
@@ -809,6 +948,7 @@ def build_music_video_director_plan(package, payload=None):
     package = package if isinstance(package, dict) else {}
     payload = payload or {}
     brief = build_story_brief(package, payload)
+    treatment = resolve_visual_treatment(package, payload)
     song_seed = _stable_song_seed(package, payload)
     world_key = choose_visual_world(package, {**payload, "visualBrief": brief["explicitVisualDirection"]})
     world = copy.deepcopy(VISUAL_WORLDS[world_key])
@@ -852,6 +992,7 @@ def build_music_video_director_plan(package, payload=None):
         "songVisualSeed": song_seed,
         "storyBrief": brief,
         "storyboard": storyboard,
+        "visualTreatment": treatment,
         "athleticStory": brief["athleticStory"],
         "continuity": brief["continuity"],
         "excludedTools": EXCLUDED_VIDEO_TOOLS,
@@ -874,8 +1015,8 @@ def build_music_video_director_plan(package, payload=None):
             "allowedObjects": world["motifs"],
             "bannedObjects": BANNED_IMAGE_OBJECTS,
             "continuityRules": [
-                "keep the same protagonist, wardrobe and connected settings across scenes",
-                "advance through tension, decision and resolution; vary framing rather than inventing unrelated locations",
+                "keep established cast, wardrobe and settings consistent whenever they are visible; inserts need not show a person",
+                "advance through tension, decision and resolution with different subjects, actions and shot scales, within the established world",
                 "one clear scene focus; include only the cast and objects established in the story",
                 "no readable text inside generated frames",
                 "avoid literal props for every lyric line",
@@ -884,8 +1025,9 @@ def build_music_video_director_plan(package, payload=None):
             ],
         },
         "sceneStrategy": (
-            "cinematic story related to the full lyrics: establish a recurring protagonist and connected locations, "
-            "develop the emotional arc by song section, vary framing and action while preserving continuity; "
+            f"{treatment} music treatment related to the full lyrics: preserve authored people, actions and connected locations; "
+            "alternate meaningful character moments, environments, tactile details and intentional light/texture imagery as the treatment permits; "
+            "continuity is a shared visual language, not the same person and pose in every shot; "
             "keep generated frames text-free and do not literalize each phrase"
         ),
         "qualityGates": {
@@ -1005,24 +1147,35 @@ def director_scene_prompt(section, sample_line, index, plan):
     brief = plan.get("storyBrief") if isinstance(plan.get("storyBrief"), dict) else {}
     direction = compact_text(brief.get("explicitVisualDirection"), 400)
     metaphor = recipe.get("lyricMetaphor") or lyric_visual_metaphor(section, sample_line, index, plan)
+    if recipe["shotType"] == "character":
+        continuity = compact_text((brief.get("continuity") or {}).get("protagonist"), 500)
+        world_description = compact_text(world.get("description"), 240)
+    else:
+        direction = "follow only the locked insert subject, action and visual treatment below"
+        world_description = compact_text(recipe["location"], 240)
+        continuity = (
+            "the established palette, materials, light progression and story world; "
+            + ("show only cast parts explicitly required by the locked detail" if recipe["category"] == "narrative_detail" else "keep the cast off screen in this insert")
+        )
     return compact_text(
         (
             "16:9 cinematic text-free premium music-video still; symbolic emotional storytelling within a coherent story. "
             "No words, captions, logos, random props or literal objects from lyric metaphors. Physically grounded, realistic contact shadows. "
-            f"Story world: {compact_text(world.get('description'), 240)}. "
+            f"Story world: {world_description}. "
             f"Creative direction: {direction or 'a cinematic story related to the full song'}. "
-            f"Continuity: {compact_text((brief.get('continuity') or {}).get('protagonist'), 500)}; consistent wardrobe, connected locations and palette. "
+            f"Visual treatment: {recipe['visualTreatment']}; shot type: {recipe['shotType']}; purpose: {recipe['visualFunction']}. "
+            f"Continuity: {continuity}; consistent palette and connected locations. "
             f"Section: {compact_text(section, 60)}. Emotional progression: {metaphor}. "
             f"LOCKED SHOT RECIPE: {recipe['id']}. Subject: {recipe['subject']}. Location: {recipe['location']}. "
-            f"Wardrobe: {recipe['wardrobe']}. Action: {recipe['action']}. Prop rules: {recipe['propRules']}. "
+            f"Human policy: {recipe['humanPolicy']}. Wardrobe: {recipe['wardrobe']}. Action: {recipe['action']}. Prop rules: {recipe['propRules']}. "
             f"Composition: {recipe['composition']}. Camera: {recipe['camera']}; {camera}."
         ),
         2400,
     )
 
 
-def build_beat_shot_recipe(section, line, index, plan):
-    return build_shot_recipe(section, line, index, plan)
+def build_beat_shot_recipe(section, line, index, plan, *, progress=None):
+    return build_shot_recipe(section, line, index, plan, progress=progress)
 
 
 def _lyric_sections(lyrics, limit=8):
@@ -1053,6 +1206,7 @@ def enrich_package_with_director_plan(package, payload=None):
     video["userVisualDirection"] = plan["storyBrief"]["explicitVisualDirection"]
     video["userStoryContext"] = plan["storyBrief"]["explicitStoryTheme"]
     video["storyboard"] = copy.deepcopy(plan["storyboard"])
+    video["visualTreatment"] = plan["visualTreatment"]
     video["visualIdentity"] = compact_text(plan["visualBible"]["identity"], 600)
     video["visualWorld"] = compact_text(plan["visualWorld"]["description"], 300)
     video["sceneStrategy"] = compact_text(plan["sceneStrategy"], 360)
@@ -1100,7 +1254,7 @@ def enrich_package_with_director_plan(package, payload=None):
     package["musicVideoDirector"] = plan
     notes = package.get("productionNotes") if isinstance(package.get("productionNotes"), list) else []
     notes = [note for note in notes if not str(note).startswith("Music Director v")]
-    director_note = "Music Director v6: storyboard cinematografico preservado con reparto, acciones y lugares; contexto de escucha separado de la historia. Direccion heuristica provisional si falta un storyboard validado."
+    director_note = "Music Director v7: historia preservada con tratamiento narrativo, hibrido o abstracto; variedad de sujetos y escalas sin cambiar el mundo de la cancion. Direccion heuristica provisional si falta un storyboard validado."
     if director_note not in notes:
         package["productionNotes"] = [*notes, director_note][:12]
     return package

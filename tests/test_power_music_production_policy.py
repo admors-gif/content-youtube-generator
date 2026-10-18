@@ -276,12 +276,13 @@ def test_vision_qa_receives_story_and_lyric_evidence_as_reference_data(monkeypat
     assert not music._vision_qa_failed(result)
 
 
-def test_failed_thumbnail_cannot_reuse_old_openai_raw_image(tmp_path):
+def test_failed_thumbnail_cannot_reuse_old_openai_raw_image(monkeypatch, tmp_path):
     old_raw = tmp_path / "thumbnail_openai_raw.jpg"
     old_raw.write_bytes(b"old-scene" * 1000)
-    source, label = music._thumbnail_fallback_source(tmp_path / "thumbnail.jpg", "local_exact_overlay_fallback")
-    assert source is None
-    assert label == ""
+    monkeypatch.setattr(music, "_compose_generated_frame", forbidden)
+    monkeypatch.setattr(music, "_draw_music_visual_fallback_frame", lambda *args: Image.new("RGB", (16, 16)))
+    source = music._write_music_fallback_frame(tmp_path / "thumbnail.jpg", tmp_path / "fallback.jpg", music._palette({}), "Song", {}, 1, "local_exact_overlay_fallback")
+    assert source == "local_fallback"
 
 
 @pytest.mark.parametrize("fallback", [False, True])
@@ -324,33 +325,33 @@ def test_existing_video_shorts_never_request_story_planning(monkeypatch, tmp_pat
     assert result["musicShorts"] == []
 
 
-def test_rejected_thumbnail_is_replaced_with_procedural_local_frame(monkeypatch, tmp_path, fast_renderer):
+def test_missing_source_uses_local_background_without_grading_app_typography(monkeypatch, tmp_path, fast_renderer):
     replacements = []
 
     def fallback(thumbnail, target, *args, force_local=False, **kwargs):
         replacements.append(force_local)
         Path(target).write_bytes(b"offline-image" * 500)
-        return "local_fallback" if force_local else "thumbnail_raw"
+        return "local_fallback"
 
     monkeypatch.setattr(music, "_write_music_fallback_frame", fallback)
     monkeypatch.setattr(music, "_generate_openai_beat_images", lambda *args: {"availableScenes": [], "error": "OpenAI unavailable"})
-    monkeypatch.setattr(music, "_evaluate_music_frame_with_openai_vision", lambda *args: {"enabled": True, "passed": False, "score": 95, "storyRelevance": 5, "issues": ["unrelated gym"], "hasUnauthorizedAthleticContent": True})
+    monkeypatch.setattr(music, "_evaluate_music_frame_with_openai_vision", forbidden)
     monkeypatch.setenv("CONTENT_FACTORY_MUSIC_OPENAI_VISION_QA_ENABLED", "true")
     result = music.render_power_music_video("test", {}, tmp_path / "audio.mp3", tmp_path)
-    assert replacements == [False, True]
+    assert replacements == [False]
     assert result["thumbnailFallbackFrames"] == 0
     assert result["localFallbackFrames"] == 1
     assert result["fallbackFrames"] == 1
-    assert result["visionQa"]["results"][0]["replacement"] == "local_fallback_after_vision_qa"
+    assert result["visionQa"]["checked"] == 0
     assert result["degradedOutput"] is True
 
 
 def test_force_local_fallback_bypasses_thumbnail_reuse(monkeypatch, tmp_path):
     monkeypatch.setenv("CONTENT_FACTORY_MUSIC_FALLBACK_FRAME_MODE", "thumbnail")
-    monkeypatch.setattr(music, "_compose_thumbnail_fallback_frame", forbidden)
+    monkeypatch.setattr(music, "_compose_generated_frame", forbidden)
     monkeypatch.setattr(music, "_draw_music_visual_fallback_frame", lambda *args: Image.new("RGB", (16, 16)))
     target = tmp_path / "replacement.jpg"
-    source = music._write_music_fallback_frame(tmp_path / "rejected.jpg", target, music._palette({}), "Song", {}, 1, "openai_test", force_local=True)
+    source = music._write_music_fallback_frame(tmp_path / "rejected.jpg", target, music._palette({}), "Song", {}, 1, "openai_test", force_local=True, approved_sources=[{"approved": True, "path": tmp_path / "safe.jpg", "scene_number": 2}])
     assert source == "local_fallback"
     assert target.exists()
 

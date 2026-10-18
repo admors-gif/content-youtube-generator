@@ -28,7 +28,7 @@ except Exception:  # pragma: no cover - keeps standalone script execution safe
     except Exception:  # pragma: no cover
         DIRECTOR_VERSION = "power_music_director_unavailable"
 
-        def build_beat_shot_recipe(section, line, index, plan):
+        def build_beat_shot_recipe(section, line, index, plan, *, progress=None):
             return {}
 
         def enrich_package_with_director_plan(package, payload=None):
@@ -87,7 +87,7 @@ class MusicProductionPolicy:
             "comfyAllowed": self.allow_comfy,
             "elevenlabsAllowed": self.allow_elevenlabs,
             "shortCtaVoice": "elevenlabs" if self.allow_elevenlabs else "disabled",
-            "visualFailureFallback": "local_with_warning",
+            "visualFailureFallback": "approved_song_image_or_clean_background_with_warning",
         }
 
 
@@ -458,12 +458,8 @@ def _music_instrumental_gap_seconds():
     return _env_float("CONTENT_FACTORY_MUSIC_INSTRUMENTAL_GAP_SECONDS", DEFAULT_MUSIC_INSTRUMENTAL_GAP_SECONDS)
 
 
-def _music_fallback_quotes_enabled():
-    return _env_bool("CONTENT_FACTORY_MUSIC_FALLBACK_QUOTES_ENABLED", default=True)
-
-
 def _music_fallback_lyrics_enabled():
-    return _env_bool("CONTENT_FACTORY_MUSIC_FALLBACK_LYRICS_ENABLED", default=True)
+    return _env_bool("CONTENT_FACTORY_MUSIC_FALLBACK_LYRICS_ENABLED", default=False)
 
 
 def _music_shorts_enabled():
@@ -498,10 +494,10 @@ def _music_shorts_cta_text():
 
 
 def _music_fallback_frame_mode():
-    value = os.getenv("CONTENT_FACTORY_MUSIC_FALLBACK_FRAME_MODE", "thumbnail").strip().lower()
+    value = os.getenv("CONTENT_FACTORY_MUSIC_FALLBACK_FRAME_MODE", "approved_song_image").strip().lower()
     if value in {"local", "abstract", "off"}:
         return "local"
-    return "thumbnail"
+    return "approved_song_image"
 
 
 def _parse_json_object(text):
@@ -523,6 +519,35 @@ def _parse_json_object(text):
         return {}
 
 
+def _music_shot_evidence(beat, story_brief=None, continuity=None):
+    """Keep an insert's visible instructions separate from the off-screen plot."""
+    recipe = dict(beat.get("shotRecipe") or {})
+    brief = dict(story_brief if isinstance(story_brief, dict) else beat.get("storyBrief") or {})
+    continuity = continuity if isinstance(continuity, dict) else recipe.get("continuity") or brief.get("continuity") or {}
+    if not isinstance(continuity, dict):
+        continuity = {}
+    is_insert = recipe.get("shotType") in {"environment", "detail", "abstract"}
+    moment = compact_text(beat.get("storyMoment"), 600)
+    if is_insert:
+        # The human story explains the emotion; it must not turn a landscape,
+        # abstract texture or authored hand detail back into a cast portrait.
+        moment = compact_text(recipe.get("action") or recipe.get("lyricMetaphor") or recipe.get("visualFunction"), 600)
+        recipe = {key: value for key, value in recipe.items() if key not in {
+            "storyPremise", "authoredAction", "wardrobe", "continuity", "continuityKey", "summary", "lyricMetaphor",
+        }}
+        continuity = {key: value for key, value in continuity.items() if key in {
+            "locations", "visualLanguage", "palette", "materials", "lighting", "lightProgression", "cameraDirection",
+        }}
+        brief = {
+            "referenceScope": "emotion_and_story_world_only_not_a_literal_human_action",
+            "emotion": recipe.get("storyEmotion") or recipe.get("motif") or "",
+            "visualFunction": recipe.get("visualFunction") or "",
+            "athleticStory": brief.get("athleticStory") is True,
+            "sport": brief.get("sport") or "none",
+        }
+    return {"shotRecipe": recipe, "storyBrief": brief, "continuity": continuity, "storyMoment": moment, "isInsert": is_insert}
+
+
 def _evaluate_music_frame_with_openai_vision(image_path, beat):
     if not _music_vision_qa_enabled():
         return {"enabled": False}
@@ -533,19 +558,30 @@ def _evaluate_music_frame_with_openai_vision(image_path, beat):
         mime = "image/png" if image_path.suffix.lower() == ".png" else "image/jpeg"
         encoded = base64.b64encode(image_path.read_bytes()).decode("utf-8")
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", "").strip())
+        evidence = _music_shot_evidence(beat)
         semantic_context = {
-            "storyBrief": beat.get("storyBrief") or {},
+            "storyBrief": evidence["storyBrief"],
             "athleticStory": beat.get("athleticStory") is True,
             "section": compact_text(beat.get("section"), 60),
             "lyricEvidence": compact_text(beat.get("lyric"), 260),
-            "storyMoment": compact_text(beat.get("storyMoment"), 360),
-            "shotRecipe": beat.get("shotRecipe") or {},
+            "storyMoment": compact_text(evidence["storyMoment"], 360),
+            "shotRecipe": evidence["shotRecipe"],
+            "lyricEvidenceRole": "emotional reference, not a required literal human action" if evidence["isInsert"] else "narrative evidence",
         }
         prompt = (
             "You are a strict visual QA critic for a cinematic music visualizer. "
             "Return only JSON with keys: passed boolean, score 0-100, issues array, hasReadableText boolean, "
-            "hasRandomDomesticObject boolean, brandFit 0-100, storyRelevance 0-100, hasUnauthorizedAthleticContent boolean. "
+            "hasRandomDomesticObject boolean, brandFit 0-100, storyRelevance 0-100, hasUnauthorizedAthleticContent boolean, "
+            "hasAnatomyDefect boolean, hasPhysicalInconsistency boolean, hasWatermark boolean, hasLogo boolean, hasUnrelatedContent boolean, "
+            "hardIssueCodes array containing only confirmed defects from: readable_text, unauthorized_athletic_content, "
+            "unrelated_content, random_domestic_object, anatomy_defect, physical_inconsistency, watermark, logo. "
+            "Use issues for explanations of actual defects only; never list absent defects or positive observations as issues. "
             "Story relevance is mandatory: reject an attractive image when its scene or objects contradict the story brief or locked shot. "
+            "Respect the shotRecipe shotType and visualTreatment: environment and detail shots can omit people, "
+            "and an explicitly authored abstract shot can use symbolic textures, light and patterns without a literal character. "
+            "Judge those shots against their authored action, visual function and song theme, not against an imagined requirement to show the protagonist. "
+            "For inserts, judge emotion, materials, location, light and shotType; do not require the off-screen cast, wardrobe or a literal depiction of a human action from the lyrics. "
+            "Respect the exact humanPolicy: an authored hand detail or optional distant silhouette is allowed when explicitly requested; do not apply a blanket ban on all anatomy. "
             "Strength, persistence, iron, resilience or energy in lyrics are emotional metaphors; they do not authorize a gym or sports equipment. "
             "If athleticStory is false, any gym, weightlifting apparatus, dumbbell, barbell or exercise machine is unauthorized athletic content and a hard rejection. "
             "If athleticStory is true, equipment from a different sport is still unauthorized: running does not authorize weightlifting or boxing apparatus. "
@@ -590,35 +626,21 @@ def _evaluate_music_frame_with_openai_vision(image_path, beat):
 def _vision_qa_failed(qa_result):
     if not isinstance(qa_result, dict) or not qa_result.get("enabled"):
         return False
-    issue_text = " ".join(str(item).lower() for item in (qa_result.get("issues") or []))
-    hard_markers = [
-        "readable text",
-        "fake letters",
-        "pseudo",
-        "logo",
-        "watermark",
-        "household",
-        "domestic",
-        "iron",
-        "ironing",
-        "floating",
-        "weight",
-        "dumbbell",
-        "barbell",
-        "between legs",
-        "anatomy",
-        "deformed",
-        "mismatched",
-        "scale",
-        "office clothes",
-        "stock-photo",
-        "stock photo",
-        "unrelated",
-        "irrelevant",
-        "unauthorized athletic",
-        "story mismatch",
-    ]
-    if qa_result.get("hasReadableText") is True or qa_result.get("hasRandomDomesticObject") is True or qa_result.get("hasUnauthorizedAthleticContent") is True:
+    # Free-form explanations can contain negations ("no anatomy issues") or
+    # unrelated substrings ("environment" contains "iron"). Only explicit
+    # structured defects can trigger a hard rejection.
+    hard_flags = (
+        "hasReadableText", "hasRandomDomesticObject", "hasUnauthorizedAthleticContent",
+        "hasAnatomyDefect", "hasPhysicalInconsistency", "hasWatermark", "hasLogo", "hasUnrelatedContent",
+    )
+    hard_codes = {
+        "readable_text", "unauthorized_athletic_content", "unrelated_content",
+        "random_domestic_object", "anatomy_defect", "physical_inconsistency", "watermark", "logo",
+    }
+    codes = qa_result.get("hardIssueCodes") or []
+    if not isinstance(codes, list):
+        codes = []
+    if any(qa_result.get(flag) is True for flag in hard_flags) or any(code in hard_codes for code in codes if isinstance(code, str)):
         qa_result["hardRejected"] = True
         return True
     if qa_result.get("passed") is not None:
@@ -629,9 +651,6 @@ def _vision_qa_failed(qa_result):
         if relevance is None or not math.isfinite(relevance) or relevance < _music_vision_qa_min_score():
             qa_result["hardRejected"] = True
             return True
-    if any(marker in issue_text for marker in hard_markers):
-        qa_result["hardRejected"] = True
-        return True
     try:
         score = float(qa_result.get("score"))
     except Exception:
@@ -654,11 +673,13 @@ def _vision_qa_failed(qa_result):
 
 def _qa_repair_prompt(prompt, qa_result, beat, attempt):
     issues = ", ".join(str(item) for item in (qa_result.get("issues") or [])[:8]) if isinstance(qa_result, dict) else ""
-    recipe = beat.get("shotRecipe") if isinstance(beat.get("shotRecipe"), dict) else {}
+    evidence = _music_shot_evidence(beat)
+    recipe = evidence["shotRecipe"]
     return "\n".join([
         str(prompt or ""),
         f"STRICT REPAIR PASS {attempt}. Previous QA evidence: {issues}.",
-        "Simplify the same locked scene. Keep only the authorized recurring cast, grounded objects and clear contact shadows; preserve the song's story and continuity.",
+        ("Simplify this same insert while preserving its shotType, visible action, emotion, material and location. Respect its exact humanPolicy, including any explicitly authored hand detail; do not reintroduce the off-screen cast, wardrobe or human plot action."
+         if evidence["isInsert"] else "Simplify the same locked scene. Keep only the authorized recurring cast, grounded objects and clear contact shadows; preserve the song's story and continuity."),
         "Remove objects that do not belong to the authorized story or sport. Preserve every original final constraint.",
         f"Locked shot: {json.dumps(recipe, ensure_ascii=False)}",
         f"Final constraints: {TEXT_FREE_NEGATIVE_PROMPT} No deformed anatomy or floating props. No text or logos.",
@@ -914,44 +935,12 @@ def _compose_generated_frame(source_path, output_path, palette, beat):
     return output_path.exists() and output_path.stat().st_size > 5000
 
 
-def _draw_fallback_quote(draw, quote, box, palette):
-    if not _music_fallback_quotes_enabled():
-        return False
-    quote = compact_text(quote, 92)
-    if not quote:
-        return False
-    x1, y1, x2, y2 = box
-    max_width = max(240, x2 - x1)
-    font = load_font(56, bold=True)
-    lines = _wrap_text(draw, quote, font, max_width)[:2]
-    while len(lines) > 2 and font.size > 34:
-        font = load_font(font.size - 4, bold=True)
-        lines = _wrap_text(draw, quote, font, max_width)[:2]
-    line_h = font.size + 10
-    total_h = line_h * len(lines)
-    y = min(y2 - total_h, max(y1, y2 - total_h))
-    paper = (246, 242, 232, 248)
-    accent = (*palette[1], 230)
-    draw.rounded_rectangle(
-        (x1 - 22, y - 20, x2 + 22, y + total_h + 22),
-        radius=24,
-        fill=(0, 0, 0, 96),
-        outline=(*palette[2], 105),
-        width=2,
-    )
-    draw.line((x1, y - 4, min(x2, x1 + 180), y - 4), fill=accent, width=5)
-    for line in lines:
-        draw.text((x1, y), line, font=font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 210))
-        y += line_h
-    return True
-
-
 def _fallback_overlay_text(beat):
+    # A fallback never invents a slogan. Only the actual, aligned lyric may be
+    # shown, and only when its overlay was explicitly enabled for this beat.
     if (beat.get("showLyricOverlay") or beat.get("showFallbackLyricOverlay")) and not beat.get("isInstrumentalGap"):
-        lyric = compact_text(beat.get("lyric") or beat.get("overlay"), 92)
-        if lyric:
-            return lyric
-    return compact_text(beat.get("fallbackQuote"), 92)
+        return compact_text(beat.get("lyric"), 92)
+    return ""
 
 
 def _beat_uses_fallback_lyric_overlay(beat):
@@ -963,118 +952,70 @@ def _beat_uses_fallback_lyric_overlay(beat):
 
 
 def _draw_music_visual_fallback_frame(size, palette, title, beat, seed):
-    """Text-free fallback frame used only when generated images are missing."""
-    img = _background(size, palette, seed=seed)
+    """Clean atmospheric safety background in the song's palette, never a card."""
+    # Render the soft light field at low resolution, then upscale. This has no
+    # frames, rings, random props or fabricated motivational copy.
+    rng = random.Random(seed)
+    small = Image.new("RGB", (240, 135))
+    pixels = small.load()
+    base, warm, accent = palette
+    phase = rng.uniform(-0.2, 0.2)
+    for y in range(small.height):
+        for x in range(small.width):
+            nx, ny = x / small.width, y / small.height
+            light = math.exp(-(((nx - 0.7 - phase) / 0.55) ** 2 + ((ny - 0.38) / 0.55) ** 2) * 2)
+            haze = math.exp(-((ny - nx * 0.4 - 0.3 - phase) / 0.22) ** 2) * 0.14
+            color = _blend(base, warm, min(0.48, light * 0.4))
+            pixels[x, y] = _blend(color, accent, haze)
+    img = small.resize(size, Image.Resampling.BICUBIC).filter(ImageFilter.GaussianBlur(5)).convert("RGBA")
     w, h = size
     draw = ImageDraw.Draw(img, "RGBA")
-    ember = (*palette[2], 245)
-    gold = (*palette[1], 210)
     margin = int(w * 0.055)
     lyric_font = load_font(48, bold=True)
-
-    for offset in range(0, 5):
-        alpha = max(25, 95 - offset * 16)
-        draw.rounded_rectangle(
-            (
-                margin + offset * 18,
-                margin + offset * 12,
-                w - margin - offset * 18,
-                h - margin - offset * 12,
-            ),
-            radius=32,
-            outline=(*palette[2], alpha),
-            width=2,
-        )
-    draw.line((margin, int(h * 0.72), w - margin, int(h * 0.72)), fill=gold, width=3)
-    draw.ellipse((int(w * 0.62), int(h * 0.23), int(w * 0.84), int(h * 0.62)), outline=ember, width=5)
-
     fallback_text = _fallback_overlay_text(beat)
-    if fallback_text and (beat.get("showLyricOverlay") or beat.get("showFallbackLyricOverlay")) and not beat.get("isInstrumentalGap"):
+    if fallback_text:
         y = int(h * 0.68)
         for line in _wrap_text(draw, fallback_text, lyric_font, w - margin * 2)[:2]:
             paper = (246, 242, 232, 245)
             draw.text((margin, y), line, font=lyric_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 190))
             y += lyric_font.size + 8
-    else:
-        _draw_fallback_quote(draw, fallback_text, (margin, int(h * 0.58), int(w * 0.72), h - margin - 34), palette)
     return img.convert("RGB")
 
 
-def _thumbnail_fallback_source(thumbnail_path, thumbnail_engine=""):
-    thumbnail_path = Path(thumbnail_path)
-    raw_path = thumbnail_path.with_name("thumbnail_openai_raw.jpg")
-    if str(thumbnail_engine or "").lower().startswith("openai") and raw_path.exists() and raw_path.stat().st_size > 5000:
-        return raw_path, "thumbnail_raw"
-    if (
-        str(thumbnail_engine or "").lower().startswith("openai")
-        and thumbnail_path.exists()
-        and thumbnail_path.stat().st_size > 5000
-    ):
-        return thumbnail_path, "thumbnail_cropped"
-    return None, ""
+def _approved_music_fallback_candidates(beat, approved_sources, rejected_paths=(), avoid_paths=(), usage=None):
+    """Rank only QA-approved sources from this render; never the rejected image."""
+    rejected = {Path(path).resolve() for path in rejected_paths if path}
+    avoid = {Path(path).resolve() for path in avoid_paths if path}
+    usage = usage or {}
+    candidates = [
+        item for item in (approved_sources or [])
+        if item.get("approved") is True and item.get("path")
+        and Path(item["path"]).resolve() not in rejected
+        and item.get("scene_number") != beat.get("scene_number")
+    ]
+    scene = int(beat.get("scene_number") or 0)
+    section = str(beat.get("section") or "").lower()
+    return sorted(candidates, key=lambda item: (
+        Path(item["path"]).resolve() in avoid,
+        str(item.get("section") or "").lower() != section,
+        usage.get(str(Path(item["path"]).resolve()), 0),
+        abs(int(item.get("scene_number") or 0) - scene),
+    ))
 
 
-def _compose_thumbnail_fallback_frame(thumbnail_path, output_path, palette, beat, seed, thumbnail_engine=""):
-    source_path, source_label = _thumbnail_fallback_source(thumbnail_path, thumbnail_engine=thumbnail_engine)
-    if not source_path:
-        return False, ""
-    try:
-        img = Image.open(source_path).convert("RGB")
-    except Exception:
-        return False, ""
-
-    # The final thumbnail can contain title text on the left. For video fallback
-    # frames, crop toward the visual area so the frame feels related without
-    # repeating cover typography across the whole song.
-    if source_label == "thumbnail_cropped":
-        src_w, src_h = img.size
-        crop_left = int(src_w * 0.52)
-        crop = img.crop((crop_left, 0, src_w, src_h))
-        img = _resize_cover(crop, VIDEO_SIZE)
-    else:
-        img = _resize_cover(img, VIDEO_SIZE)
-
-    img = img.convert("RGBA").filter(ImageFilter.GaussianBlur(0.55))
-    shade = Image.new("RGBA", VIDEO_SIZE, (0, 0, 0, 0))
-    px = shade.load()
-    w, h = VIDEO_SIZE
-    for y in range(h):
-        for x in range(w):
-            edge = max(abs((x / max(1, w - 1)) - 0.5), abs((y / max(1, h - 1)) - 0.5)) * 2
-            alpha = int(34 + max(0.0, edge - 0.35) * 104)
-            px[x, y] = (0, 0, 0, min(156, alpha))
-    img = Image.alpha_composite(img, shade)
-
-    draw = ImageDraw.Draw(img, "RGBA")
-    gold = (*palette[1], 125)
-    ember = (*palette[2], 145)
-    scene_number = int(beat.get("scene_number") or 0)
-    offset = (seed + scene_number * 37) % 180
-    draw.line((90 + offset, h - 96, w - 120, h - 96), fill=gold, width=3)
-    draw.rounded_rectangle((74, 64, w - 74, h - 64), radius=34, outline=ember, width=2)
-
-    fallback_text = _fallback_overlay_text(beat)
-    if fallback_text and (beat.get("showLyricOverlay") or beat.get("showFallbackLyricOverlay")) and not beat.get("isInstrumentalGap"):
-        paper = (246, 242, 232, 245)
-        lyric_font = load_font(44, bold=True)
-        y = h - 168
-        for line in _wrap_text(draw, fallback_text, lyric_font, w - 170)[:2]:
-            draw.text((84, y), line, font=lyric_font, fill=paper, stroke_width=3, stroke_fill=(0, 0, 0, 190))
-            y += 52
-    else:
-        _draw_fallback_quote(draw, fallback_text, (96, int(h * 0.61), int(w * 0.66), h - 112), palette)
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    img.convert("RGB").save(output_path, quality=93)
-    return output_path.exists() and output_path.stat().st_size > 5000, source_label
-
-
-def _write_music_fallback_frame(thumbnail_path, image_path, palette, title, beat, seed, thumbnail_engine="", *, force_local=False):
-    if not force_local and _music_fallback_frame_mode() == "thumbnail":
-        ok, source = _compose_thumbnail_fallback_frame(thumbnail_path, image_path, palette, beat, seed, thumbnail_engine=thumbnail_engine)
-        if ok:
-            return source
+def _write_music_fallback_frame(thumbnail_path, image_path, palette, title, beat, seed, thumbnail_engine="", *, force_local=False, approved_sources=None, rejected_paths=(), avoid_paths=(), usage=None):
+    # thumbnail_path/engine remain accepted for callers, but an unreviewed or
+    # rejected thumbnail can no longer enter the video as a silent fallback.
+    if not force_local and _music_fallback_frame_mode() == "approved_song_image":
+        for source in _approved_music_fallback_candidates(beat, approved_sources, rejected_paths, avoid_paths, usage):
+            overlay_beat = {**beat, "showLyricOverlay": bool(_fallback_overlay_text(beat))}
+            if _compose_generated_frame(source["path"], image_path, palette, overlay_beat):
+                beat["fallbackSourceScene"] = source["scene_number"]
+                beat["fallbackSourceFile"] = Path(source["path"]).name
+                return "approved_song_image"
     frame = _draw_music_visual_fallback_frame(VIDEO_SIZE, palette, title, beat, seed)
+    image_path = Path(image_path)
+    image_path.parent.mkdir(parents=True, exist_ok=True)
     frame.save(image_path, quality=92)
     return "local_fallback"
 
@@ -2329,19 +2270,6 @@ def _fallback_quote_pack(package):
         if len(candidates) >= 10:
             break
 
-    for phrase in [
-        "Mas rapido. Mas fuerte.",
-        "No negocies con tu excusa.",
-        "Hazlo aunque nadie mire.",
-        "El fuego tambien se entrena.",
-        "Tu disciplina habla por ti.",
-        "La fuerza se construye en silencio.",
-        "Cuando duela, sigue.",
-        "No pares antes de verte cambiar.",
-        "Convierte presion en poder.",
-        "Hoy no gana la excusa.",
-    ]:
-        add(phrase)
     return candidates[:14]
 
 
@@ -2409,8 +2337,6 @@ def _visual_story_moment(line, index, section):
     ]
     if tokens & {"cama", "despierto", "manana", "amanece", "dia"}:
         return "early morning transition from shadow to sunrise, leaving comfort behind, cinematic first action"
-    if tokens & {"pesa", "pesas", "dumbbell", "barbell", "gym", "gimnasio", "levanto"}:
-        return "grounded training detail: equipment secondary, chalk dust, breath, focused movement, realistic contact shadows, no logos"
     if tokens & {"fuego", "hierro", "sudor", "entreno", "fuerza", "golpe"}:
         return "physical power without obvious props: breath, heat, shadow, grounded stance, sunrise pressure, controlled intensity"
     if tokens & {"miedo", "duda", "caer", "excusa"}:
@@ -2435,6 +2361,8 @@ def _build_music_visual_prompt(package, beat, scene, palette):
     brief = director_plan.get("storyBrief") if isinstance(director_plan.get("storyBrief"), dict) else {}
     shot_recipe = beat.get("shotRecipe") if isinstance(beat.get("shotRecipe"), dict) else {}
     continuity = shot_recipe.get("continuity") or director_plan.get("continuity") or brief.get("continuity") or {}
+    evidence = _music_shot_evidence(beat, brief, continuity)
+    shot_recipe, brief, continuity = evidence["shotRecipe"], evidence["storyBrief"], evidence["continuity"]
     athletic_story = brief.get("athleticStory") is True
     sport = compact_text(brief.get("sport"), 60) or "none"
     story_context = {
@@ -2446,10 +2374,13 @@ def _build_music_visual_prompt(package, beat, scene, palette):
         "sport": sport,
         "listeningContextIsScenery": False,
     }
+    if evidence["isInsert"]:
+        story_context = {**brief, "listeningContextIsScenery": False}
     shot = {
         key: shot_recipe.get(key) for key in (
             "id", "category", "storyStage", "storyPremise", "storyEmotion", "subject", "humanPolicy", "wardrobe", "action",
             "location", "motif", "propRules", "composition", "camera", "physics",
+            "visualTreatment", "shotType", "visualFunction", "authoredAction", "storyBeatId",
         ) if shot_recipe.get(key)
     }
     return "\n".join([
@@ -2457,10 +2388,11 @@ def _build_music_visual_prompt(package, beat, scene, palette):
         "Follow the story brief and this single locked shot; musical genre or intended listening activity does not determine the scenery.",
         f"Story brief JSON: {json.dumps(story_context, ensure_ascii=False)}",
         f"Locked shot recipe JSON: {json.dumps(shot, ensure_ascii=False)}",
-        f"Emotional image for this beat: {compact_text(beat.get('storyMoment'), 600)}",
+        f"Emotional image for this beat: {evidence['storyMoment']}",
         f"Continuity across the song: {json.dumps(continuity, ensure_ascii=False)}",
         f"Palette: {json.dumps(video.get('palette') or list(palette), ensure_ascii=False)}",
-        "Maintain the same recurring cast, clothing, locations, light progression and motifs. Preserve any authored relationships and multi-person cast. Change camera distance and composition within that story, rather than adding unrelated scenes.",
+        ("This is an insert: maintain the established materials, place, light, palette and emotion. Do not illustrate the off-screen human plot action literally. Show only the subject and anatomy explicitly authorized by the locked humanPolicy; an authored hand detail or optional silhouette remains allowed. Do not add the cast, relationships or wardrobe as extra visible subjects."
+         if evidence["isInsert"] else "Maintain the same recurring cast, clothing, locations, light progression and motifs. Preserve any authored relationships and multi-person cast. Follow the authored shot type and action."),
         "Use believable gravity, grounded objects, contact shadows, anatomically coherent people and realistic scale.",
         (f"Only athletic actions and props belonging to the authorized sport '{sport}' may appear. Do not introduce equipment from another sport."
          if athletic_story else "Athletic scenery is not authorized: no gym, weights, exercise machines, weightlifting, boxing or training apparatus. Treat strength, persistence and iron as emotional metaphors."),
@@ -2542,12 +2474,12 @@ def _build_visual_beats(package, duration, interval_seconds, max_beats, timed_se
             "previousLine": previous_unit.get("line") if isinstance(previous_unit, dict) else "",
             "nextLine": next_unit.get("line") if isinstance(next_unit, dict) else "",
         }
-        shot_recipe = build_beat_shot_recipe(unit.get("section"), unit.get("line"), index, director_plan)
+        shot_recipe = build_beat_shot_recipe(unit.get("section"), unit.get("line"), index, director_plan, progress=(start + end) / max(0.001, 2 * duration))
         prompt_context["shotRecipe"] = shot_recipe
         lyric_moment = lyric_visual_metaphor(unit.get("section"), unit.get("line"), index, director_plan)
         story_moment = (
-            compact_text(lyric_moment, 360)
-            or compact_text(shot_recipe.get("lyricMetaphor"), 360)
+            compact_text(shot_recipe.get("lyricMetaphor"), 360)
+            or compact_text(lyric_moment, 360)
             or _visual_story_moment(unit.get("line"), index, unit.get("section"))
             or compact_text(shot_recipe.get("summary"), 360)
         )
@@ -2896,6 +2828,70 @@ def _regenerate_openai_beat_image(beat, images_dir):
     return stats
 
 
+def _prepare_music_visual_sources(beats, openai_dir, comfy_dir, assets_dir, palette, policy, openai_stats, vision_qa_max_frames):
+    """Approve source imagery before overlays or assembly, then expose a safe pool."""
+    records, qa_results = [], []
+    regenerated = 0
+    for index, beat in enumerate(beats, start=1):
+        scene = int(beat.get("scene_number") or index)
+        openai_path = Path(openai_dir) / f"scene_{scene:04d}.jpg"
+        comfy_path = Path(comfy_dir) / f"scene_{scene:04d}.png"
+        preview_path = Path(assets_dir) / f"beat_{index:03d}.jpg"
+        candidates = []
+        if policy.visual_provider == "openai_images":
+            if scene in openai_stats.get("availableScenes", []):
+                candidates.append(("openai_images", openai_path))
+            if policy.allow_comfy:
+                candidates.append(("comfy", comfy_path))
+        else:
+            candidates.extend((("comfy", comfy_path), ("openai_images", openai_path)))
+        record = {"scene_number": scene, "section": beat.get("section"), "source": "", "path": None, "approved": False, "qaRejected": False}
+        clean_beat = {**beat, "showLyricOverlay": False, "showFallbackLyricOverlay": False}
+        for source, source_path in candidates:
+            if source_path.exists() and source_path.stat().st_size > 5000 and _compose_generated_frame(source_path, preview_path, palette, clean_beat):
+                record.update({"source": source, "path": source_path})
+                break
+        if record["path"] is not None and vision_qa_max_frames and len(qa_results) < vision_qa_max_frames:
+            # Critique the raw provider image, never lyrics or branding that the
+            # application itself will add after the source has been approved.
+            qa_result = _evaluate_music_frame_with_openai_vision(record["path"], clean_beat)
+            qa_result.update({"index": index, "source": record["source"], "evaluatedLayer": "source_image"})
+            qa_failed = _vision_qa_failed(qa_result)
+            if qa_failed:
+                repairs = []
+                for attempt in range(1, _music_vision_qa_regen_attempts() + 1):
+                    original_prompt = beat.get("prompt") or ""
+                    beat["prompt"] = _qa_repair_prompt(original_prompt, qa_result, beat, attempt)
+                    beat["promptGate"] = prompt_gate_for_recipe(beat["prompt"], beat.get("shotRecipe") or {})
+                    if record["source"] == "openai_images":
+                        repair = _regenerate_openai_beat_image(beat, openai_dir)
+                    elif policy.allow_comfy:
+                        repair = _regenerate_comfy_beat_image(beat, comfy_dir, production_policy=policy)
+                    else:
+                        break
+                    repairs.append(repair)
+                    if repair.get("success") and _compose_generated_frame(record["path"], preview_path, palette, clean_beat):
+                        regenerated += 1
+                        repaired = _evaluate_music_frame_with_openai_vision(record["path"], clean_beat)
+                        repaired.update({"index": index, "source": f"{record['source']}_repaired", "evaluatedLayer": "source_image", "repairedFrom": qa_result})
+                        qa_result = repaired
+                        qa_failed = _vision_qa_failed(qa_result)
+                        if not qa_failed:
+                            break
+                    else:
+                        beat["prompt"] = original_prompt
+                qa_result["repairAttempts"] = repairs
+                if qa_failed:
+                    record["qaRejected"] = True
+                    record["rejectedPath"] = record["path"]
+                    record["path"] = None
+            record["approved"] = bool(record["path"] is not None and qa_result.get("passed") is True and not qa_result.get("error") and not qa_failed and not qa_result.get("softAccepted"))
+            record["qa"] = qa_result
+            qa_results.append(qa_result)
+        records.append(record)
+    return records, qa_results, regenerated
+
+
 def _prepare_music_story_for_render(package, *, cache_path=None):
     try:
         from scripts.power_music_story import prepare_music_story
@@ -3000,116 +2996,54 @@ def render_power_music_video(track_id, package, audio_path, output_dir, *, produ
     comfy_generated_frames = 0
     fallback_frames = 0
     thumbnail_fallback_frames = 0
+    approved_song_fallback_frames = 0
     local_fallback_frames = 0
     fallback_lyric_overlay_frames = 0
-    vision_qa_results = []
-    qa_regenerated_frames = 0
     qa_replaced_frames = 0
     vision_qa_max_frames = _music_vision_qa_max_frames() if _music_vision_qa_enabled() else 0
+    sources, vision_qa_results, qa_regenerated_frames = _prepare_music_visual_sources(
+        beats, openai_dir, comfy_dir, assets_dir, palette, policy, openai_stats, vision_qa_max_frames,
+    )
+    approved_sources = [source for source in sources if source["approved"]]
+    source_usage = {}
+    previous_source_path = None
     for index, beat in enumerate(beats, start=1):
         image_path = assets_dir / f"beat_{index:03d}.jpg"
         segment_path = segments_dir / f"segment_{index:03d}.mp4"
-        openai_path = openai_dir / f"scene_{index:04d}.jpg"
-        comfy_path = comfy_dir / f"scene_{index:04d}.png"
-        frame_source = ""
-        generated_source = ""
-        source_candidates = []
-        if preferred_visual_provider == "openai_images":
-            if int(beat.get("scene_number") or index) in openai_stats.get("availableScenes", []):
-                source_candidates.append(("openai_images", openai_path))
-            if policy.allow_comfy:
-                source_candidates.append(("comfy", comfy_path))
-        else:
-            source_candidates.append(("comfy", comfy_path))
-            source_candidates.append(("openai_images", openai_path))
-        for candidate_source, candidate_path in source_candidates:
-            if candidate_path.exists() and candidate_path.stat().st_size > 5000 and _compose_generated_frame(candidate_path, image_path, palette, beat):
-                generated_source = candidate_source
-                frame_source = candidate_source
-                break
-        if generated_source:
+        source = sources[index - 1]
+        source_path = source["path"]
+        frame_source = source["source"] if source_path is not None else ""
+        if source_path is not None and _compose_generated_frame(source_path, image_path, palette, beat):
             generated_frames += 1
-            if generated_source == "openai_images":
+            if frame_source == "openai_images":
                 openai_generated_frames += 1
-            elif generated_source == "comfy":
+            elif frame_source == "comfy":
                 comfy_generated_frames += 1
         else:
-            frame_source = _write_music_fallback_frame(thumbnail_path, image_path, palette, title, beat, 100 + index, thumbnail_engine=thumbnail_engine)
+            next_source_path = sources[index]["path"] if index < len(sources) else None
+            frame_source = _write_music_fallback_frame(
+                thumbnail_path, image_path, palette, title, beat, 100 + index,
+                thumbnail_engine=thumbnail_engine, approved_sources=approved_sources,
+                rejected_paths=(source.get("rejectedPath"), source_path),
+                avoid_paths=(previous_source_path, next_source_path), usage=source_usage,
+            )
             fallback_frames += 1
             if _beat_uses_fallback_lyric_overlay(beat):
                 fallback_lyric_overlay_frames += 1
-            if frame_source.startswith("thumbnail"):
-                thumbnail_fallback_frames += 1
+            if frame_source == "approved_song_image":
+                approved_song_fallback_frames += 1
+                source_path = next((item["path"] for item in approved_sources if item["scene_number"] == beat.get("fallbackSourceScene")), None)
             else:
                 local_fallback_frames += 1
-
-        if vision_qa_max_frames and len(vision_qa_results) < vision_qa_max_frames:
-            qa_result = _evaluate_music_frame_with_openai_vision(image_path, beat)
-            qa_result["index"] = index
-            qa_result["source"] = frame_source
-            if _vision_qa_failed(qa_result):
-                repair_attempts = []
-                qa_result["repairAttempts"] = repair_attempts
-                for attempt in range(1, _music_vision_qa_regen_attempts() + 1):
-                    if frame_source not in {"openai_images", "comfy"}:
-                        break
-                    original_prompt = beat.get("prompt") or ""
-                    beat["prompt"] = _qa_repair_prompt(original_prompt, qa_result, beat, attempt)
-                    beat["promptGate"] = prompt_gate_for_recipe(beat["prompt"], beat.get("shotRecipe") or {})
-                    if frame_source == "openai_images":
-                        repair_stats = _regenerate_openai_beat_image(beat, openai_dir)
-                        repair_path = openai_path
-                    elif policy.allow_comfy:
-                        repair_stats = _regenerate_comfy_beat_image(beat, comfy_dir, production_policy=policy)
-                        repair_path = comfy_path
-                    else:
-                        break
-                    repair_attempts.append(repair_stats)
-                    if repair_stats.get("success") and _compose_generated_frame(repair_path, image_path, palette, beat):
-                        qa_regenerated_frames += 1
-                        repaired_qa = _evaluate_music_frame_with_openai_vision(image_path, beat)
-                        repaired_qa["index"] = index
-                        repaired_qa["source"] = f"{frame_source}_repaired"
-                        repaired_qa["repairAttempts"] = repair_attempts
-                        repaired_qa["repairedFrom"] = qa_result
-                        qa_result = repaired_qa
-                        if not _vision_qa_failed(qa_result):
-                            break
-                    else:
-                        beat["prompt"] = original_prompt
-                qa_result["repairAttempts"] = repair_attempts
-                if _vision_qa_failed(qa_result):
-                    replacement_source = _write_music_fallback_frame(
-                        thumbnail_path,
-                        image_path,
-                        palette,
-                        title,
-                        beat,
-                        800 + index,
-                        thumbnail_engine=thumbnail_engine,
-                        force_local=True,
-                    )
-                    qa_replaced_frames += 1
-                    if frame_source == "openai_images":
-                        openai_generated_frames -= 1
-                        generated_frames -= 1
-                    elif frame_source == "comfy":
-                        comfy_generated_frames -= 1
-                        generated_frames -= 1
-                    if frame_source not in {"local_fallback", "thumbnail_raw", "thumbnail_cropped"}:
-                        fallback_frames += 1
-                        if _beat_uses_fallback_lyric_overlay(beat):
-                            fallback_lyric_overlay_frames += 1
-                        if replacement_source.startswith("thumbnail"):
-                            thumbnail_fallback_frames += 1
-                        else:
-                            local_fallback_frames += 1
-                    elif frame_source.startswith("thumbnail") and replacement_source == "local_fallback":
-                        thumbnail_fallback_frames -= 1
-                        local_fallback_frames += 1
-                    qa_result["replacement"] = f"{replacement_source}_after_vision_qa"
-                    frame_source = replacement_source
-            vision_qa_results.append(qa_result)
+                source_path = None
+            beat["needsVisualReview"] = True
+            if source["qaRejected"]:
+                qa_replaced_frames += 1
+                source["qa"]["replacement"] = f"{frame_source}_after_vision_qa"
+        if source_path is not None:
+            source_key = str(Path(source_path).resolve())
+            source_usage[source_key] = source_usage.get(source_key, 0) + 1
+        previous_source_path = source_path
         beat["renderSource"] = frame_source
 
         segment_duration = max(0.5, float(beat.get("duration") or visual_interval))
@@ -3246,7 +3180,7 @@ def render_power_music_video(track_id, package, audio_path, output_dir, *, produ
     if openai_stats.get("modelFallbacks"):
         render_warnings.append("OpenAI utilizó un modelo alternativo; consulta openaiImages.modelFallbacks para ver el motivo y el modelo efectivo.")
     if fallback_frames:
-        render_warnings.append(f"{fallback_frames} escenas usan recursos de respaldo locales o la miniatura en lugar de imágenes aprobadas.")
+        render_warnings.append(f"{fallback_frames} escenas fueron sustituidas: {approved_song_fallback_frames} reutilizan otra imagen aprobada de la canción y {local_fallback_frames} usan un fondo atmosférico local. Revisa estas escenas antes de publicar.")
     if thumbnail_engine == "local_exact_overlay_fallback":
         render_warnings.append(f"La miniatura usa diseño local: {thumbnail_diagnostics.get('error') or 'no se pudo completar la imagen OpenAI'}")
     if thumbnail_diagnostics.get("fallbackReason"):
@@ -3257,6 +3191,13 @@ def render_power_music_video(track_id, package, audio_path, output_dir, *, produ
         render_warnings.append("No se pudo completar parte de la revisión visual OpenAI; consulta visionQa.results.")
     if qa_replaced_frames:
         render_warnings.append(f"La revisión visual rechazó {qa_replaced_frames} escenas y se usaron recursos de respaldo.")
+    unreviewed_sources = sum(1 for source in sources if source["path"] is not None and (source.get("qa") or {}).get("passed") not in (True, False)) if vision_qa_max_frames else 0
+    visual_review_required = bool(fallback_frames or (vision_qa_max_frames and any(
+        (source.get("qa") or {}).get("passed") is not True or (source.get("qa") or {}).get("softAccepted")
+        for source in sources
+    )))
+    if unreviewed_sources:
+        render_warnings.append(f"{unreviewed_sources} escenas generadas quedaron sin una revisión visual completa por error o por límite de revisión. Revísalas antes de publicar.")
     metadata = {
         "trackId": track_id,
         "productionProfile": policy.name,
@@ -3282,11 +3223,16 @@ def render_power_music_video(track_id, package, audio_path, output_dir, *, produ
         "comfyGeneratedFrames": comfy_generated_frames,
         "fallbackFrames": fallback_frames,
         "thumbnailFallbackFrames": thumbnail_fallback_frames,
+        "approvedSongFallbackFrames": approved_song_fallback_frames,
+        "approvedVisualSources": len(approved_sources),
         "localFallbackFrames": local_fallback_frames,
         "fallbackLyricOverlayFrames": fallback_lyric_overlay_frames,
         "fallbackFrameMode": _music_fallback_frame_mode(),
-        "renderer": "power_music_video_v5_shot_controlled_vision_qa",
-        "visualizerMode": "symbolic_premium_text_free_director_v4",
+        "visualReviewRequired": visual_review_required,
+        "unreviewedSourceFrames": unreviewed_sources,
+        "fallbackDurationSeconds": round(sum(float(beat.get("duration") or 0) for beat in beats if beat.get("needsVisualReview")), 3),
+        "renderer": "power_music_video_v6_source_qa_approved_fallback",
+        "visualizerMode": "song_story_text_free_source_qa_v6",
         "directorVersion": DIRECTOR_VERSION,
         "musicVideoDirector": director_plan,
         "songVisualSeed": director_plan.get("songVisualSeed") if isinstance(director_plan, dict) else None,
@@ -3328,6 +3274,9 @@ def render_power_music_video(track_id, package, audio_path, output_dir, *, produ
                 "promptGate": beat.get("promptGate"),
                 "prompt": beat.get("prompt"),
                 "renderSource": beat.get("renderSource"),
+                "fallbackSourceScene": beat.get("fallbackSourceScene"),
+                "fallbackSourceFile": beat.get("fallbackSourceFile"),
+                "needsVisualReview": bool(beat.get("needsVisualReview")),
             }
             for beat in beats
         ],
@@ -3370,9 +3319,14 @@ def render_power_music_video(track_id, package, audio_path, output_dir, *, produ
         "comfyGeneratedFrames": metadata["comfyGeneratedFrames"],
         "fallbackFrames": fallback_frames,
         "thumbnailFallbackFrames": thumbnail_fallback_frames,
+        "approvedSongFallbackFrames": approved_song_fallback_frames,
+        "approvedVisualSources": metadata["approvedVisualSources"],
         "localFallbackFrames": local_fallback_frames,
         "fallbackLyricOverlayFrames": metadata["fallbackLyricOverlayFrames"],
         "fallbackFrameMode": metadata["fallbackFrameMode"],
+        "visualReviewRequired": metadata["visualReviewRequired"],
+        "unreviewedSourceFrames": metadata["unreviewedSourceFrames"],
+        "fallbackDurationSeconds": metadata["fallbackDurationSeconds"],
         "openaiImages": openai_stats,
         "comfy": comfy_stats,
         "renderer": metadata["renderer"],

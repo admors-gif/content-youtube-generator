@@ -4,16 +4,20 @@ import re
 from datetime import datetime, timezone
 
 try:
-    from scripts.power_music_director import enrich_package_with_director_plan, normalize_storyboard
+    from scripts.power_music_director import enrich_package_with_director_plan, normalize_storyboard, resolve_visual_treatment
 except Exception:  # pragma: no cover - keeps legacy local imports safe
     try:
-        from power_music_director import enrich_package_with_director_plan, normalize_storyboard
+        from power_music_director import enrich_package_with_director_plan, normalize_storyboard, resolve_visual_treatment
     except Exception:  # pragma: no cover
         def enrich_package_with_director_plan(package, payload=None):
             return package
 
         def normalize_storyboard(value):
             return {}
+
+        def resolve_visual_treatment(package=None, payload=None, *, default="narrative"):
+            value = (payload or {}).get("visualTreatment") or ((package or {}).get("videoConcept") or {}).get("visualTreatment") or default
+            return value if value in {"narrative", "hybrid", "abstract"} else default
 
 
 DEFAULT_LANGUAGE = "es"
@@ -196,6 +200,7 @@ def build_generation_prompt(payload: dict) -> str:
         "style": style,
         "targetUse": target_use,
         "visualBrief": visual_brief,
+        "visualTreatment": resolve_visual_treatment(payload=payload, default="hybrid"),
         "energy": energy,
         "vocalPerspective": vocal_perspective,
         "personalAngle": personal_angle,
@@ -219,6 +224,10 @@ REQUISITOS DE CALIDAD:
 - La letra debe estar optimizada para Suno: secciones claras entre corchetes.
 - El prompt Suno debe ser copiables y en ingles, porque Suno suele responder mejor a descripciones musicales en ingles.
 - Crea una historia cinematografica relacionada con la letra completa: protagonista, situacion inicial, decision y cierre emocional. Define 2 o 3 lugares conectados y un vestuario consistente.
+- Respeta visualTreatment: narrative cuenta la historia con el reparto; hybrid combina momentos humanos con ambientes, detalles tactiles y abstracciones de luz/materiales del mismo mundo; abstract expresa el arco emocional sin personas ni objetos literales. El predeterminado para canciones nuevas es hybrid.
+- En hybrid, dedica como maximo un tercio de los planos al personaje; alterna sujetos, acciones y escalas reales, no solo lentes o poses de la misma persona. En abstract conserva la relacion emocional con la letra y la identidad visual, no un collage aleatorio.
+- Cada beat indica shotType (character, environment, detail o abstract), subject concreto y function editorial. En planos environment/abstract no incluyas personas. Un detail puede mostrar una tarea significativa del relato con solo las manos u otras partes del reparto que requiere, sus objetos y su accion, sin retrato completo. No uses hombre en azotea o sentado en una cama como respuesta universal.
+- Para una cancion completa de 2-4 minutos, planifica 12-18 beats visuales distintos: normalmente 2-3 por seccion larga y desarrollo nuevo al repetir el coro. Para extractos cortos usa menos. No cuentes simples cambios de lente o pose como situaciones nuevas.
 - targetUse describe cuando se escucha la cancion; no determina la historia ni autoriza escenas deportivas. El estilo musical tampoco determina objetos o escenarios.
 - Las imagenes visuales deben ser text-free: nunca pidas letras, palabras, carteles, logos, pantallas con texto ni tipografia dentro de la imagen.
 - No conviertas cada frase en un objeto. Agrupa las secciones en un arco emocional y expresa los cambios mediante acciones, expresiones, luz y encuadres del mismo mundo.
@@ -233,6 +242,7 @@ REQUISITOS DE CALIDAD:
 - La miniatura debe tener una frase de click fuerte de 2 a 6 palabras; el texto final lo renderiza la app, no la IA de imagen.
 
 JSON SCHEMA EXACTO:
+Los cuatro beats siguientes ilustran solamente la forma de cada objeto; no son un limite de cantidad. Completa beats segun la duracion y el desarrollo de la cancion.
 {{
   "title": "titulo de la cancion",
   "subtitle": "promesa corta",
@@ -249,6 +259,7 @@ JSON SCHEMA EXACTO:
   "negativePrompt": "English negative style prompt...",
   "coverPrompt": "prompt visual 1:1 premium para portada",
   "videoConcept": {{
+    "visualTreatment": "{contract['visualTreatment']}",
     "visualIdentity": "identidad visual",
     "visualWorld": "lugares y ambiente concretos relacionados con el tema de la letra",
     "sceneStrategy": "historia cinematografica en bloques emocionales, protagonista y lugares consistentes, cero texto generado",
@@ -261,10 +272,10 @@ JSON SCHEMA EXACTO:
       "wardrobe": "vestuario concreto y consistente del reparto",
       "locations": ["lugar concreto A", "lugar conectado B"],
       "beats": [
-        {{"section": "Intro", "location": "lugar concreto A", "action": "accion observable de apertura", "emotion": "estado emocional inicial"}},
-        {{"section": "Verse 1", "location": "lugar concreto A", "action": "accion relacionada con la historia", "emotion": "tension de la historia"}},
-        {{"section": "Chorus", "location": "lugar conectado B", "action": "decision visible o interaccion que expresa el coro", "emotion": "cambio emocional"}},
-        {{"section": "Final", "location": "lugar conectado B", "action": "accion concreta que resuelve la historia", "emotion": "estado final"}}
+        {{"section": "Intro", "location": "lugar concreto A", "action": "accion observable de apertura", "emotion": "estado emocional inicial", "shotType": "environment", "subject": "entorno concreto que presenta la historia", "function": "abrir el mundo visual"}},
+        {{"section": "Verse 1", "location": "lugar concreto A", "action": "accion relacionada con la historia", "emotion": "tension de la historia", "shotType": "character", "subject": "reparto concreto realizando esa accion", "function": "hacer visible la decision"}},
+        {{"section": "Chorus", "location": "lugar conectado B", "action": "decision visible o interaccion que expresa el coro", "emotion": "cambio emocional", "shotType": "abstract", "subject": "luz y materiales del lugar que expresan la emocion", "function": "dar amplitud visual al coro"}},
+        {{"section": "Final", "location": "lugar conectado B", "action": "accion concreta que resuelve la historia", "emotion": "estado final", "shotType": "detail", "subject": "detalle existente que cierra el motivo visual", "function": "resolver la identidad visual"}}
       ]
     }},
     "scenes": [
@@ -440,6 +451,7 @@ def normalize_package(data: dict, payload: dict | None = None) -> dict:
         "negativePrompt": compact_text(data.get("negativePrompt"), 500) or "no imitation of real artists, no copyrighted melody, no sad ending, no romantic dependency, no medical claims, no readable text in visuals",
         "coverPrompt": compact_text(data.get("coverPrompt"), 900),
         "videoConcept": {
+            "visualTreatment": resolve_visual_treatment(data, payload, default="hybrid" if payload else "narrative"),
             "userVisualDirection": compact_text(video.get("userVisualDirection"), 600),
             "userStoryContext": compact_text(video.get("userStoryContext"), 300),
             "storyboard": normalize_storyboard(video.get("storyboard")),
@@ -518,6 +530,7 @@ def fallback_package(payload: dict | None = None) -> dict:
         "negativePrompt": "no imitation of real artists, no copyrighted melody, no sad ending, no romantic dependency, no medical claims",
         "coverPrompt": "Cinematic song cover, one adult protagonist in a familiar neighborhood setting, a quiet decision expressed through posture and changing natural light, emotionally grounded, no readable text, no logos",
         "videoConcept": {
+            "visualTreatment": resolve_visual_treatment(payload=payload, default="hybrid"),
             "visualIdentity": "cinematic personal story, a recurring adult protagonist and connected familiar places",
             "visualWorld": "a familiar room, its courtyard and the neighboring street, changing from cool morning light to warmer daylight",
             "sceneStrategy": "Develop a decision and emotional resolution in the same story world. Keep generated images text-free.",
@@ -668,6 +681,7 @@ def build_imported_song_package(payload: dict | None = None) -> dict:
         "coverPrompt": compact_text(payload.get("coverPrompt"), 900)
         or f"Premium cinematic cover for {title}, {visual_identity}, powerful subject, dramatic light, no readable text, no logos",
         "videoConcept": {
+            "visualTreatment": resolve_visual_treatment(payload=payload, default="hybrid"),
             "visualIdentity": visual_identity,
             "visualWorld": "connected locations belonging to the song's emotional story",
             "sceneStrategy": "Develop a cinematic story across song sections, preserving protagonist and location continuity. Do not literalize every lyric line. Generated images must be text-free.",

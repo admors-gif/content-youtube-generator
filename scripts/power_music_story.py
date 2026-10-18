@@ -7,10 +7,10 @@ import os
 import tempfile
 from pathlib import Path
 
-from scripts.power_music_director import build_story_brief, normalize_storyboard, storyboard_sports
+from scripts.power_music_director import build_story_brief, normalize_storyboard, storyboard_sports, resolve_visual_treatment
 
 
-STORY_VERSION = "music_storyboard_v1"
+STORY_VERSION = "music_storyboard_v2_visual_treatment"
 STORY_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -29,8 +29,11 @@ STORY_SCHEMA = {
                     "location": {"type": "string"},
                     "action": {"type": "string"},
                     "emotion": {"type": "string"},
+                    "shotType": {"type": "string", "enum": ["character", "environment", "detail", "abstract"]},
+                    "subject": {"type": "string"},
+                    "function": {"type": "string"},
                 },
-                "required": ["section", "location", "action", "emotion"],
+                "required": ["section", "location", "action", "emotion", "shotType", "subject", "function"],
             },
         },
     },
@@ -43,9 +46,24 @@ Return the requested JSON storyboard, in English, without rewriting the lyrics.
 Respect explicitVisualDirection first; infer a coherent story from the full song when it is empty.
 Keep the actual people, relationships, places and actions that matter to this song.
 Use one recurring protagonist or a small recurring cast, specific appearance and wardrobe,
-2-3 connected locations, and 4-8 beats with a beginning, development and emotional resolution.
+2-3 connected locations and a beginning, development and emotional resolution.
+For a complete 2-4 minute song, plan 12-18 distinct visual beats: typically 2-3 for a long
+section, with new visual development when a chorus repeats. Use fewer beats for a short excerpt.
+These are meaningful visual situations and editorial inserts, not more camera lenses on one pose.
 Keep section names from the song. Every beat.location must exactly match a locations entry.
 Scenes must show a concrete, meaningful action; do not default every song to walking toward sunlight.
+Respect visualTreatment. In narrative, preserve the authored cast and meaningful actions.
+In hybrid, combine a small number of human moments with environment inserts, tactile details
+and intentional nonfigurative images of light, reflections and material from that same world.
+Use at least three shot types and put the person in no more than one third of the beats.
+In abstract, use no visible people; translate the song's emotional progression into a coherent
+visual motif and a changing scale of light, texture and color, not a collage of random objects.
+Each beat has shotType (character, environment, detail or abstract), a concrete visual subject
+and an editorial function. Environment and abstract shots keep the cast off screen.
+Details can show a meaningful authored task, including only the cropped hands or other cast
+parts it requires and the established props; preserve that subject and action without a full portrait.
+Vary the subject and action, not merely the camera lens or the same man's pose.
+Do not default to a man on a rooftop or sitting on a bed.
 Listening context, musical genre, tempo and energy are not story settings.
 Strength, the weight of the past, rising and fighting for oneself are usually emotional metaphors.
 Do not add exercise machines, weights, gyms, sports or literal objects from those metaphors.
@@ -66,6 +84,7 @@ def _story_input(package):
         "athleticStory": brief["athleticStory"],
         "authorizedSport": brief["sport"],
         "authorizedSports": brief["authorizedSports"],
+        "visualTreatment": resolve_visual_treatment(package),
     }
 
 
@@ -143,7 +162,7 @@ def prepare_music_story(package, *, client=None, cache_path=None):
         if not isinstance(data, dict):
             raise ValueError("story_planner_invalid_object")
         storyboard = normalize_storyboard({
-            **data, "contentVersion": STORY_VERSION, "source": "openai_story_planner",
+            **data, "contentVersion": "music_storyboard_v1", "source": "openai_story_planner",
             "inputSignature": signature,
         })
         if not storyboard:

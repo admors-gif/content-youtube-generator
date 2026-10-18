@@ -12,6 +12,11 @@ import {
 
 const MUSIC_STUDIO_ENABLED = process.env.NEXT_PUBLIC_CONTENT_FACTORY_MUSIC_STUDIO_ENABLED !== "false";
 const MUSIC_PRODUCTION_PROFILE = "openai_only";
+const VISUAL_TREATMENTS = [
+  { id: "hybrid", label: "Mixto: historia e imagenes simbolicas" },
+  { id: "narrative", label: "Historia con personajes" },
+  { id: "abstract", label: "Abstracto y atmosferico" },
+];
 
 const DEFAULT_FORM = {
   intention: "disciplina",
@@ -27,6 +32,7 @@ const DEFAULT_FORM = {
   mustAvoid:
     "promesas medicas, bajar de peso como castigo, imitacion de artistas reales, lenguaje vulgar gratuito",
   visualBrief: "",
+  visualTreatment: "hybrid",
 };
 
 const DEFAULT_IMPORT_FORM = {
@@ -36,6 +42,7 @@ const DEFAULT_IMPORT_FORM = {
   style: "latin_trap_anthem",
   energy: "alta, elegante, cinematica",
   visualIdentity: "",
+  visualTreatment: "hybrid",
   lyrics: "",
 };
 
@@ -512,6 +519,7 @@ function openaiImagesLabel(render) {
 function directorVersionLabel(version) {
   const value = safeText(version).toLowerCase();
   if (!value) return "";
+  if (value.includes("director_v7")) return "Director v7 · variedad visual";
   if (value.includes("director_v6")) return "Director v6 · historia";
   if (value.includes("director_v5")) return "Director v5";
   if (value.includes("director_v4") || value.includes("song_seed_lyric_metaphor")) return "Director v4";
@@ -1583,6 +1591,12 @@ export default function MusicStudioPage() {
               <TextArea label="Angulo personal" value={form.personalAngle} onChange={(value) => updateForm("personalAngle", value)} rows={4} />
               <TextArea label="Debe incluir" value={form.mustInclude} onChange={(value) => updateForm("mustInclude", value)} rows={3} />
               <TextArea label="Evitar" value={form.mustAvoid} onChange={(value) => updateForm("mustAvoid", value)} rows={3} />
+              <SelectField
+                label="Estilo del video"
+                value={form.visualTreatment}
+                onChange={(value) => updateForm("visualTreatment", value)}
+                options={VISUAL_TREATMENTS}
+              />
               <TextArea
                 label="Historia visual (opcional)"
                 value={form.visualBrief}
@@ -1591,7 +1605,7 @@ export default function MusicStudioPage() {
                 rows={3}
               />
               <p className="cf-music-helper" style={{ margin: 0 }}>
-                El video sigue la historia de la letra. El uso de escucha, como entrenar o trabajar, no define sus escenas.
+                El estilo mixto alterna personajes, ambientes y detalles simbolicos. El uso de escucha, como entrenar o trabajar, no define las escenas.
               </p>
 
               <button
@@ -1635,6 +1649,12 @@ export default function MusicStudioPage() {
                 />
               </div>
               <Field label="Energia visual" value={importForm.energy} onChange={(value) => updateImportForm("energy", value)} />
+              <SelectField
+                label="Estilo del video"
+                value={importForm.visualTreatment}
+                onChange={(value) => updateImportForm("visualTreatment", value)}
+                options={VISUAL_TREATMENTS}
+              />
               <TextArea
                 label="Historia e identidad visual (opcional)"
                 value={importForm.visualIdentity}
@@ -1898,7 +1918,7 @@ export default function MusicStudioPage() {
                 )}
                 {Array.isArray(renderPanel?.renderWarnings) && renderPanel.renderWarnings.length > 0 && (
                   <div className="cf-card" style={{ padding: "var(--s-4)", marginBottom: "var(--s-4)", borderColor: "var(--ember)" }}>
-                    <strong>{renderPanel.degradedOutput ? "Video generado con recursos de respaldo" : "Avisos de produccion"}</strong>
+                    <strong>{renderPanel.visualReviewRequired ? "Revisa las imagenes antes de publicar" : renderPanel.degradedOutput ? "Video generado con recursos de respaldo" : "Avisos de produccion"}</strong>
                     <ul style={{ marginBottom: 0 }}>
                       {renderPanel.renderWarnings.map((warning, index) => (
                         <li key={`${index}-${String(warning)}`}>{String(warning)}</li>

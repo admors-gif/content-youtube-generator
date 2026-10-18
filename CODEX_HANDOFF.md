@@ -48,10 +48,11 @@ Infra principal:
 
 - Referencia vigente: `docs/power-music-openai-2026-10.md`; las notas Music v1/v4 de abajo son historial.
 - Suno manual, perfil `openai_only` fijado desde API/Celery hasta el renderer. No Comfy, ElevenLabs ni Deepgram en este perfil.
-- Director v6 conserva storyboard semantico; compositor entrega relato estructurado, y `scripts/power_music_story.py` planifica canciones importadas/antiguas mediante OpenAI.
-- Imagenes/miniatura: GPT Image 2.5 Flare configurable, con respaldos OpenAI; el planificador de texto usa GPT-6 Luna configurable. No se comprobo acceso/saldo de la cuenta con generacion pagada durante esta revision.
-- QA evalua relevancia narrativa; rechazos persistentes pasan a recurso procedural y se informan como salida degradada. Cache firmada por prompt/modelos/director.
-- Pruebas de Musica: `tests/test_music_dispatch_policy.py`, `tests/test_power_music_production_policy.py`, `tests/test_power_music_story_director.py`, `tests/test_power_music_story_planner.py`.
+- Director v7 conserva storyboard semantico y ofrece tratamientos mixto, narrativo y abstracto. Predeterminado mixto para canciones nuevas; antiguas conservan narrativo. Cada beat distingue personaje, ambiente, detalle o abstraccion y su funcion. `scripts/power_music_story.py` planifica canciones importadas/antiguas mediante OpenAI.
+- Imagenes/miniatura: GPT Image 2.5 Flare configurable, con respaldos OpenAI; planificador de texto GPT-6 Luna configurable. Una prueba del usuario genero 39 imagenes y MP4. No se presupone saldo permanente.
+- La prueba real de 191.1 s tenia 21/39 tarjetas y solo cinco situaciones repetidas. QA v6 del renderer evalua fuentes antes de overlays y usa defectos estructurados, sin falsos positivos por subcadenas. El respaldo intenta otra imagen aprobada de la cancion; si no hay, fondo atmosferico sin marcos ni lemas. Expone contadores, avisos y revision visual pendiente. Cache firmada por prompt/modelos/director.
+- Pruebas de Musica: `tests/test_music_dispatch_policy.py`, `tests/test_power_music_production_policy.py`, `tests/test_power_music_story_director.py`, `tests/test_power_music_story_planner.py`, `tests/test_power_music_visual_variety.py`, `tests/test_music_visual_fallback.py`.
+- Falta validar artisticamente una muestra v7. El MP4 original no cambia automaticamente. La aprobacion interactiva de storyboard/referencias y el presupuesto por render siguen pendientes.
 - Desarrollo desde casa: en `web/`, `npm run dev:remote -- --hostname 127.0.0.1 --port 3001`, abrir `http://localhost:3001/dashboard/music`. Usa API del VPS; no requiere backend local.
 - La adquisicion del tab localhost por automatizacion fue rechazada por politica de seguridad en esta sesion; no intentar rodear ese bloqueo por otro navegador/CDP/lectura de perfil. Se verificaron codigo, pruebas y build.
 

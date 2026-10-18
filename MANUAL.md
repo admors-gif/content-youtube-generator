@@ -7,7 +7,7 @@
 **Repo:** `https://github.com/admors-gif/content-youtube-generator`
 **Tag de rollback:** `pre-migration-2026-05-01` (commit `099a25f`)
 
-**Musica:** Suno permanece manual. El perfil `openai_only` usa OpenAI para imagenes, miniatura, planificacion de historias importadas y alineacion opcional; excluye Comfy y ElevenLabs en este modulo. El director v6 conserva el storyboard del compositor y separa narrativa de contexto de escucha. Configuracion, limitaciones, evaluacion y fuentes actuales: [Musica con OpenAI — octubre de 2026](docs/power-music-openai-2026-10.md).
+**Musica:** Suno permanece manual. El perfil `openai_only` usa OpenAI para imagenes, miniatura, planificacion de historias importadas y alineacion opcional; excluye Comfy y ElevenLabs en este modulo. El director v7 ofrece tratamiento mixto, narrativo y abstracto, conservando el storyboard y separando narrativa de contexto de escucha. QA revisa fuentes antes de overlays; los respaldos priorizan imagenes aprobadas de la cancion, sin la antigua tarjeta naranja ni lemas ajenos. Configuracion, limitaciones y revision de la primera prueba real: [Musica con OpenAI — octubre de 2026](docs/power-music-openai-2026-10.md).
 
 ---
 
