@@ -5,7 +5,8 @@ import unicodedata
 from datetime import datetime, timezone
 
 
-DIRECTOR_VERSION = "power_music_director_v4_song_seed_lyric_metaphor"
+DIRECTOR_VERSION = "power_music_director_v6_narrative_storyboard"
+STORYBOARD_CONTENT_VERSION = "music_storyboard_v1"
 
 EXCLUDED_VIDEO_TOOLS = {
     "luma": "disabled_by_request",
@@ -198,8 +199,8 @@ VISUAL_WORLDS = {
         "locations": [
             "minimal black studio with geometric light",
             "concrete room with a single vertical beam",
-            "dark training lab with clean symmetry",
-            "empty arena floor under one spotlight",
+            "quiet studio with clean symmetry",
+            "concrete courtyard under one spotlight",
             "steel corridor with precise light strips",
         ],
         "motifs": [
@@ -211,6 +212,24 @@ VISUAL_WORLDS = {
         ],
     },
 }
+
+
+VISUAL_WORLDS.update({
+    "everyday_resolve": {
+        "label": "Everyday Resolve",
+        "description": "an intimate story of finding direction again, ordinary places changing with the protagonist's emotional state",
+        "palette": ["muted blue", "warm amber", "soft charcoal", "natural skin tones"],
+        "locations": ["quiet apartment beside a window", "shared apartment courtyard", "tree-lined neighborhood street", "small public garden", "pedestrian passage near the same neighborhood"],
+        "motifs": ["window light crossing a familiar room", "a reflection in the courtyard window", "tree shadows across the pavement", "an open passage into the same garden", "changing daylight on the same walls"],
+    },
+    "emotional_recovery": {
+        "label": "Emotional Recovery",
+        "description": "a personal story of letting go, recovering calm and rebuilding trust, expressed through familiar spaces and restrained human gestures",
+        "palette": ["soft blue gray", "warm ivory", "faded terracotta", "gentle daylight"],
+        "locations": ["quiet lived-in room beside a window", "small courtyard outside the room", "neighborhood path after rain", "sheltered garden near home", "same room opening into morning light"],
+        "motifs": ["rain fading on a window", "a curtain opening to natural light", "a reflection resolving in clear glass", "water settling in a garden pool", "sunlight returning to the same doorway"],
+    },
+})
 
 
 SHOT_ARCHETYPES = {
@@ -283,13 +302,49 @@ SHOT_ARCHETYPES = {
 }
 
 
+SHOT_ARCHETYPES.update({
+    "setting_establishing": {
+        "category": "environment_wide", "humanPolicy": "same protagonist may appear small in frame",
+        "subject": "the established story location, with the protagonist quietly present",
+        "wardrobe": "same simple everyday outfit throughout the story", "action": "observing the surroundings without posing",
+        "propRules": "use only objects already present in the story location; introduce no symbolic equipment",
+        "composition": "wide establishing frame, realistic perspective and clear spatial geography",
+        "camera": "wide 28mm environmental frame, natural motivated light",
+        "controlNet": {"recommended": "none", "reason": "story composition is described in the image prompt"},
+    },
+    "character_moment": {
+        "category": "human_portrait", "humanPolicy": "one recurring adult protagonist, medium framing, relaxed natural anatomy",
+        "subject": "the same protagonist responding to the moment with a restrained expression",
+        "wardrobe": "same simple everyday outfit throughout the story", "action": "pausing, observing, then relaxing their posture",
+        "propRules": "no added props; emotion comes from gesture and light",
+        "composition": "medium portrait connected visibly to the established location",
+        "camera": "natural eye-level 50mm portrait, restrained depth of field",
+        "controlNet": {"recommended": "none", "reason": "simple natural posture"},
+    },
+    "environment_detail": {
+        "category": "environment_detail", "humanPolicy": "no close human anatomy",
+        "subject": "one existing detail of the established story location",
+        "wardrobe": "none", "action": "light or reflections changing across the same space",
+        "propRules": "the detail must belong to the established setting, without adding objects from lyric metaphors",
+        "composition": "close environmental detail, physical texture, clear contact and scale",
+        "camera": "50mm detail shot with natural light and tactile texture",
+        "controlNet": {"recommended": "none", "reason": "simple environmental detail"},
+    },
+    "story_transition": {
+        "category": "human_wide_pose", "humanPolicy": "one recurring protagonist, full body only at a distance",
+        "subject": "the same protagonist moving through the established story location",
+        "wardrobe": "same simple everyday outfit throughout the story", "action": "slow natural walking from shadow toward clearer light",
+        "propRules": "no new props; keep the environment recognizable",
+        "composition": "medium-wide frame with a clear direction of movement and grounded feet",
+        "camera": "35mm frame, gentle lateral perspective, coherent geography",
+        "controlNet": {"recommended": "none", "reason": "simple walking posture without complex action"},
+    },
+})
+
+
 ARCHETYPE_SEQUENCE = [
-    "status_architecture",
-    "controlled_portrait",
-    "grounded_training_still",
-    "shadow_symbol",
-    "athletic_motion_wide",
-    "victory_rooftop",
+    "setting_establishing", "character_moment", "environment_detail",
+    "story_transition", "character_moment", "setting_establishing",
 ]
 
 
@@ -308,24 +363,208 @@ def _tokens(value):
     return set(re.findall(r"[a-z0-9_]+", _ascii_text(value)))
 
 
+def normalize_storyboard(value):
+    """Accept versioned authored stories, never infer provenance from old scenes."""
+    if not isinstance(value, dict) or value.get("contentVersion") != STORYBOARD_CONTENT_VERSION:
+        return {}
+    source = value.get("source")
+    if source not in {"composer", "openai_story_planner", "human"}:
+        return {}
+    if any(not isinstance(value.get(key), str) for key in ["premise", "protagonist", "wardrobe"]):
+        return {}
+    text_fields = {key: compact_text(value.get(key), limit) for key, limit in [
+        ("premise", 900), ("protagonist", 500), ("wardrobe", 350),
+    ]}
+    if not all(text_fields.values()):
+        return {}
+    locations = value.get("locations")
+    beats = value.get("beats")
+    if not isinstance(locations, list) or not isinstance(beats, list):
+        return {}
+    locations = list(dict.fromkeys(compact_text(item, 240) for item in locations if isinstance(item, str) and item.strip()))[:12]
+    if not locations or not beats or len(beats) > 32:
+        return {}
+    clean_beats = []
+    for beat in beats:
+        if not isinstance(beat, dict):
+            return {}
+        if any(not isinstance(beat.get(key), str) for key in ["section", "location", "action", "emotion"]):
+            return {}
+        clean = {key: compact_text(beat.get(key), limit) for key, limit in [
+            ("section", 80), ("location", 240), ("action", 700), ("emotion", 240),
+        ]}
+        if not all(clean.values()) or clean["location"] not in locations:
+            return {}
+        clean_beats.append(clean)
+    result = {"contentVersion": STORYBOARD_CONTENT_VERSION, "source": source, **text_fields, "locations": locations, "beats": clean_beats}
+    if isinstance(value.get("inputSignature"), str) and value["inputSignature"].strip():
+        result["inputSignature"] = compact_text(value["inputSignature"], 256)
+    return result
+
+
+def _storyboard_beat(section, index, plan):
+    storyboard = normalize_storyboard(plan.get("storyboard"))
+    if not storyboard:
+        return {}, {}
+    section_key = _ascii_text(section).strip().strip("[]")
+    exact_index = int(index or 0)
+    if 0 <= exact_index < len(storyboard["beats"]):
+        indexed = storyboard["beats"][exact_index]
+        if _ascii_text(indexed["section"]).strip().strip("[]") == section_key:
+            return storyboard, copy.deepcopy(indexed)
+    matches = [beat for beat in storyboard["beats"] if _ascii_text(beat["section"]).strip().strip("[]") == section_key]
+    beats = matches or storyboard["beats"]
+    return storyboard, copy.deepcopy(beats[int(index or 0) % len(beats)])
+
+
+def storyboard_sports(storyboard):
+    """Collect every sport/fitness equipment domain, rather than one winner."""
+    if not isinstance(storyboard, dict):
+        return set()
+    evidence = [storyboard.get(key) for key in ["premise", "protagonist", "wardrobe"]]
+    evidence.extend(storyboard.get("locations") or [])
+    for beat in storyboard.get("beats") or []:
+        if isinstance(beat, dict):
+            evidence.extend(beat.get(key) for key in ["action", "emotion", "location"])
+    # Newlines keep negations scoped to their own field, while a "boxing
+    # gym" and subsequent "same gym" share the story's sport context.
+    return sports_in_text("\n".join(str(part) for part in evidence if part))
+
+
+def storyboard_has_athletics(storyboard):
+    return bool(storyboard_sports(storyboard))
+
+
+def _affirmative_sport_text(value):
+    text = _ascii_text(value)
+    # A negated list belongs to one clause: "sin boxeo ni gimnasio" must
+    # remove both nouns, while the next sentence can still establish a sport.
+    text = re.sub(r"\b(?:sin|without|avoid|evitar)\b[^,.;\n]*", "", text)
+    text = re.sub(
+        r"\bno\s+(?:es\s+|hay\s+|usar\s+|quiero\s+|incluir\s+)?"
+        r"(?:gym|gimnasio|pesas|deportes?|sports?|weights?|entrenamiento|boxeo|boxing|atleta|athlete|corredor|corredora|tenis|tennis|natacion|swimming)\b(?:\s+(?:ni|or|and)\s+\w+)*",
+        "", text,
+    )
+    return text
+
+
 def _text_blob(package, payload=None):
+    """Story evidence only. Listening context and music genre are not scenery."""
     payload = payload or {}
+    video = package.get("videoConcept") if isinstance(package.get("videoConcept"), dict) else {}
     parts = [
         package.get("title"),
         package.get("subtitle"),
-        package.get("intention"),
-        package.get("style"),
-        package.get("energy"),
         package.get("lyrics"),
-        payload.get("theme"),
-        payload.get("visualIdentity"),
-        payload.get("targetUse"),
+        payload.get("theme") or video.get("userStoryContext"),
+        payload.get("visualBrief") or payload.get("visual_brief"),
+        payload.get("visualIdentity") or payload.get("visual_identity"),
     ]
     return " ".join(str(part or "") for part in parts)
 
 
-def _stable_song_seed(package, payload=None):
+def sports_in_text(value):
+    """Affirmative sport evidence; generic strength metaphors grant no props."""
+    text = _affirmative_sport_text(value)
+    tokens = _tokens(text)
+    aliases = {
+        "boxing": {"boxeo", "boxeador", "boxeadora", "boxing", "boxer"},
+        "swimming": {"nadador", "nadadora", "natacion", "swimming", "swimmer"},
+        "running": {"maraton", "marathon", "corredor", "corredora", "runner"},
+        "tennis": {"tenis", "tennis", "tenista"},
+        "basketball": {"baloncesto", "basquetbol", "basketball"},
+        "football": {"futbol", "soccer", "football"},
+        "strength_training": {"pesas", "mancuerna", "mancuernas", "dumbbell", "dumbbells", "barbell", "barbells", "weightlifting", "weights", "rack"},
+    }
+    sports = {sport for sport, words in aliases.items() if tokens & words}
+    if re.search(
+        r"\b(?:levanto|levantar|levantando|lifting)\s+(?:las?\s+|una?\s+)?(?:pesas|weights|barra)\b"
+        r"|\bbarra\s+(?:olimpica|de\s+pesas)\b|\b(?:squat|weight)\s+(?:bar|rack)\b"
+        r"|\b(?:exercise|weight)\s+machines?\b|\bmaquinas?\s+(?:de\s+)?(?:ejercicio|entrenamiento)\b",
+        text,
+    ):
+        sports.add("strength_training")
+    if re.search(
+        r"\b(?:corro|correr|corriendo|run|running)\s+(?:por\s+|en\s+|on\s+|the\s+|la\s+|el\s+){0,3}(?:pista|estadio|track|stadium)\b"
+        r"|\b(?:carrera|race)\s+(?:de\s+)?\d+\s*(?:km|kilometros|kilometers)\b",
+        text,
+    ):
+        sports.add("running")
+    if not sports and tokens & {"gym", "gimnasio"}:
+        sports.add("strength_training")
+    if not sports and tokens & {"atleta", "athlete"}:
+        sports.add("athletics")
+    return sports
+
+
+def _has_athletic_story(text):
+    return bool(sports_in_text(text))
+
+
+def _explicit_visual_direction(package, payload=None):
     payload = payload or {}
+    video = package.get("videoConcept") if isinstance(package.get("videoConcept"), dict) else {}
+    # Persist only human direction. Legacy model-generated visualIdentity often
+    # contains the gym/luxury boilerplate this director is replacing.
+    return compact_text(
+        payload.get("visualBrief") or payload.get("visual_brief")
+        or payload.get("visualIdentity") or payload.get("visual_identity")
+        or video.get("userVisualDirection"),
+        600,
+    )
+
+
+def build_story_brief(package, payload=None):
+    payload = payload or {}
+    video = package.get("videoConcept") if isinstance(package.get("videoConcept"), dict) else {}
+    story_theme = compact_text(payload.get("theme") or video.get("userStoryContext"), 300)
+    direction = _explicit_visual_direction(package, payload)
+    story_text = _text_blob(package, {**payload, "visualBrief": direction})
+    authorized_sports = sports_in_text(story_text)
+    athletic_story = bool(authorized_sports)
+    sport = next((item for item in ["boxing", "swimming", "tennis", "basketball", "football", "running", "strength_training", "athletics"] if item in authorized_sports), "none")
+    # Lyrics remain available as evidence in the plan, but raw phrases are not
+    # sent to the image model where "me levanto" can become weight lifting.
+    lyric_evidence = [
+        compact_text(line, 180) for line in str(package.get("lyrics") or "").splitlines()
+        if line.strip() and not line.strip().startswith("[")
+    ][:8]
+    storyboard = normalize_storyboard(video.get("storyboard"))
+    if storyboard and not storyboard_sports(storyboard).issubset(authorized_sports):
+        storyboard = {}
+    narrative_source = storyboard.get("source") or ("human_direction_fallback" if direction else "heuristic_fallback")
+    continuity = {
+        "protagonist": storyboard.get("protagonist") or ("the character or characters established in the explicit human direction" if direction else "one recurring adult protagonist, same appearance and simple wardrobe"),
+        "wardrobe": storyboard.get("wardrobe") or "keep the same story-appropriate wardrobe across scenes",
+        "locations": storyboard.get("locations") or ("only the locations established in the explicit human direction" if direction else "a connected group of locations belonging to the same story"),
+        "visualLanguage": "consistent palette, daylight progression and camera direction",
+    }
+    return {
+        "basis": "lyrics_and_explicit_visual_direction",
+        "songTitle": compact_text(package.get("title"), 120),
+        "lyricEvidence": lyric_evidence,
+        "explicitVisualDirection": direction,
+        "explicitStoryTheme": story_theme,
+        "athleticStory": athletic_story,
+        "sport": sport,
+        "authorizedSports": sorted(authorized_sports),
+        "narrativeSource": narrative_source,
+        "premise": storyboard.get("premise") or direction or "No authored story is available; provisional emotional direction inferred from the lyrics.",
+        "storyboard": storyboard,
+        "warnings": [] if storyboard else ["No validated authored storyboard is available. This visual direction is a provisional fallback, not a semantic screenplay."],
+        "listeningContextIsScenery": False,
+        "approach": "cinematic story with scenes related to the full song, not a separate object for each line",
+        "emotionalArc": [beat["emotion"] for beat in storyboard["beats"]] if storyboard else [
+            "establish the protagonist and the song's emotional tension",
+            "show a small decision or shift in perspective in the same environment",
+            "resolve the emotional movement through posture, action and changing light",
+        ],
+        "continuity": continuity,
+        "interpretationRule": "Treat strength, weight, rising, fighting and running from the past as emotional metaphors unless the song establishes an actual sport story.",
+    }
+
+
+def _stable_song_seed(package, payload=None):
     raw = "||".join(
         str(part or "")
         for part in [
@@ -334,8 +573,7 @@ def _stable_song_seed(package, payload=None):
             package.get("mainHook"),
             package.get("mantra"),
             package.get("lyrics"),
-            payload.get("visualIdentity"),
-            payload.get("theme"),
+            _explicit_visual_direction(package, payload),
         ]
     )
     if not raw.strip():
@@ -352,199 +590,155 @@ def _seeded_item(items, index, seed, stride=1):
 
 def choose_visual_world(package, payload=None):
     tokens = _tokens(_text_blob(package, payload))
-    if tokens & {"dinero", "exito", "rico", "riqueza", "lujo", "estatus", "millonario", "oro"}:
-        return "luxury_ascent"
-    if tokens & {"corro", "correr", "entreno", "gym", "fuerza", "hierro", "sudor", "pesas", "cardio"}:
+    if _has_athletic_story(_text_blob(package, payload)):
         return "athletic_power"
-    if tokens & {"mujer", "reina", "diosa", "presencia", "mirada", "magnetismo"}:
-        return "feminine_power"
-    if tokens & {"nino", "infancia", "futuro", "pasado", "historia", "protejo", "promesa"}:
+    if tokens & {"infancia", "ninez", "nino", "nina"}:
         return "inner_child_victory"
-    if tokens & {"carro", "auto", "manejar", "noche", "ciudad", "calle", "neon", "velocidad", "ruta"}:
+    if tokens & {"ruptura", "desamor", "duelo", "sanar", "sanando", "ansiedad", "perdono", "perdonar", "respiro", "soltar", "adios"}:
+        return "emotional_recovery"
+    if tokens & {"lujo", "millonario", "penthouse", "mansiones"}:
+        return "luxury_ascent"
+    if tokens & {"carro", "auto", "manejar", "conduzco", "neon"}:
         return "urban_night_drive"
-    if tokens & {"cima", "subo", "montana", "altura", "amanecer", "resistencia", "camino", "avanzar"}:
+    if tokens & {"montana", "sendero", "desierto", "cumbre"}:
         return "summit_resolve"
-    if tokens & {"mente", "enfoque", "silencio", "control", "presion", "forja", "metal", "vision"}:
-        return "mind_forge"
-    return "shadow_to_power"
+    return "everyday_resolve"
 
 
 def choose_shot_archetype(section, line, index, world_key=None, seed=0):
     tokens = _tokens(f"{section} {line}")
-    if tokens & {"pesa", "pesas", "dumbbell", "barbell", "gym", "gimnasio", "levanto", "levantando"}:
-        return "grounded_training_still"
-    if tokens & {"hierro", "entreno", "fuerza", "sudor", "golpe"}:
+    # Athletic imagery is opt-in at song/story level. A line saying "mi
+    # palabra pesa" or "me levanto" cannot change the location into a gym.
+    if world_key == "athletic_power":
+        if tokens & {"pesas", "dumbbell", "dumbbells", "barbell", "barbells"}:
+            return "grounded_training_still"
         seeded_index = int(index or 0) + int(seed or 0)
-        return ["athletic_motion_wide", "victory_rooftop", "shadow_symbol", "status_architecture"][seeded_index % 4]
-    if tokens & {"corro", "correr", "running", "ruta", "calle", "camino", "cima", "paso", "cardio"}:
-        return "athletic_motion_wide"
-    if tokens & {"mujer", "reina", "diosa", "presencia", "mirada", "magnetismo", "ella"}:
-        return "controlled_portrait"
-    if tokens & {"dinero", "exito", "rico", "riqueza", "lujo", "estatus", "gano", "meta", "oro"}:
-        return "status_architecture"
-    if tokens & {"miedo", "duda", "caer", "excusa", "sombra", "ansiedad", "dolor"}:
-        return "shadow_symbol"
-    if tokens & {"final", "victoria", "cumplo", "promesa", "subo", "cima"}:
-        return "victory_rooftop"
+        return ["setting_establishing", "athletic_motion_wide", "character_moment", "environment_detail"][seeded_index % 4]
     seeded_index = int(index or 0) + int(seed or 0)
-    if world_key == "athletic_power" and seeded_index % 7 == 1:
-        return "grounded_training_still"
-    if world_key == "feminine_power" and seeded_index % 3 == 1:
-        return "controlled_portrait"
-    if world_key == "luxury_ascent" and seeded_index % 3 != 2:
-        return "status_architecture"
     return ARCHETYPE_SEQUENCE[seeded_index % len(ARCHETYPE_SEQUENCE)]
+
+
+def _story_stage(section):
+    section = _ascii_text(section)
+    if any(word in section for word in ["outro", "final", "ending", "cierre"]):
+        return 2
+    if any(word in section for word in ["chorus", "coro", "bridge", "puente", "verse 2", "verso 2"]):
+        return 1
+    return 0
 
 
 def lyric_visual_metaphor(section, line, index, plan=None):
     plan = plan if isinstance(plan, dict) else {}
+    storyboard, story_beat = _storyboard_beat(section, index, plan)
+    if storyboard:
+        return f"{story_beat['emotion']}. {story_beat['action']}"
     world = plan.get("visualWorld") if isinstance(plan.get("visualWorld"), dict) else {}
-    world_key = world.get("key") or "shadow_to_power"
+    world_key = world.get("key") or "everyday_resolve"
     seed = int(plan.get("songVisualSeed") or 0)
-    tokens = _tokens(f"{section} {line}")
-
-    if tokens & {"excusa", "miedo", "duda", "ansiedad", "caer", "dolor"}:
+    tokens = _tokens(line)
+    stage = _story_stage(section)
+    if world_key == "athletic_power":
         options = [
-            "a dark room split by one clean beam of light, pressure becoming direction",
-            "a cracked concrete wall with a controlled ember line inside, resistance turning into power",
-            "a lone figure standing still while shadow breaks behind them, calm under pressure",
+            "the established athlete preparing calmly in the same sporting location, without inventing equipment",
+            "the same athlete practicing the sport established by the song, with a simple believable action",
+            "the same athlete pausing after their effort, the story resolving through posture and light",
         ]
-    elif tokens & {"cumplo", "promesa", "palabra", "elijo", "decido", "plan"}:
-        options = [
-            "a grounded figure crossing a bright threshold, commitment made visible without papers or text",
-            "a single silhouette at the center of a clean arena floor, decision and self-command",
-            "a precise vertical light beam over a strong posture, promise turned into structure",
-        ]
-    elif tokens & {"pesa", "pesas", "dumbbell", "barbell", "gym", "gimnasio", "levanto"}:
-        options = [
-            "grounded training equipment under dramatic light with chalk dust and real contact shadows",
-            "a controlled training still life: grounded equipment, heat, breath, effort, no floating props",
-            "an athlete silhouette beside secondary equipment, power restrained and believable",
-        ]
-    elif tokens & {"fuego", "hierro", "sudor", "fuerza", "entreno", "golpe"}:
-        options = [
-            "a sunrise rooftop stance with heat, breath and disciplined pressure, no obvious gym props",
-            "a dark stadium tunnel with chalk dust in the air and one grounded silhouette moving forward",
-            "black marble, ember light and a controlled posture, strength shown through scale and shadow",
-        ]
-    elif tokens & {"corro", "ruta", "camino", "cima", "paso", "subo", "avanzar"}:
-        options = [
-            "a wide open path at first light, one small grounded figure moving toward the horizon",
-            "a concrete stair climb with long shadow and sunrise edge light",
-            "a road line disappearing toward a distant summit, endurance without clutter",
-        ]
-    elif tokens & {"dinero", "exito", "riqueza", "oro", "lujo", "estatus", "gano", "meta"}:
-        options = [
-            "black marble and city lights reflected under a calm powerful silhouette",
-            "a glass tower lobby at night, elegant ambition without cash or logos",
-            "a luxury staircase with one figure ascending, status earned through discipline",
-        ]
-    elif tokens & {"mujer", "reina", "diosa", "presencia", "mirada", "magnetismo"}:
-        options = [
-            "a confident feminine silhouette in an elegant corridor, authority without objectification",
-            "a controlled editorial portrait with gold rim light and clean negative space",
-            "a poised figure on a city balcony, magnetism shown through posture and light",
-        ]
-    elif tokens & {"mente", "silencio", "respiro", "calma", "enfoque", "vision", "control"}:
-        options = [
-            "a minimal black studio with geometric light, focus becoming a physical structure",
-            "a close controlled breath in cold light, quiet confidence and mental discipline",
-            "a steel corridor with precise light strips, internal order made visible",
-        ]
-    elif world_key == "urban_night_drive":
-        options = [
-            "wet asphalt and distant headlights, ambition moving through the night",
-            "a tunnel exit opening into city light, momentum with no random props",
-            "an underground ramp with clean reflections and one grounded silhouette",
-        ]
-    elif world_key == "summit_resolve":
-        options = [
-            "a lone figure against a sunrise horizon, earned clarity after pressure",
-            "a mountain road with long shadow and open air, victory without noise",
-            "an empty overlook above the city, calm power after the climb",
-        ]
-    elif world_key == "mind_forge":
-        options = [
-            "ember light inside concrete geometry, pressure turned into precise focus",
-            "a dark training lab with one spotlight, mind forged into discipline",
-            "graphite shadows and white-hot light, internal fire made controlled",
-        ]
+        return options[stage]
+    if tokens & {"miedo", "duda", "ansiedad", "dolor", "lloro", "triste"}:
+        emotion = "a restrained expression of vulnerability gradually giving way to composure"
+    elif tokens & {"elijo", "decido", "cumplo", "promesa", "vuelvo", "levantare", "levanto"}:
+        emotion = "a small deliberate action and a more assured posture, expressing a personal decision"
+    elif tokens & {"respiro", "calma", "libre", "suelto", "soltar", "perdono"}:
+        emotion = "a relaxed breath and an unguarded expression, expressing emotional release"
     else:
-        options = [
-            "a symbolic power scene where shadow becomes movement and control",
-            "a strong silhouette in a premium cinematic space, identity becoming action",
-            "a minimal high-contrast scene with one clear subject and emotional pressure",
-        ]
-    return compact_text(_seeded_item(options, index, seed, stride=2), 260)
-
-
-def _coherent_location(archetype_id, proposed_location, world_key, index, seed):
-    location = compact_text(proposed_location, 160)
-    if archetype_id == "grounded_training_still":
-        bank = [
-            "industrial training space with dramatic light",
-            "minimal boxing gym with one spotlight",
-            "rubber gym floor beside a steel rack",
-            "dark training lab with clean symmetry",
-            "cold air rooftop training corner",
-        ]
-        return _seeded_item(bank, index, seed, stride=2)
-    if archetype_id == "athletic_motion_wide":
-        bank = [
-            "wide road at blue hour",
-            "empty stadium tunnel before sunrise",
-            "mountain road at first light",
-            "city overpass at midnight with clean ground plane",
-            "concrete stair climb under sunrise",
-        ]
-        return _seeded_item(bank, index, seed, stride=2)
-    if archetype_id == "victory_rooftop":
-        bank = [
-            "sunrise rooftop above the city",
-            "empty overlook above a sleeping city",
-            "windy rooftop edge with clear horizon",
-            "wide elevated terrace at first light",
-            "glass tower rooftop with distant skyline",
-        ]
-        return _seeded_item(bank, index, seed, stride=2)
-    if archetype_id == "status_architecture" and world_key not in {"luxury_ascent", "urban_night_drive"}:
-        bank = [
-            "glass tower lobby at night",
-            "black marble penthouse with city lights",
-            "opulent staircase with deep shadows",
-            "underground parking ramp with cinematic reflections",
-            "wet avenue outside a luxury building",
-        ]
-        return _seeded_item(bank, index, seed, stride=2)
-    return location
+        emotion = "a subtle change in expression and posture following the song's emotional movement"
+    progression = [
+        "establish the familiar setting and the protagonist's initial emotional state",
+        "return to the established place as the protagonist makes a small meaningful change",
+        "resolve in the same connected story world, with clearer light and a calmer, more assured protagonist",
+    ][stage]
+    # A detail shot can carry the emotion without inventing a new literal prop.
+    detail = _seeded_item(world.get("motifs") or VISUAL_WORLDS["everyday_resolve"]["motifs"], index // 3, seed)
+    return compact_text(f"{progression}; {emotion}; recurring environmental cue: {detail}", 480)
 
 
 def build_shot_recipe(section, sample_line, index, plan):
     plan = plan if isinstance(plan, dict) else {}
     world = plan.get("visualWorld") if isinstance(plan.get("visualWorld"), dict) else {}
-    world_key = world.get("key") or "shadow_to_power"
+    world_key = world.get("key") or "everyday_resolve"
+    brief = plan.get("storyBrief") if isinstance(plan.get("storyBrief"), dict) else {}
+    athletic_story = bool(brief.get("athleticStory")) if brief else world_key == "athletic_power"
+    if not athletic_story and world_key == "athletic_power":
+        world_key = "everyday_resolve"
+        world = VISUAL_WORLDS[world_key]
     seed = int(plan.get("songVisualSeed") or 0)
     archetype_id = choose_shot_archetype(section, sample_line, index, world_key, seed=seed)
     archetype = copy.deepcopy(SHOT_ARCHETYPES.get(archetype_id) or SHOT_ARCHETYPES["shadow_symbol"])
     locations = world.get("locations") or VISUAL_WORLDS.get(world_key, VISUAL_WORLDS["shadow_to_power"])["locations"]
     motifs = world.get("motifs") or VISUAL_WORLDS.get(world_key, VISUAL_WORLDS["shadow_to_power"])["motifs"]
-    location = _seeded_item(locations, index, seed, stride=2)
-    location = _coherent_location(archetype_id, location, world_key, index, seed)
-    motif = _seeded_item(motifs, index, seed // 7, stride=3)
+    location = _seeded_item(locations, _story_stage(section), seed)
+    motif = _seeded_item(motifs, index // 3, seed // 7)
+    if archetype_id == "grounded_training_still":
+        archetype["subject"] = "the specific grounded training equipment explicitly established by the song"
+    if archetype_id == "athletic_motion_wide":
+        sport = brief.get("sport") or "running"
+        archetype["subject"] = f"the same athlete practicing {sport.replace('_', ' ')} in the established sporting location"
+        archetype["action"] = "one simple natural action appropriate to the established sport, physically grounded"
+    if athletic_story and archetype["wardrobe"] != "none":
+        archetype["wardrobe"] = "the same sport-appropriate training outfit throughout the story"
+    if archetype_id == "environment_detail":
+        archetype["subject"] = f"an environmental detail already in the established location: {motif}"
     metaphor = lyric_visual_metaphor(section, sample_line, index, plan)
-    continuity_key = f"{world_key}:{archetype_id}:{seed % 997}:{index % 4}"
+    storyboard, story_beat = _storyboard_beat(section, index, plan)
+    direction = brief.get("explicitVisualDirection") or ""
+    if storyboard:
+        location = story_beat["location"]
+        motif = story_beat["emotion"]
+        archetype.update({
+            "category": "story_scene",
+            "subject": storyboard["protagonist"],
+            "humanPolicy": "only the character or characters established in the authored story, with natural anatomy and interaction",
+            "wardrobe": storyboard["wardrobe"],
+            "action": story_beat["action"],
+            "propRules": "allow the objects and interactions established in the authored story; add no unrelated props",
+            "composition": "clear cinematic framing suited to the authored cast and action, keeping the specified setting recognizable",
+            "camera": ["35mm medium-wide story frame", "50mm medium story frame", "28mm wide story frame"][int(index or 0) % 3],
+        })
+    elif direction:
+        # A provisional human brief still outranks every inferred apartment,
+        # street or training-room recipe. The semantic planner can replace
+        # this fallback with a fully authored storyboard before generation.
+        location = f"Only the setting established by this human direction: {direction}"
+        motif = "details belonging to the human-directed story, with no inferred locations or props"
+        archetype.update({
+            "category": "story_scene",
+            "subject": "the character or characters and central subject established in the human creative direction",
+            "humanPolicy": "only the cast established in the human creative direction",
+            "wardrobe": "the consistent wardrobe established by the human direction, appropriate to that story",
+            "action": "the event or interaction established by the human direction, following the song's emotional progression",
+            "propRules": "allow the objects explicitly requested by the human direction; do not substitute unrelated objects",
+            "composition": "clear cinematic framing suited to the human-directed cast and event, keeping the specified setting recognizable",
+            "camera": ["35mm medium-wide story frame", "50mm medium story frame", "28mm wide story frame"][int(index or 0) % 3],
+        })
+        metaphor = f"Develop the human-directed event within its specified setting: {direction}"
+    continuity_key = f"{world_key}:{seed % 997}:same_protagonist"
     strict_physics = [
         "all visible objects obey gravity",
         "every object has contact shadows",
         "no object floats unless it is smoke, haze or light",
         "no prop is placed between legs",
-        "one subject scale only; no mismatched body sizes",
-        "if a person runs, clothing must be athletic, never an office suit",
-        "if clothing is formal, action is standing or slow walking only",
+        "natural proportions and coherent scale for every story character and the environment",
     ]
     recipe = {
         "id": archetype_id,
+        "category": archetype["category"],
         "index": index,
+        "athleticStory": athletic_story,
+        "storyStage": _story_stage(section),
+        "storyEmotion": story_beat.get("emotion") or "",
+        "storyPremise": storyboard.get("premise") or direction,
+        "narrativeSource": brief.get("narrativeSource") or "heuristic_fallback",
+        "continuity": brief.get("continuity") or {},
         "continuityKey": continuity_key,
         "location": location,
         "motif": motif,
@@ -566,10 +760,6 @@ def build_shot_recipe(section, sample_line, index, plan):
             "distorted hands",
             "malformed face",
             "two bodies merged",
-            "floating dumbbell",
-            "floating barbell",
-            "office clothes while running",
-            "repeated identical runner shot",
         ],
     }
     return recipe
@@ -594,7 +784,7 @@ def _director_nodes():
         },
         {
             "id": "image_generation",
-            "role": "generate stills with ComfyUI/Flux only",
+            "role": "generate cinematic story stills with OpenAI Images; ComfyUI is an optional explicit choice",
             "retryable": True,
         },
         {
@@ -617,35 +807,60 @@ def _director_nodes():
 
 def build_music_video_director_plan(package, payload=None):
     package = package if isinstance(package, dict) else {}
+    payload = payload or {}
+    brief = build_story_brief(package, payload)
     song_seed = _stable_song_seed(package, payload)
-    world_key = choose_visual_world(package, payload)
+    world_key = choose_visual_world(package, {**payload, "visualBrief": brief["explicitVisualDirection"]})
     world = copy.deepcopy(VISUAL_WORLDS[world_key])
-    identity = compact_text(
-        (package.get("videoConcept") or {}).get("visualIdentity")
-        if isinstance(package.get("videoConcept"), dict)
-        else "",
-        300,
-    )
-    if not identity:
-        identity = f"{world['label']} premium music visualizer identity"
+    storyboard = brief["storyboard"]
+    if storyboard:
+        world_key = "authored_story"
+        world = {
+            "label": "Authored Cinematic Story",
+            "description": storyboard["premise"],
+            "palette": world["palette"],
+            "locations": storyboard["locations"],
+            "motifs": list(dict.fromkeys(beat["emotion"] for beat in storyboard["beats"])),
+        }
+    elif brief["explicitVisualDirection"]:
+        world_key = "human_direction"
+        world = {
+            "label": "Human Creative Direction — Provisional",
+            "description": brief["explicitVisualDirection"],
+            "palette": world["palette"],
+            "locations": [f"only the setting specified by the human direction: {brief['explicitVisualDirection']}"],
+            "motifs": ["details belonging to the human-directed scene, with no added locations or props"],
+        }
+    elif brief["athleticStory"]:
+        sport_worlds = {
+            "running": (["the same outdoor running track", "the track entrance and adjacent path", "the same track at warmer morning light"], ["track markings", "morning light across the track", "the athlete's shadow on the track"]),
+            "boxing": (["the same modest boxing training room", "the edge of the same boxing ring", "the same training room after practice"], ["ropes around the ring", "light across the ring canvas", "the athlete's shadow on the canvas"]),
+            "swimming": (["the same quiet swimming pool", "the edge of the same pool", "the same swimming lanes after practice"], ["lane markings under clear water", "light reflected on the pool edge", "ripples settling in the same swimming lane"]),
+            "tennis": (["the same local tennis court", "the baseline of the same tennis court", "the same tennis court after practice"], ["court boundary lines", "light across the tennis net", "shadows beside the same court"]),
+            "basketball": (["the same local basketball court", "the sideline of the same basketball court", "the same basketball court after practice"], ["court boundary lines", "light near the basketball hoop", "shadows beside the same court"]),
+            "football": (["the same local football field", "the sideline of the same football field", "the same football field after practice"], ["field boundary lines", "light near the goal", "shadows beside the same field"]),
+            "athletics": (["the sporting location explicitly established by the song", "the entrance of that same sporting location", "that same sporting location after practice"], ["details established by the sporting story", "light on the same sporting surface", "the athlete's shadow in the same location"]),
+            "court_or_field_sport": (["the same local sports court or field", "the entrance beside the same playing area", "the same playing area after practice"], ["markings on the playing surface", "morning light on the same playing area", "shadows near the sidelines"]),
+            "strength_training": (["the same restrained strength-training room", "the same training area beside a grounded rack", "the same training room after practice"], ["light on the training floor", "grounded equipment established in the song", "the athlete's shadow beside the rack"]),
+        }
+        world["locations"], world["motifs"] = sport_worlds[brief["sport"]]
+    identity = brief["explicitVisualDirection"] or f"Cinematic story: {world['description']}"
 
     return {
         "version": DIRECTOR_VERSION,
         "createdAtIso": datetime.now(timezone.utc).isoformat(),
         "songVisualSeed": song_seed,
+        "storyBrief": brief,
+        "storyboard": storyboard,
+        "athleticStory": brief["athleticStory"],
+        "continuity": brief["continuity"],
         "excludedTools": EXCLUDED_VIDEO_TOOLS,
-        "primaryOutcome": "make music videos feel premium, coherent and watchable without literal lyric images",
+        "primaryOutcome": "tell a coherent cinematic story related to the song while keeping lyric metaphors from becoming unrelated props",
         "visualWorld": {
             "key": world_key,
             **world,
-            "locations": [
-                _seeded_item(world.get("locations") or [], index, song_seed, stride=2)
-                for index in range(len(world.get("locations") or []))
-            ],
-            "motifs": [
-                _seeded_item(world.get("motifs") or [], index, song_seed // 7, stride=3)
-                for index in range(len(world.get("motifs") or []))
-            ],
+            "locations": world["locations"],
+            "motifs": world["motifs"],
         },
         "visualBible": {
             "identity": identity,
@@ -656,27 +871,22 @@ def build_music_video_director_plan(package, payload=None):
                 "wide establishing frame before close detail",
                 "premium editorial lighting",
             ],
-            "allowedObjects": world["motifs"]
-            + [
-                "clean architecture",
-                "silhouettes",
-                "smoke or haze",
-                "city lights",
-                "polished floor reflections",
-                "minimal symbolic objects",
-            ],
+            "allowedObjects": world["motifs"],
             "bannedObjects": BANNED_IMAGE_OBJECTS,
             "continuityRules": [
-                "repeat color, light and composition language instead of repeating the same subject",
-                "one iconic subject per image",
+                "keep the same protagonist, wardrobe and connected settings across scenes",
+                "advance through tension, decision and resolution; vary framing rather than inventing unrelated locations",
+                "one clear scene focus; include only the cast and objects established in the story",
                 "no readable text inside generated frames",
                 "avoid literal props for every lyric line",
+                "listening context, musical genre and words such as strength, weight or rising do not authorize athletic scenery",
                 "no Luma and no Runway in this pipeline",
             ],
         },
         "sceneStrategy": (
-            "symbolic premium visualizer: translate each lyric beat into power, motion, luxury, shadow, "
-            "discipline or victory; keep frames text-free and avoid random props"
+            "cinematic story related to the full lyrics: establish a recurring protagonist and connected locations, "
+            "develop the emotional arc by song section, vary framing and action while preserving continuity; "
+            "keep generated frames text-free and do not literalize each phrase"
         ),
         "qualityGates": {
             "preImagePromptGate": {
@@ -691,7 +901,7 @@ def build_music_video_director_plan(package, payload=None):
             },
             "autoRepairGate": {
                 "enabled": True,
-                "action": "regenerate failed Comfy frames once with stricter prompt, then replace with local fallback if still failing",
+                "action": "repair failed generated frames once when regeneration is enabled, then use a local fallback",
             },
             "thumbnailGate": {
                 "engine": "OpenAI Images when OPENAI_API_KEY is present, exact title overlay rendered by backend",
@@ -719,8 +929,9 @@ def build_music_video_director_plan(package, payload=None):
                 },
             },
             "images": {
-                "primary": "ComfyUI/Flux",
-                "controlNet": "ready through shotRecipe.controlNet and custom Comfy workflow env vars",
+                "primary": "OpenAI Images",
+                "optional": "ComfyUI/Flux when explicitly selected",
+                "controlNet": "optional only for explicit Comfy workflows; OpenAI uses the shot recipe directly",
                 "thumbnail": "OpenAI Images background + backend exact text overlay",
                 "critic": "OpenAI Vision QA with auto-repair/replacement",
                 "excluded": ["Luma", "Runway"],
@@ -791,24 +1002,22 @@ def director_scene_prompt(section, sample_line, index, plan):
     cameras = bible.get("cameraLanguage") or ["strong symmetry", "premium editorial lighting"]
     camera = cameras[index % len(cameras)]
     recipe = build_shot_recipe(section, sample_line, index, plan)
-    negatives = ", ".join(recipe.get("negativeConstraints", [])[:18])
-    physics = "; ".join(recipe.get("physics", [])[:7])
+    brief = plan.get("storyBrief") if isinstance(plan.get("storyBrief"), dict) else {}
+    direction = compact_text(brief.get("explicitVisualDirection"), 400)
     metaphor = recipe.get("lyricMetaphor") or lyric_visual_metaphor(section, sample_line, index, plan)
     return compact_text(
         (
-            "16:9 cinematic text-free premium music visualizer still. "
-            f"Section: {compact_text(section, 60)}. "
-            f"Lyric emotion metadata only, do not render words: {compact_text(sample_line, 160)}. "
-            f"Lyric-derived visual metaphor to express visually: {metaphor}. "
-            f"Visual world: {compact_text(world.get('description'), 240)}. "
-            f"LOCKED SHOT RECIPE: {recipe['id']}. Subject: {recipe['subject']}. Location: {recipe['location']}. Motif: {recipe['motif']}. "
+            "16:9 cinematic text-free premium music-video still; symbolic emotional storytelling within a coherent story. "
+            "No words, captions, logos, random props or literal objects from lyric metaphors. Physically grounded, realistic contact shadows. "
+            f"Story world: {compact_text(world.get('description'), 240)}. "
+            f"Creative direction: {direction or 'a cinematic story related to the full song'}. "
+            f"Continuity: {compact_text((brief.get('continuity') or {}).get('protagonist'), 500)}; consistent wardrobe, connected locations and palette. "
+            f"Section: {compact_text(section, 60)}. Emotional progression: {metaphor}. "
+            f"LOCKED SHOT RECIPE: {recipe['id']}. Subject: {recipe['subject']}. Location: {recipe['location']}. "
             f"Wardrobe: {recipe['wardrobe']}. Action: {recipe['action']}. Prop rules: {recipe['propRules']}. "
-            f"Composition: {recipe['composition']}. Camera: {recipe['camera']}; {camera}. Physics: {physics}. "
-            "One clear iconic subject, high contrast, polished music-video lighting, clean negative space, strong composition, realistic contact shadows, physically grounded objects. "
-            "No readable text, no letters, no logos, no signs, no screens, no pseudo-words, no random household objects, "
-            f"no clothes iron, no ironing board, no office papers, no cheap motivational poster, no literal lyric illustration. Negative constraints: {negatives}."
+            f"Composition: {recipe['composition']}. Camera: {recipe['camera']}; {camera}."
         ),
-        1400,
+        2400,
     )
 
 
@@ -841,17 +1050,19 @@ def enrich_package_with_director_plan(package, payload=None):
     plan = build_music_video_director_plan(package, payload)
     video = package.get("videoConcept") if isinstance(package.get("videoConcept"), dict) else {}
     video = copy.deepcopy(video)
-    video["visualIdentity"] = compact_text(
-        video.get("visualIdentity")
-        or plan["visualBible"]["identity"],
-        300,
-    )
+    video["userVisualDirection"] = plan["storyBrief"]["explicitVisualDirection"]
+    video["userStoryContext"] = plan["storyBrief"]["explicitStoryTheme"]
+    video["storyboard"] = copy.deepcopy(plan["storyboard"])
+    video["visualIdentity"] = compact_text(plan["visualBible"]["identity"], 600)
     video["visualWorld"] = compact_text(plan["visualWorld"]["description"], 300)
     video["sceneStrategy"] = compact_text(plan["sceneStrategy"], 360)
     video["palette"] = video.get("palette") if isinstance(video.get("palette"), list) and video.get("palette") else plan["visualWorld"]["palette"]
     video["directorPlan"] = plan
 
-    source_sections = _lyric_sections(package.get("lyrics"), limit=8)
+    source_sections = [
+        {"section": beat["section"], "lines": []}
+        for beat in plan["storyboard"].get("beats", [])
+    ] or _lyric_sections(package.get("lyrics"), limit=8)
     if not source_sections:
         existing = video.get("scenes") if isinstance(video.get("scenes"), list) else []
         source_sections = [
@@ -888,7 +1099,8 @@ def enrich_package_with_director_plan(package, payload=None):
     package["videoConcept"] = video
     package["musicVideoDirector"] = plan
     notes = package.get("productionNotes") if isinstance(package.get("productionNotes"), list) else []
-    director_note = "Music Director v4 activo: seed visual por cancion, metaforas de letra, shot recipes, fisica visual, QA y reparacion automatica sin Luma/Runway."
+    notes = [note for note in notes if not str(note).startswith("Music Director v")]
+    director_note = "Music Director v6: storyboard cinematografico preservado con reparto, acciones y lugares; contexto de escucha separado de la historia. Direccion heuristica provisional si falta un storyboard validado."
     if director_note not in notes:
         package["productionNotes"] = [*notes, director_note][:12]
     return package

@@ -1,6 +1,6 @@
 # Power Music Studio
 
-Estado: 2026-06-17
+Referencia historica: 2026-06-17. La configuracion actual de Musica, sus modelos y la evaluacion del modulo estan en [Musica con OpenAI — octubre de 2026](power-music-openai-2026-10.md). El perfil `openai_only` reemplaza las cadenas de proveedores descritas aqui.
 
 ## Objetivo
 

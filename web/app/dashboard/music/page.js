@@ -11,20 +11,22 @@ import {
 } from "@/components/music/MusicYouTubePublishModal";
 
 const MUSIC_STUDIO_ENABLED = process.env.NEXT_PUBLIC_CONTENT_FACTORY_MUSIC_STUDIO_ENABLED !== "false";
+const MUSIC_PRODUCTION_PROFILE = "openai_only";
 
 const DEFAULT_FORM = {
   intention: "disciplina",
   style: "latin_trap_anthem",
   theme: "Hoy no negocio conmigo",
-  targetUse: "entrenar fuerza",
+  targetUse: "empezar el dia",
   energy: "alta, elegante, feroz pero limpia",
   vocalPerspective: "primera persona, presente, identidad ganadora",
   personalAngle:
-    "Una cancion para escuchar entrenando, recordar que ya no negocio mi disciplina y volver a mi vision cuando aparezca cansancio.",
+    "Una cancion sobre recuperar la confianza y cumplir una promesa personal, incluso cuando aparezca cansancio.",
   mustInclude:
-    "frases memorables, hook repetible, imagenes de amanecer, hierro, enfoque, promesa conmigo mismo",
+    "frases memorables, hook repetible, una promesa personal y acciones concretas de la vida cotidiana",
   mustAvoid:
     "promesas medicas, bajar de peso como castigo, imitacion de artistas reales, lenguaje vulgar gratuito",
+  visualBrief: "",
 };
 
 const DEFAULT_IMPORT_FORM = {
@@ -33,8 +35,7 @@ const DEFAULT_IMPORT_FORM = {
   intention: "disciplina",
   style: "latin_trap_anthem",
   energy: "alta, elegante, cinematica",
-  visualIdentity:
-    "visuales cinematograficos premium que sigan la letra: amanecer, movimiento, enfoque, simbolos de identidad, fuerza y avance",
+  visualIdentity: "",
   lyrics: "",
 };
 
@@ -43,6 +44,7 @@ const emptyPresets = {
   styles: [],
   targetUses: [],
   model: "",
+  productionProfile: "",
 };
 
 function pillStyle(tone = "neutral") {
@@ -510,6 +512,8 @@ function openaiImagesLabel(render) {
 function directorVersionLabel(version) {
   const value = safeText(version).toLowerCase();
   if (!value) return "";
+  if (value.includes("director_v6")) return "Director v6 · historia";
+  if (value.includes("director_v5")) return "Director v5";
   if (value.includes("director_v4") || value.includes("song_seed_lyric_metaphor")) return "Director v4";
   if (value.includes("director_v3") || value.includes("shot_control_qa")) return "Director v3";
   if (value.includes("director_v2") || value.includes("no_luma_runway")) return "Director v2";
@@ -997,6 +1001,7 @@ export default function MusicStudioPage() {
   const uploadAbortRef = useRef(null);
 
   const packageData = current?.package || null;
+  const openaiProductionReady = presets.productionProfile === MUSIC_PRODUCTION_PROFILE;
   const audioData = current?.audio || null;
   const audioVersions = current?.audioVersions || [];
   const activeAudioVersionId = current?.activeAudioVersionId || audioData?.versionId || "";
@@ -1054,13 +1059,11 @@ export default function MusicStudioPage() {
 
   useEffect(() => {
     if (!uploadingAudio || !uploadStartedAt) {
-      setUploadElapsedSeconds(0);
       return undefined;
     }
     const updateElapsed = () => {
       setUploadElapsedSeconds(Math.max(0, Math.floor((Date.now() - uploadStartedAt) / 1000)));
     };
-    updateElapsed();
     const timer = setInterval(updateElapsed, 1000);
     return () => clearInterval(timer);
   }, [uploadingAudio, uploadStartedAt]);
@@ -1114,6 +1117,7 @@ export default function MusicStudioPage() {
           styles: presetData.styles || [],
           targetUses: presetData.targetUses || [],
           model: presetData.model || "",
+          productionProfile: presetData.productionProfile || "",
         });
         setTracks(trackData.items || []);
       })
@@ -1296,6 +1300,10 @@ export default function MusicStudioPage() {
   }
 
   async function produceVideo(versionId = "") {
+    if (!openaiProductionReady) {
+      setError("Falta activar la actualizacion de imagenes OpenAI en el servidor. El render estara disponible cuando el servidor confirme esta configuracion.");
+      return;
+    }
     if (!currentId) {
       setError("Primero genera o selecciona un track.");
       return;
@@ -1317,6 +1325,8 @@ export default function MusicStudioPage() {
         : `/music/tracks/${encodeURIComponent(currentId)}/produce`;
       const data = await apiFetch(path, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productionProfile: MUSIC_PRODUCTION_PROFILE }),
       });
       if (data.track) {
         setCurrent(data.track);
@@ -1339,6 +1349,10 @@ export default function MusicStudioPage() {
   }
 
   async function generateShorts(versionId = "") {
+    if (!openaiProductionReady) {
+      setError("Falta activar la actualizacion de imagenes OpenAI en el servidor antes de generar shorts.");
+      return;
+    }
     if (!currentId) {
       setError("Primero selecciona un track.");
       return;
@@ -1359,6 +1373,8 @@ export default function MusicStudioPage() {
     try {
       const data = await apiFetch(`/music/tracks/${encodeURIComponent(currentId)}/audio/${encodeURIComponent(selectedVersionId)}/shorts`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productionProfile: MUSIC_PRODUCTION_PROFILE }),
       });
       if (data.track) {
         setCurrent(data.track);
@@ -1550,7 +1566,7 @@ export default function MusicStudioPage() {
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--s-4)" }}>
                 <SelectField
-                  label="Uso"
+                  label="Uso de escucha"
                   value={form.targetUse}
                   onChange={(value) => updateForm("targetUse", value)}
                   options={presets.targetUses.length ? presets.targetUses : [DEFAULT_FORM.targetUse]}
@@ -1567,6 +1583,16 @@ export default function MusicStudioPage() {
               <TextArea label="Angulo personal" value={form.personalAngle} onChange={(value) => updateForm("personalAngle", value)} rows={4} />
               <TextArea label="Debe incluir" value={form.mustInclude} onChange={(value) => updateForm("mustInclude", value)} rows={3} />
               <TextArea label="Evitar" value={form.mustAvoid} onChange={(value) => updateForm("mustAvoid", value)} rows={3} />
+              <TextArea
+                label="Historia visual (opcional)"
+                value={form.visualBrief}
+                onChange={(value) => updateForm("visualBrief", value)}
+                placeholder="Ej. Una mujer vuelve a su ciudad, repara la casa familiar y abre las ventanas al amanecer. Si lo dejas vacio, la historia se basa en la letra."
+                rows={3}
+              />
+              <p className="cf-music-helper" style={{ margin: 0 }}>
+                El video sigue la historia de la letra. El uso de escucha, como entrenar o trabajar, no define sus escenas.
+              </p>
 
               <button
                 type="button"
@@ -1587,12 +1613,12 @@ export default function MusicStudioPage() {
             actions={<span style={pillStyle("neutral")}>video desde audio</span>}
           >
             <p className="cf-music-helper" style={{ marginTop: 0, marginBottom: "var(--s-4)" }}>
-              Pega una letra ya creada en Suno o escrita por ti. Content Factory generara direccion visual, score, metadata y un visualizer premium sin texto quemado. Si Whisper alinea bien, exporta SRT aparte.
+              Pega una letra ya creada en Suno o escrita por ti. La app prepara una historia visual cinematografica y monta el video con tu audio. La sincronizacion de subtitulos usa OpenAI cuando esta disponible.
             </p>
             <div style={{ display: "grid", gap: "var(--s-4)" }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--s-4)" }}>
                 <Field label="Titulo" value={importForm.title} onChange={(value) => updateImportForm("title", value)} placeholder="Ej. Hoy no negocio conmigo" />
-                <Field label="Subtitulo / promesa" value={importForm.subtitle} onChange={(value) => updateImportForm("subtitle", value)} placeholder="Ej. Disciplina para entrenar sin excusas" />
+                <Field label="Subtitulo / promesa" value={importForm.subtitle} onChange={(value) => updateImportForm("subtitle", value)} placeholder="Ej. Volver a confiar en mi" />
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "var(--s-4)" }}>
                 <SelectField
@@ -1610,9 +1636,10 @@ export default function MusicStudioPage() {
               </div>
               <Field label="Energia visual" value={importForm.energy} onChange={(value) => updateImportForm("energy", value)} />
               <TextArea
-                label="Identidad visual"
+                label="Historia e identidad visual (opcional)"
                 value={importForm.visualIdentity}
                 onChange={(value) => updateImportForm("visualIdentity", value)}
+                placeholder="Personajes, lugares y acciones relacionados con tu letra. Vacio: se interpreta la historia de la cancion."
                 rows={3}
               />
               <TextArea
@@ -1812,6 +1839,14 @@ export default function MusicStudioPage() {
               )
             }
           >
+            <div className="cf-card" style={{ padding: "var(--s-4)", marginBottom: "var(--s-4)", borderColor: openaiProductionReady ? "var(--ok)" : "var(--ember)" }}>
+              <strong>{openaiProductionReady ? "Imagenes con OpenAI · Suno manual" : "Configuracion OpenAI pendiente en el servidor"}</strong>
+              <p className="cf-music-helper" style={{ margin: "8px 0 0" }}>
+                {openaiProductionReady
+                  ? "OpenAI genera las escenas y la miniatura; FFmpeg monta el video. Este flujo no usa Comfy ni ElevenLabs. Las imagenes y la transcripcion consumen saldo de la API de OpenAI."
+                  : "Puedes preparar letras y subir tu audio. Para producir nuevos videos, el servidor debe confirmar el flujo sin Comfy ni ElevenLabs."}
+              </p>
+            </div>
             <div
               style={{
                 display: "grid",
@@ -1861,6 +1896,16 @@ export default function MusicStudioPage() {
                     {renderPanel.error || "El render fallo. Puedes reintentar sin volver a crear la letra."}
                   </div>
                 )}
+                {Array.isArray(renderPanel?.renderWarnings) && renderPanel.renderWarnings.length > 0 && (
+                  <div className="cf-card" style={{ padding: "var(--s-4)", marginBottom: "var(--s-4)", borderColor: "var(--ember)" }}>
+                    <strong>{renderPanel.degradedOutput ? "Video generado con recursos de respaldo" : "Avisos de produccion"}</strong>
+                    <ul style={{ marginBottom: 0 }}>
+                      {renderPanel.renderWarnings.map((warning, index) => (
+                        <li key={`${index}-${String(warning)}`}>{String(warning)}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {renderPanel?.shortsStatus === "failed" && (
                   <div className="cf-card" style={{ padding: "var(--s-4)", borderColor: "var(--bad)", color: "var(--bad)", marginBottom: "var(--s-4)" }}>
                     {renderPanel.shortsError || "La generacion de shorts fallo. Puedes reintentar sin rehacer el video largo."}
@@ -1870,9 +1915,10 @@ export default function MusicStudioPage() {
                   <button
                     type="button"
                     className="cf-button cf-button--primary"
-                    onClick={produceVideo}
+                    onClick={() => produceVideo()}
                     disabled={
                       producingVideo ||
+                      !openaiProductionReady ||
                       !currentId ||
                       (!audioData?.url && !audioData?.storagePath) ||
                       renderPanel?.status === "completed" ||

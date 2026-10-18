@@ -123,6 +123,7 @@ from scripts.power_music import (
     stable_track_id as _power_music_track_id,
 )
 from scripts.power_music_video import (
+    resolve_music_production_policy as _resolve_music_production_policy,
     render_power_music_shorts_from_existing_video as _render_power_music_shorts_from_existing_video,
     render_power_music_video as _render_power_music_video,
 )
@@ -5545,6 +5546,28 @@ MUSIC_AUDIO_CONTENT_TYPES = {
     ".aac": "audio/aac",
 }
 MUSIC_RENDER_DIR = Path(os.environ.get("MUSIC_RENDER_DIR", str(BASE_DIR / "output" / "music_renders")))
+MUSIC_PRODUCTION_PROFILE = "openai_only"
+
+
+def _music_validate_production_profile(value=None) -> str:
+    profile = str(value or MUSIC_PRODUCTION_PROFILE).strip().lower()
+    if profile != MUSIC_PRODUCTION_PROFILE:
+        raise HTTPException(status_code=400, detail="Music Studio requiere el perfil openai_only: sin Comfy ni ElevenLabs")
+    return _resolve_music_production_policy(profile).name
+
+
+async def _music_requested_production_profile(request: Request) -> str:
+    # Older clients sent an empty POST; they receive the safe default as well.
+    raw = await request.body()
+    if not raw.strip():
+        return _music_validate_production_profile()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="JSON de produccion invalido")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="La configuracion de produccion debe ser un objeto")
+    return _music_validate_production_profile(body.get("productionProfile"))
 
 
 def _music_storage_blob_name(gs_path: str) -> str:
@@ -5742,11 +5765,12 @@ def _music_track_ref_for_job(track_id: str):
     return db, firestore, ref, snap.to_dict() or {}
 
 
-def _run_music_video_job(track_id: str, audio_version_id: str | None = None) -> dict:
+def _run_music_video_job(track_id: str, audio_version_id: str | None = None, production_profile: str = MUSIC_PRODUCTION_PROFILE) -> dict:
     """
     Render completo para Power Music.
     Corre en worker/API background, nunca en el navegador.
     """
+    production_profile = _music_validate_production_profile(production_profile)
     raw_track_id = str(track_id or "").strip()
     clean_track_id = re.sub(r"[^a-zA-Z0-9_-]", "", raw_track_id).strip()
     if not clean_track_id or clean_track_id != raw_track_id:
@@ -5775,6 +5799,7 @@ def _run_music_video_job(track_id: str, audio_version_id: str | None = None) -> 
         base_record = {
             "audioVersionId": selected_audio_version_id,
             "audioLabel": audio.get("label") or "",
+            "productionProfile": production_profile,
             "updatedAt": now,
             **record,
         }
@@ -5826,7 +5851,7 @@ def _run_music_video_job(track_id: str, audio_version_id: str | None = None) -> 
             },
         )
 
-        outputs = _render_power_music_video(clean_track_id, package, audio_path, render_dir)
+        outputs = _render_power_music_video(clean_track_id, package, audio_path, render_dir, production_profile=production_profile)
 
         _set_render_state(
             {
@@ -5869,6 +5894,12 @@ def _run_music_video_job(track_id: str, audio_version_id: str | None = None) -> 
             "subtitleDiagnostics": outputs.get("subtitleDiagnostics") or {},
             "transcriptionProvider": outputs.get("transcriptionProvider") or "",
             "visualProvider": outputs.get("visualProvider"),
+            "productionProfile": outputs.get("productionProfile") or production_profile,
+            "providerPolicy": outputs.get("providerPolicy") or {},
+            "renderWarnings": outputs.get("renderWarnings") or [],
+            "degradedOutput": bool(outputs.get("degradedOutput")),
+            "thumbnailDiagnostics": outputs.get("thumbnailDiagnostics") or {},
+            "storyPlanning": outputs.get("storyPlanning") or {},
             "preferredVisualProvider": outputs.get("preferredVisualProvider"),
             "thumbnailEngine": outputs.get("thumbnailEngine"),
             "showLyricOverlay": outputs.get("showLyricOverlay"),
@@ -5920,11 +5951,12 @@ def _run_music_video_job(track_id: str, audio_version_id: str | None = None) -> 
         raise
 
 
-def _run_music_shorts_job(track_id: str, audio_version_id: str | None = None) -> dict:
+def _run_music_shorts_job(track_id: str, audio_version_id: str | None = None, production_profile: str = MUSIC_PRODUCTION_PROFILE) -> dict:
     """
     Genera solo shorts verticales desde un render musical existente.
     No re-renderiza Comfy ni reemplaza el MP4 largo.
     """
+    production_profile = _music_validate_production_profile(production_profile)
     raw_track_id = str(track_id or "").strip()
     clean_track_id = re.sub(r"[^a-zA-Z0-9_-]", "", raw_track_id).strip()
     if not clean_track_id or clean_track_id != raw_track_id:
@@ -6001,7 +6033,7 @@ def _run_music_shorts_job(track_id: str, audio_version_id: str | None = None) ->
             }
         )
 
-        outputs = _render_power_music_shorts_from_existing_video(clean_track_id, package, source_video, render_dir, metadata)
+        outputs = _render_power_music_shorts_from_existing_video(clean_track_id, package, source_video, render_dir, metadata, production_profile=production_profile)
         generated = [
             short
             for short in (outputs.get("musicShorts") or [])
@@ -6039,6 +6071,9 @@ def _run_music_shorts_job(track_id: str, audio_version_id: str | None = None) ->
                 "musicShorts": shorts_payload,
                 "shortsMetadata": metadata_asset,
                 "shortsRenderer": outputs.get("renderer") or "power_music_shorts_from_existing_video_v1",
+                "shortsProductionProfile": outputs.get("productionProfile") or production_profile,
+                "shortsProviderPolicy": outputs.get("providerPolicy") or {},
+                "shortsWarnings": outputs.get("renderWarnings") or [],
             }
         )
         updated = ref.get().to_dict() or {}
@@ -6055,25 +6090,27 @@ def _run_music_shorts_job(track_id: str, audio_version_id: str | None = None) ->
         raise
 
 
-def _enqueue_music_video_job(track_id: str, background_tasks: BackgroundTasks, audio_version_id: str | None = None) -> dict:
+def _enqueue_music_video_job(track_id: str, background_tasks: BackgroundTasks, audio_version_id: str | None = None, production_profile: str = MUSIC_PRODUCTION_PROFILE) -> dict:
+    production_profile = _music_validate_production_profile(production_profile)
     try:
         from worker_tasks import produce_music_video
-        task = produce_music_video.delay(track_id, audio_version_id)
+        task = produce_music_video.delay(track_id, audio_version_id, production_profile)
         return {"queue": "celery", "taskId": task.id}
     except Exception as queue_err:
         print(f"[music] queue unavailable, using api background: {queue_err}", flush=True)
-        background_tasks.add_task(_run_music_video_job, track_id, audio_version_id)
+        background_tasks.add_task(_run_music_video_job, track_id, audio_version_id, production_profile)
         return {"queue": "api_background", "error": str(queue_err)[:200]}
 
 
-def _enqueue_music_shorts_job(track_id: str, background_tasks: BackgroundTasks, audio_version_id: str | None = None) -> dict:
+def _enqueue_music_shorts_job(track_id: str, background_tasks: BackgroundTasks, audio_version_id: str | None = None, production_profile: str = MUSIC_PRODUCTION_PROFILE) -> dict:
+    production_profile = _music_validate_production_profile(production_profile)
     try:
         from worker_tasks import produce_music_shorts
-        task = produce_music_shorts.delay(track_id, audio_version_id)
+        task = produce_music_shorts.delay(track_id, audio_version_id, production_profile)
         return {"queue": "celery", "taskId": task.id}
     except Exception as queue_err:
         print(f"[music-shorts] queue unavailable, using api background: {queue_err}", flush=True)
-        background_tasks.add_task(_run_music_shorts_job, track_id, audio_version_id)
+        background_tasks.add_task(_run_music_shorts_job, track_id, audio_version_id, production_profile)
         return {"queue": "api_background", "error": str(queue_err)[:200]}
 
 
@@ -8276,6 +8313,8 @@ def music_presets(request: Request):
         "styles": POWER_MUSIC_STYLES,
         "targetUses": POWER_MUSIC_TARGET_USES,
         "model": os.environ.get("CONTENT_FACTORY_MUSIC_MODEL", "claude-opus-4-7"),
+        "productionProfile": MUSIC_PRODUCTION_PROFILE,
+        "providerPolicy": _resolve_music_production_policy(MUSIC_PRODUCTION_PROFILE).as_metadata(),
         "creditCharged": False,
     }
 
@@ -8703,7 +8742,9 @@ def _music_queue_track_render(
     audio_version_id: str | None,
     principal: dict,
     background_tasks: BackgroundTasks,
+    production_profile: str = MUSIC_PRODUCTION_PROFILE,
 ) -> dict:
+    production_profile = _music_validate_production_profile(production_profile)
     clean_track_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(track_id or "")).strip()
     if not clean_track_id or clean_track_id != track_id:
         raise HTTPException(status_code=400, detail="invalid track id")
@@ -8750,6 +8791,7 @@ def _music_queue_track_render(
     now = _music_render_now()
     queued_record = {
         "status": "queued",
+        "productionProfile": production_profile,
         "stepName": "Esperando worker de video musical",
         "progress": 2,
         "audioVersionId": selected_audio_version_id,
@@ -8772,7 +8814,7 @@ def _music_queue_track_render(
         },
         merge=True,
     )
-    dispatch = _enqueue_music_video_job(clean_track_id, background_tasks, selected_audio_version_id)
+    dispatch = _enqueue_music_video_job(clean_track_id, background_tasks, selected_audio_version_id, production_profile)
     dispatch_record = {
         "audioVersionId": selected_audio_version_id,
         "audioLabel": audio.get("label") or "",
@@ -8807,7 +8849,9 @@ def _music_queue_track_shorts(
     audio_version_id: str | None,
     principal: dict,
     background_tasks: BackgroundTasks,
+    production_profile: str = MUSIC_PRODUCTION_PROFILE,
 ) -> dict:
+    production_profile = _music_validate_production_profile(production_profile)
     clean_track_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(track_id or "")).strip()
     if not clean_track_id or clean_track_id != track_id:
         raise HTTPException(status_code=400, detail="invalid track id")
@@ -8855,6 +8899,7 @@ def _music_queue_track_shorts(
         "audioVersionId": selected_audio_version_id,
         "audioLabel": render_record.get("audioLabel") or audio.get("label") or "",
         "shortsStatus": "queued",
+        "shortsProductionProfile": production_profile,
         "shortsStepName": "Esperando worker de shorts",
         "shortsProgress": 2,
         "shortsQueuedAt": now,
@@ -8872,7 +8917,7 @@ def _music_queue_track_shorts(
         },
         merge=True,
     )
-    dispatch = _enqueue_music_shorts_job(clean_track_id, background_tasks, selected_audio_version_id)
+    dispatch = _enqueue_music_shorts_job(clean_track_id, background_tasks, selected_audio_version_id, production_profile)
     dispatch_record = {
         "audioVersionId": selected_audio_version_id,
         "audioLabel": render_record.get("audioLabel") or audio.get("label") or "",
@@ -8906,7 +8951,8 @@ def _music_queue_track_shorts(
 async def music_track_produce_video(track_id: str, request: Request, background_tasks: BackgroundTasks):
     principal = _require_music_studio_admin(request)
     try:
-        return _music_queue_track_render(track_id, None, principal, background_tasks)
+        profile = await _music_requested_production_profile(request)
+        return _music_queue_track_render(track_id, None, principal, background_tasks, profile)
     except HTTPException:
         raise
     except Exception as exc:
@@ -8917,7 +8963,8 @@ async def music_track_produce_video(track_id: str, request: Request, background_
 async def music_track_produce_audio_version(track_id: str, version_id: str, request: Request, background_tasks: BackgroundTasks):
     principal = _require_music_studio_admin(request)
     try:
-        return _music_queue_track_render(track_id, version_id, principal, background_tasks)
+        profile = await _music_requested_production_profile(request)
+        return _music_queue_track_render(track_id, version_id, principal, background_tasks, profile)
     except HTTPException:
         raise
     except Exception as exc:
@@ -8928,7 +8975,8 @@ async def music_track_produce_audio_version(track_id: str, version_id: str, requ
 async def music_track_generate_audio_version_shorts(track_id: str, version_id: str, request: Request, background_tasks: BackgroundTasks):
     principal = _require_music_studio_admin(request)
     try:
-        return _music_queue_track_shorts(track_id, version_id, principal, background_tasks)
+        profile = await _music_requested_production_profile(request)
+        return _music_queue_track_shorts(track_id, version_id, principal, background_tasks, profile)
     except HTTPException:
         raise
     except Exception as exc:
@@ -9055,6 +9103,7 @@ async def music_generate(request: Request):
                     "theme": body.get("theme") or "",
                     "targetUse": body.get("targetUse") or body.get("target_use") or "",
                     "energy": body.get("energy") or "",
+                    "visualBrief": body.get("visualBrief") or body.get("visualIdentity") or "",
                 },
                 "model": model,
                 "generationMode": generation_mode,
@@ -13159,7 +13208,12 @@ def download_images_zip(project: str, request: Request):
 
 @app.get("/")
 def health_check():
-    return {"status": "online", "service": "Content Factory API"}
+    return {
+        "status": "online",
+        "service": "Content Factory API",
+        "musicProductionProfile": MUSIC_PRODUCTION_PROFILE,
+        "musicPipelineVersion": "cinematic_openai_v1",
+    }
 
 
 @app.get("/queue/status/{task_id}")

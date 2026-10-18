@@ -141,7 +141,7 @@ def ingest_knowledge_pdf(self, job_id: str):
     retry_backoff=60,
     retry_jitter=True,
 )
-def produce_music_video(self, track_id: str, audio_version_id: str | None = None):
+def produce_music_video(self, track_id: str, audio_version_id: str | None = None, production_profile: str = "openai_only"):
     """Renderiza video final para un track de Power Music."""
     try:
         import sentry_sdk
@@ -166,7 +166,7 @@ def produce_music_video(self, track_id: str, audio_version_id: str | None = None
         f"[WORKER] produce_music_video starting | track_id={track_id} | audio_version_id={audio_version_id or ''} | task_id={self.request.id}",
         flush=True,
     )
-    result = api_module._run_music_video_job(track_id, audio_version_id)
+    result = api_module._run_music_video_job(track_id, audio_version_id, production_profile)
     print(f"[WORKER] produce_music_video finished | track_id={track_id} | audio_version_id={audio_version_id or ''}", flush=True)
     return result
 
@@ -179,7 +179,7 @@ def produce_music_video(self, track_id: str, audio_version_id: str | None = None
     retry_backoff=45,
     retry_jitter=True,
 )
-def produce_music_shorts(self, track_id: str, audio_version_id: str | None = None):
+def produce_music_shorts(self, track_id: str, audio_version_id: str | None = None, production_profile: str = "openai_only"):
     """Genera solo shorts verticales desde un render musical existente."""
     try:
         import sentry_sdk
@@ -204,6 +204,6 @@ def produce_music_shorts(self, track_id: str, audio_version_id: str | None = Non
         f"[WORKER] produce_music_shorts starting | track_id={track_id} | audio_version_id={audio_version_id or ''} | task_id={self.request.id}",
         flush=True,
     )
-    result = api_module._run_music_shorts_job(track_id, audio_version_id)
+    result = api_module._run_music_shorts_job(track_id, audio_version_id, production_profile)
     print(f"[WORKER] produce_music_shorts finished | track_id={track_id} | audio_version_id={audio_version_id or ''}", flush=True)
     return result

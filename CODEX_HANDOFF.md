@@ -1,6 +1,6 @@
 # Content Factory - AI Handoff
 
-Ultima revision local: 2026-05-09
+Ultima revision local: 2026-10-18
 
 ## Para empezar una sesion nueva
 
@@ -17,8 +17,7 @@ No leas ni pegues contenido de `.env`, `web/.env.local`, `firebase-admin*.json`,
 ## Estado del repo
 
 - Repo GitHub: `https://github.com/admors-gif/content-youtube-generator`
-- Branch local actual: `redesign/v2-editorial-cinematic`
-- `git status` al 2026-05-04: limpio, sin cambios locales detectados.
+- Base integrada en casa: `master`, sincronizada con el avance del trabajo y `origin/master` de junio de 2026. Se verifico el rescate del trabajo sin sobrescribir codigo mas reciente.
 - Frontend: `web/`, Next.js 16.2.4 + React 19.2.4 + Firebase 12.12.1.
 - Backend: `api.py` + `scripts/`, FastAPI/Python, deploy por GitHub Actions self-hosted al VPS.
 
@@ -44,6 +43,17 @@ Infra principal:
 - Storage bucket: `content-factory-5cbcb.firebasestorage.app`.
 
 ## Estado operativo importante
+
+### Musica — octubre de 2026
+
+- Referencia vigente: `docs/power-music-openai-2026-10.md`; las notas Music v1/v4 de abajo son historial.
+- Suno manual, perfil `openai_only` fijado desde API/Celery hasta el renderer. No Comfy, ElevenLabs ni Deepgram en este perfil.
+- Director v6 conserva storyboard semantico; compositor entrega relato estructurado, y `scripts/power_music_story.py` planifica canciones importadas/antiguas mediante OpenAI.
+- Imagenes/miniatura: GPT Image 2.5 Flare configurable, con respaldos OpenAI; el planificador de texto usa GPT-6 Luna configurable. No se comprobo acceso/saldo de la cuenta con generacion pagada durante esta revision.
+- QA evalua relevancia narrativa; rechazos persistentes pasan a recurso procedural y se informan como salida degradada. Cache firmada por prompt/modelos/director.
+- Pruebas de Musica: `tests/test_music_dispatch_policy.py`, `tests/test_power_music_production_policy.py`, `tests/test_power_music_story_director.py`, `tests/test_power_music_story_planner.py`.
+- Desarrollo desde casa: en `web/`, `npm run dev:remote -- --hostname 127.0.0.1 --port 3001`, abrir `http://localhost:3001/dashboard/music`. Usa API del VPS; no requiere backend local.
+- La adquisicion del tab localhost por automatizacion fue rechazada por politica de seguridad en esta sesion; no intentar rodear ese bloqueo por otro navegador/CDP/lectura de perfil. Se verificaron codigo, pruebas y build.
 
 ### Power Music Studio v1
 

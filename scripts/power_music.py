@@ -4,13 +4,16 @@ import re
 from datetime import datetime, timezone
 
 try:
-    from scripts.power_music_director import enrich_package_with_director_plan
+    from scripts.power_music_director import enrich_package_with_director_plan, normalize_storyboard
 except Exception:  # pragma: no cover - keeps legacy local imports safe
     try:
-        from power_music_director import enrich_package_with_director_plan
+        from power_music_director import enrich_package_with_director_plan, normalize_storyboard
     except Exception:  # pragma: no cover
         def enrich_package_with_director_plan(package, payload=None):
             return package
+
+        def normalize_storyboard(value):
+            return {}
 
 
 DEFAULT_LANGUAGE = "es"
@@ -127,7 +130,7 @@ ROLE
 Eres un compositor premium de musica motivacional en español, experto en hooks, rap/trap/house/reggaeton/electronica, afirmaciones conscientes, narrativa de identidad y prompts para Suno.
 
 CORE FORMULA
-La cancion debe hacer que la persona quiera moverse, entrenar, correr, volver a intentar y actuar como su version mas fuerte. No escribes poesia plana: escribes canciones cantables, recordables, con coro viral y frases repetibles.
+La cancion debe desarrollar la intencion emocional elegida: volver a intentar, cuidarse, encontrar direccion o actuar con confianza. Entrenar o correr solo son temas si el usuario los pide. Escribes canciones cantables, recordables y con frases repetibles.
 
 SAFETY AND ETHICS
 - No uses mensajes ocultos ni manipulacion subliminal. Todo mensaje de autoprogramacion debe ser consciente, explicito y saludable.
@@ -178,7 +181,8 @@ def build_generation_prompt(payload: dict) -> str:
     style = style_by_id(str(payload.get("style") or DEFAULT_STYLE))
     theme = compact_text(payload.get("theme"), 180) or intention["label"]
     personal_angle = compact_text(payload.get("personalAngle") or payload.get("personal_angle"), 700)
-    target_use = compact_text(payload.get("targetUse") or payload.get("target_use"), 120) or TARGET_USE_PRESETS[0]
+    target_use = compact_text(payload.get("targetUse") or payload.get("target_use"), 120) or "empezar el dia"
+    visual_brief = compact_text(payload.get("visualBrief") or payload.get("visual_brief") or payload.get("visualIdentity") or payload.get("visual_identity"), 600)
     energy = compact_text(payload.get("energy"), 80) or "alta, elegante, determinada"
     vocal_perspective = compact_text(payload.get("vocalPerspective") or payload.get("vocal_perspective"), 80) or "primera persona"
     must_include = compact_text(payload.get("mustInclude") or payload.get("must_include"), 500)
@@ -191,6 +195,7 @@ def build_generation_prompt(payload: dict) -> str:
         "intention": intention,
         "style": style,
         "targetUse": target_use,
+        "visualBrief": visual_brief,
         "energy": energy,
         "vocalPerspective": vocal_perspective,
         "personalAngle": personal_angle,
@@ -207,18 +212,24 @@ Genera un paquete premium para crear una cancion en Suno y luego producir un vid
 REQUISITOS DE CALIDAD:
 - Letra completa en español, con estructura real de cancion.
 - Debe sentirse moderna, fisica, repetible y emocionalmente poderosa.
-- Crea un hook/coro que se pueda repetir corriendo o entrenando.
+- Crea un hook/coro memorable que corresponda al tema emocional de la cancion.
 - Usa frases de identidad: soy, elijo, cumplo, avanzo, construyo.
 - Incluye un mantra principal corto y memorable.
 - Evita sonar generico, religioso obligatorio o coach barato.
 - La letra debe estar optimizada para Suno: secciones claras entre corchetes.
 - El prompt Suno debe ser copiables y en ingles, porque Suno suele responder mejor a descripciones musicales en ingles.
-- Crea visuales premium tipo music visualizer, no videoclip literal linea por linea.
+- Crea una historia cinematografica relacionada con la letra completa: protagonista, situacion inicial, decision y cierre emocional. Define 2 o 3 lugares conectados y un vestuario consistente.
+- targetUse describe cuando se escucha la cancion; no determina la historia ni autoriza escenas deportivas. El estilo musical tampoco determina objetos o escenarios.
 - Las imagenes visuales deben ser text-free: nunca pidas letras, palabras, carteles, logos, pantallas con texto ni tipografia dentro de la imagen.
-- No conviertas cada frase de la letra en un objeto literal. Traduce la cancion a mundo visual: poder, ambicion, deseo, estatus, disciplina, victoria, sombra, lujo, movimiento.
+- No conviertas cada frase en un objeto. Agrupa las secciones en un arco emocional y expresa los cambios mediante acciones, expresiones, luz y encuadres del mismo mundo.
 - Evita objetos accidentales o domesticos: planchas, electrodomesticos, papeles con letras, pantallas con texto, logos, carteles, posters, billetes volando sin elegancia.
 - Evita repetir el mismo sujeto o accion en todas las escenas. No uses "hombre corriendo" como solucion generica; solo aparece si la letra habla literalmente de correr.
-- Prefiere motivos premium: siluetas fuertes, arquitectura de lujo, marmol negro, luces de ciudad, autos oscuros, pesas de acero, amanecer en rooftop, reflejos dorados, mujeres u hombres con presencia elegante, movimiento controlado.
+- Introduce objetos o lugares solo si pertenecen al concepto elegido. "Me levanto", "el peso del pasado", "fuerza", "hierro" o "lucho por mi" no significan pesas, gimnasio, fabrica ni combate.
+- Usa deporte y equipo de entrenamiento solo cuando la historia lo establece de forma explicita. Una historia de atletismo tampoco autoriza equipo de otro deporte.
+- Ejemplo: letra "me levanto y suelto el peso del pasado", targetUse "entrenar fuerza": historia de recuperacion personal; misma persona y lugares, sin interpretar la metafora como equipo deportivo.
+- Ejemplo: letra sobre una boxeadora preparando su combate: conserva boxeo, personaje, lugar y vestuario; no introduzcas una corredora o maquinas de gimnasio ajenas a la historia.
+- Verifica que cada escena aporte al relato, varie encuadre y conserve continuidad; elimina objetos sugeridos solamente por el contexto de escucha.
+- Escribe la historia en videoConcept.storyboard con contentVersion "music_storyboard_v1" y source "composer". Describe el reparto concreto (pueden ser varias personas si la letra lo exige), vestuario, lugares y acciones observables por seccion. En cada beat, location debe coincidir exactamente con uno de los valores de locations. No sustituyas la historia por motivos genericos de poder.
 - La miniatura debe tener una frase de click fuerte de 2 a 6 palabras; el texto final lo renderiza la app, no la IA de imagen.
 
 JSON SCHEMA EXACTO:
@@ -239,13 +250,27 @@ JSON SCHEMA EXACTO:
   "coverPrompt": "prompt visual 1:1 premium para portada",
   "videoConcept": {{
     "visualIdentity": "identidad visual",
-    "visualWorld": "mundo visual premium: poder / lujo / disciplina / deseo / victoria / sombra",
-    "sceneStrategy": "visualizer simbolico, no literal; bloques emocionales, motivos recurrentes, cero texto generado",
+    "visualWorld": "lugares y ambiente concretos relacionados con el tema de la letra",
+    "sceneStrategy": "historia cinematografica en bloques emocionales, protagonista y lugares consistentes, cero texto generado",
     "palette": ["color 1", "color 2", "color 3"],
+    "storyboard": {{
+      "contentVersion": "music_storyboard_v1",
+      "source": "composer",
+      "premise": "historia concreta relacionada con la letra completa y su cambio emocional",
+      "protagonist": "descripcion consistente del personaje o reparto que la historia necesita",
+      "wardrobe": "vestuario concreto y consistente del reparto",
+      "locations": ["lugar concreto A", "lugar conectado B"],
+      "beats": [
+        {{"section": "Intro", "location": "lugar concreto A", "action": "accion observable de apertura", "emotion": "estado emocional inicial"}},
+        {{"section": "Verse 1", "location": "lugar concreto A", "action": "accion relacionada con la historia", "emotion": "tension de la historia"}},
+        {{"section": "Chorus", "location": "lugar conectado B", "action": "decision visible o interaccion que expresa el coro", "emotion": "cambio emocional"}},
+        {{"section": "Final", "location": "lugar conectado B", "action": "accion concreta que resuelve la historia", "emotion": "estado final"}}
+      ]
+    }},
     "scenes": [
       {{"section": "Intro", "visualPrompt": "prompt 16:9 text-free, motivo simbolico de apertura, sin texto", "textOverlay": ""}},
-      {{"section": "Verse 1", "visualPrompt": "prompt 16:9 text-free, motivo de tension/ambicion, sin texto", "textOverlay": ""}},
-      {{"section": "Chorus", "visualPrompt": "prompt 16:9 text-free, imagen iconica de poder/victoria, sin texto", "textOverlay": ""}},
+      {{"section": "Verse 1", "visualPrompt": "prompt 16:9 text-free, protagonista y tension de la historia, sin texto", "textOverlay": ""}},
+      {{"section": "Chorus", "visualPrompt": "prompt 16:9 text-free, decision o cambio emocional en el mismo mundo, sin texto", "textOverlay": ""}},
       {{"section": "Bridge", "visualPrompt": "prompt 16:9 text-free, giro emocional visual, sin texto", "textOverlay": ""}},
       {{"section": "Final", "visualPrompt": "prompt 16:9 text-free, cierre aspiracional poderoso, sin texto", "textOverlay": ""}}
     ],
@@ -415,9 +440,12 @@ def normalize_package(data: dict, payload: dict | None = None) -> dict:
         "negativePrompt": compact_text(data.get("negativePrompt"), 500) or "no imitation of real artists, no copyrighted melody, no sad ending, no romantic dependency, no medical claims, no readable text in visuals",
         "coverPrompt": compact_text(data.get("coverPrompt"), 900),
         "videoConcept": {
-            "visualIdentity": compact_text(video.get("visualIdentity"), 260) or "premium motivational cinematic identity",
-            "visualWorld": compact_text(video.get("visualWorld"), 260) or "symbolic power visualizer: luxury, discipline, ambition, desire, victory, shadow, controlled movement",
-            "sceneStrategy": compact_text(video.get("sceneStrategy"), 360) or "symbolic music visualizer, emotional blocks instead of literal lyric illustration, text-free generated images",
+            "userVisualDirection": compact_text(video.get("userVisualDirection"), 600),
+            "userStoryContext": compact_text(video.get("userStoryContext"), 300),
+            "storyboard": normalize_storyboard(video.get("storyboard")),
+            "visualIdentity": compact_text(video.get("visualIdentity"), 260) or "cinematic story related to the song, consistent protagonist and connected locations",
+            "visualWorld": compact_text(video.get("visualWorld"), 260) or "connected places and natural light serving the song's emotional story",
+            "sceneStrategy": compact_text(video.get("sceneStrategy"), 360) or "cinematic emotional arc with character and location continuity, text-free generated images",
             "palette": _as_list(video.get("palette"), limit=6) or ["deep black", "electric gold", "crimson ember"],
             "scenes": normalized_scenes,
             "motionDirection": compact_text(video.get("motionDirection"), 360) or "Ken Burns sutil, cortes por beat y subtitulos solo si hay timestamps reales.",
@@ -488,18 +516,18 @@ def fallback_package(payload: dict | None = None) -> dict:
         "sunoPrompt": style["suno"],
         "sunoPromptAlt": f"{style['suno']}, stronger chorus, more cinematic build up, motivational anthem in Spanish",
         "negativePrompt": "no imitation of real artists, no copyrighted melody, no sad ending, no romantic dependency, no medical claims",
-        "coverPrompt": "Premium cinematic motivational cover art, powerful silhouette in black marble luxury space with sunrise city light, black and gold palette, electric ember glow, discipline and victory identity, no readable text, no logos",
+        "coverPrompt": "Cinematic song cover, one adult protagonist in a familiar neighborhood setting, a quiet decision expressed through posture and changing natural light, emotionally grounded, no readable text, no logos",
         "videoConcept": {
-            "visualIdentity": "premium discipline anthem, dark heroic sunrise, gold ember energy",
-            "visualWorld": "symbolic power visualizer: dark luxury, discipline, controlled movement, sunrise victory",
-            "sceneStrategy": "Use aspirational cinematic motifs, not literal lyric-to-object images. Keep generated images text-free.",
-            "palette": ["deep black", "electric gold", "crimson ember"],
+            "visualIdentity": "cinematic personal story, a recurring adult protagonist and connected familiar places",
+            "visualWorld": "a familiar room, its courtyard and the neighboring street, changing from cool morning light to warmer daylight",
+            "sceneStrategy": "Develop a decision and emotional resolution in the same story world. Keep generated images text-free.",
+            "palette": ["muted blue", "warm amber", "soft charcoal"],
             "scenes": [
-                {"section": "Intro", "visualPrompt": "cinematic black marble room before sunrise, one decisive silhouette, gold light line entering, premium motivational mood, 16:9, no text", "textOverlay": ""},
-                {"section": "Verse 1", "visualPrompt": "wide city street at blue hour, focused figure in distance, gold highlights, disciplined solitude, 16:9, no text", "textOverlay": ""},
-                {"section": "Chorus", "visualPrompt": "dark stadium tunnel, chalk dust, ember light, black gold crimson, grounded athletic silhouette, premium anthem energy, 16:9, no text, no logos", "textOverlay": ""},
-                {"section": "Bridge", "visualPrompt": "mirror-like glass wall with powerful silhouette and future-self reflection, cinematic shadows, gold rim light, 16:9, no text", "textOverlay": ""},
-                {"section": "Final", "visualPrompt": "sunrise rooftop over a city, triumphant lone figure, cinematic golden sky, premium victory mood, 16:9, no text", "textOverlay": ""},
+                {"section": "Intro", "visualPrompt": "cinematic wide frame of a familiar room at morning, one adult protagonist pausing beside the window, 16:9, text-free", "textOverlay": ""},
+                {"section": "Verse 1", "visualPrompt": "same protagonist and wardrobe near the same room's doorway, quiet hesitation, natural light, 16:9, text-free", "textOverlay": ""},
+                {"section": "Chorus", "visualPrompt": "same protagonist making a small deliberate step into the connected courtyard, more assured posture, 16:9, text-free", "textOverlay": ""},
+                {"section": "Bridge", "visualPrompt": "environmental detail of light returning to the same courtyard, continuity of color and geography, 16:9, text-free", "textOverlay": ""},
+                {"section": "Final", "visualPrompt": "same protagonist on the neighboring street, quiet resolve in warmer daylight, cinematic medium-wide frame, 16:9, text-free", "textOverlay": ""},
             ],
             "motionDirection": "Ken Burns slow push, lyric punches on chorus, subtle waveform, ember particles.",
         },
@@ -566,13 +594,13 @@ def _song_sections_from_lyrics(lyrics: str, limit: int = 6) -> list[dict]:
 def _import_scene_prompt(section: str, sample_lines: list[str], visual_identity: str, style_label: str) -> str:
     return compact_text(
         (
-            "16:9 cinematic text-free premium music visualizer still, Flux/Kontext/Krea photoreal editorial quality. "
+            "16:9 cinematic text-free premium music-video still. "
             f"Section: {section}. "
-            f"Visual identity: {visual_identity}. Musical energy: {style_label}. "
-            "Translate the emotion into a symbolic aspirational scene, not a literal object-by-object illustration. "
-            "Use premium power motifs: confident silhouettes, luxury architecture, black marble, city lights, wet roads, sunrise rooftops, gold reflections, stadium tunnels, steel corridors, controlled movement. "
-            "Use gym equipment only when the lyric explicitly references gym, weights, lifting, iron or training equipment. Vary subject, setting, action and camera distance. Do not repeat a runner unless the lyric explicitly says running. "
-            "No readable text, no logos, no signs, no typography, no pseudo-letters, no posters, no screens with writing, no household appliances, no clothes iron, no ironing board."
+            f"Visual identity: {visual_identity}. "
+            "Develop the emotional story of the full song with the same protagonist, wardrobe and connected locations. "
+            "Vary framing and small meaningful actions, preserving the same story world. "
+            "Do not turn lyric metaphors into objects. Listening context and musical style do not determine scenery. "
+            "No readable text, logos, signs, pseudo-letters or unrelated props; physically grounded, realistic contact shadows."
         ),
         900,
     )
@@ -593,13 +621,13 @@ def build_imported_song_package(payload: dict | None = None) -> dict:
     subtitle = compact_text(payload.get("subtitle"), 180) or _first_singable_line(lyrics) or intention["description"]
     energy = compact_text(payload.get("energy"), 120) or "alta, enfocada, poderosa"
     visual_identity = compact_text(
-        payload.get("visualIdentity") or payload.get("visual_identity"),
+        payload.get("visualBrief") or payload.get("visual_brief") or payload.get("visualIdentity") or payload.get("visual_identity"),
         260,
     )
     if not visual_identity:
         visual_identity = (
-            "premium motivational music visualizer identity with symbolic cinematic scenes, "
-            "luxury architecture, strong silhouettes, controlled movement, status, desire, ambition, disciplined energy and clean negative space"
+            "cinematic story related to the full lyrics, a recurring protagonist and connected locations, "
+            "restrained emotional acting, consistent wardrobe and evolving natural light"
         )
 
     sections = _song_sections_from_lyrics(lyrics, limit=7)
@@ -641,15 +669,15 @@ def build_imported_song_package(payload: dict | None = None) -> dict:
         or f"Premium cinematic cover for {title}, {visual_identity}, powerful subject, dramatic light, no readable text, no logos",
         "videoConcept": {
             "visualIdentity": visual_identity,
-            "visualWorld": "symbolic premium visualizer: power, opulence, discipline, desire, victory, shadow, controlled movement",
-            "sceneStrategy": "Use emotional blocks and recurring cinematic motifs. Do not make literal images for every lyric line. Generated images must be text-free.",
+            "visualWorld": "connected locations belonging to the song's emotional story",
+            "sceneStrategy": "Develop a cinematic story across song sections, preserving protagonist and location continuity. Do not literalize every lyric line. Generated images must be text-free.",
             "palette": [
                 compact_text(payload.get("primaryColor"), 40) or "#07111F azul profundo",
                 compact_text(payload.get("accentColor"), 40) or "#D4A24C oro intenso",
                 compact_text(payload.get("emberColor"), 40) or "#E0533D energia roja",
             ],
             "scenes": scenes,
-            "motionDirection": "One symbolic visualizer still every 5 seconds, subtle Ken Burns and beat cuts; subtitles are exported only when real timestamps are available and overlays stay off by default.",
+            "motionDirection": "Cinematic story stills with subtle Ken Burns and beat cuts; subtitles are optional and require real timestamps.",
         },
         "youtube": {
             "title": youtube_title or f"{title} | Musica motivacional",
@@ -661,8 +689,8 @@ def build_imported_song_package(payload: dict | None = None) -> dict:
         },
         "productionNotes": [
             "Cancion importada: la letra no fue generada por Content Factory en este paso.",
-            "El video se renderiza en VPS con visuales simbolicos premium de Comfy/Flux cada 5 segundos.",
-            "Los subtitulos se exportan solo si Whisper alinea la letra con confianza suficiente; el video no quema letras encima por defecto.",
+            "El video combina el audio importado con escenas cinematograficas de OpenAI Images; Comfy es una opcion explicita.",
+            "Los subtitulos son opcionales y requieren alineacion con confianza suficiente; no son necesarios para crear el video.",
         ],
         "safetyNotes": [
             "Mensajes de autoprogramacion explicitos y saludables, no subliminales ocultos.",

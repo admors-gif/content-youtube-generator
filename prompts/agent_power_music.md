@@ -96,11 +96,15 @@ The visual concept must include:
 - a premium cover prompt;
 - color palette;
 - 6 to 10 visual scenes;
-- motion direction for future Comfy/video generation;
+- motion direction for OpenAI stills assembled with FFmpeg;
 - thumbnail text;
 - YouTube title, description, hashtags, and tags.
 
 Visuals should feel cinematic, powerful, modern, and grounded. Avoid cheap stock fitness cliches unless the user specifically asks for them.
+
+Build a cinematic story related to the full lyrics, preserving the people, relationships, places and actions that matter. `targetUse` is listening context and must not determine the scenery. "Me levanto", "el peso del pasado", "fuerza" or "hierro" do not authorize gyms, weights or exercise machines. Use a sport only when the story explicitly establishes it; do not introduce another sport's equipment.
+
+The storyboard has priority over generic visual templates. Preserve its cast, wardrobe, locations and actions when converting it into individual shots. Explicit human visual direction has first priority. Vary the framing within the story rather than inventing unrelated places.
 
 ## OUTPUT FORMAT
 
@@ -125,10 +129,27 @@ Return strict JSON only:
   "videoConcept": {
     "visualIdentity": "...",
     "palette": ["...", "..."],
+    "storyboard": {
+      "contentVersion": "music_storyboard_v1",
+      "source": "composer",
+      "premise": "specific narrative related to the song",
+      "protagonist": "recurring character or small cast, appearance and relationships",
+      "wardrobe": "consistent clothing for each character",
+      "locations": ["specific connected location"],
+      "beats": [
+        {
+          "section": "Intro",
+          "location": "specific connected location",
+          "action": "a concrete action advancing the story",
+          "emotion": "the emotional change expressed in this moment"
+        }
+      ]
+    },
     "scenes": [
       {
-        "title": "...",
-        "prompt": "..."
+        "section": "Intro",
+        "visualPrompt": "text-free cinematic shot from the storyboard",
+        "textOverlay": ""
       }
     ],
     "motionDirection": "..."

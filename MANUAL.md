@@ -2,10 +2,12 @@
 
 > **Documento vivo.** Se actualiza cada vez que pasa algo significativo en el proyecto. Sirve como blueprint reproducible y referencia técnica completa. Si alguien (incluido tú en 6 meses) quiere reproducir el proyecto desde cero, este documento debe tener todo lo necesario.
 
-**Última actualización:** 2026-05-09
+**Última actualización:** 2026-10-18 (Musica con OpenAI; los apartados generales conservan su historial anterior).
 **Versión del manual:** 0.3 (incluye Radar editorial admin-only + Base de conocimiento)
 **Repo:** `https://github.com/admors-gif/content-youtube-generator`
 **Tag de rollback:** `pre-migration-2026-05-01` (commit `099a25f`)
+
+**Musica:** Suno permanece manual. El perfil `openai_only` usa OpenAI para imagenes, miniatura, planificacion de historias importadas y alineacion opcional; excluye Comfy y ElevenLabs en este modulo. El director v6 conserva el storyboard del compositor y separa narrativa de contexto de escucha. Configuracion, limitaciones, evaluacion y fuentes actuales: [Musica con OpenAI — octubre de 2026](docs/power-music-openai-2026-10.md).
 
 ---
 

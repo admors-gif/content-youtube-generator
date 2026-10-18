@@ -2,6 +2,20 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+Para abrir la interfaz local usando la API existente de Content Factory:
+
+```bash
+npm run dev:remote -- --hostname 127.0.0.1 --port 3001
+```
+
+Abre [Música](http://localhost:3001/dashboard/music). Este comando establece
+`NEXT_PUBLIC_VPS_API_URL=https://api.valtyk.com` para el proceso de desarrollo;
+conserva las demás variables y no modifica los archivos de credenciales.
+La caché de la PWA se omite durante desarrollo para cargar siempre el código actual.
+Los botones de generación siguen usando la configuración y los proveedores de la API.
+
+Para comprobar la caché del service worker: `npm run test:service-worker`.
+
 First, run the development server:
 
 ```bash

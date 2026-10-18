@@ -10,6 +10,7 @@ const FIREBASE_CONFIG = {
 function swSource() {
   return `
 const CACHE_NAME = "content-factory-shell-v2";
+const DEVELOPMENT = ${process.env.NODE_ENV === "development"};
 const OFFLINE_URL = "/offline";
 const STATIC_ASSETS = [
   OFFLINE_URL,
@@ -51,6 +52,7 @@ function isSensitiveRequest(request) {
 }
 
 self.addEventListener("fetch", (event) => {
+  if (DEVELOPMENT) return;
   const request = event.request;
   if (isSensitiveRequest(request)) return;
 

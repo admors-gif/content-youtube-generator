@@ -4,9 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:remote": "node scripts/dev-with-remote-api.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:service-worker": "node --test scripts/service-worker-cache.test.mjs",
     "pwa:audit": "node scripts/pwa-audit.mjs",
     "pwa:assets": "node scripts/generate-pwa-assets.mjs",
     "mobile:add:android": "npx cap add android",
